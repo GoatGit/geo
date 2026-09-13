@@ -1,0 +1,71 @@
+import { Controller, Get, Query, Req } from '@nestjs/common';
+import type { Request } from 'express';
+import { currentAccount } from '../common/auth';
+import { BrandsService } from '../brands/brands.service';
+import { MonitorService } from './monitor.service';
+
+@Controller('monitor')
+export class MonitorController {
+  constructor(
+    private readonly monitorService: MonitorService,
+    private readonly brandsService: BrandsService,
+  ) {}
+
+  private async owned(req: Request, id: number) {
+    await this.brandsService.getOwned(currentAccount(req).accountId, id);
+  }
+
+  /** 周期选择器自适应由前端调用:默认今日(进行中)→ 无数据回退最近完成日(docs/02 §8)。 */
+  @Get('rankings')
+  async rankings(
+    @Req() req: Request,
+    @Query('brand') brand: string,
+    @Query('days') days = '1',
+    @Query('engine') engine?: string,
+  ) {
+    const brandId = Number(brand);
+    await this.owned(req, brandId);
+    const d = Math.min(Math.max(Number(days) || 1, 1), 180);
+    return this.monitorService.rankings({
+      brandId,
+      days: d,
+      engine: engine as never,
+    });
+  }
+
+  @Get('funnel')
+  async funnel(@Req() req: Request, @Query('brand') brand: string, @Query('days') days = '7') {
+    const brandId = Number(brand);
+    await this.owned(req, brandId);
+    const r = await this.monitorService.rankings({ brandId, days: Number(days) || 7 });
+    return { funnel: r.funnel, excluded: r.excluded, asOf: r.asOf, source: r.source };
+  }
+
+  @Get('competitors')
+  async competitors(@Req() req: Request, @Query('brand') brand: string, @Query('days') days = '7') {
+    const brandId = Number(brand);
+    await this.owned(req, brandId);
+    return this.monitorService.competitors(brandId, Number(days) || 7);
+  }
+
+  @Get('citations')
+  async citations(@Req() req: Request, @Query('brand') brand: string, @Query('days') days = '7') {
+    const brandId = Number(brand);
+    await this.owned(req, brandId);
+    return this.monitorService.citations(brandId, Number(days) || 7);
+  }
+
+  @Get('reputation')
+  async reputation(@Req() req: Request, @Query('brand') brand: string, @Query('days') days = '7') {
+    const brandId = Number(brand);
+    await this.owned(req, brandId);
+    return this.monitorService.reputation(brandId, Number(days) || 7);
+  }
+
+  @Get('actions')
+  async actions(@Req() req: Request, @Query('brand') brand: string, @Query('days') days = '7') {
+    const brandId = Number(brand);
+    await this.owned(req, brandId);
+    return this.monitorService.actionList(brandId, Number(days) || 7);
+  }
+}

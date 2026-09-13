@@ -1,0 +1,260 @@
+import { eq, sql } from 'drizzle-orm';
+import { and } from 'drizzle-orm';
+import { brands, collectionRounds, monitoringQuestions, queryRuns, recognitionEntries, type Db } from '@geo/db';
+import { MockEngineAdapter, AdapterRegistry } from '@geo/engine-adapters';
+import { WEB_ENGINES, type AskStatus } from '@geo/shared';
+import { createBrokerFromEnv, fingerprintHash } from '@geo/browser-session';
+import { buildEvidencePack, createStorageFromEnv } from '@geo/evidence';
+import Redis from 'ioredis';
+import { Queue, Worker, type Job } from 'bullmq';
+import { EngineBreaker } from './breaker';
+import { AccountPoolService } from './profiles';
+import { COLLECT_QUEUE, REDIS_PROGRESS_CHANNEL, REPUTATION_QUEUE, bullConnection, type CollectJobData } from './queue';
+import { discoverCompetitors, runInstantExtraction, toSubjects, type SubjectDef, type SubjectRow } from './extraction';
+
+/**
+ * 采集执行链(docs/04 §1 总体结构):
+ * 领取账号 → SessionBroker.acquire → 引擎适配器 ask → 证据包落存 → QueryRun 四态回写
+ * → 即时抽取(mention/citation) → 口碑入异步队列 → 进度推送(Redis → WS 网关)。
+ * Worker 不理解业务指标——只负责忠实采集与存证(docs/04 §1 分层原则)。
+ */
+export class CollectProcessor {
+  private readonly requeue = new Queue(COLLECT_QUEUE, { connection: bullConnection() });
+  private readonly breaker: EngineBreaker;
+  private readonly pool: AccountPoolService;
+  private readonly storage = createStorageFromEnv();
+  private readonly broker = createBrokerFromEnv();
+  private readonly registry = new AdapterRegistry();
+
+  constructor(
+    private readonly db: Db,
+    redis: Redis,
+  ) {
+    this.breaker = new EngineBreaker(redis);
+    this.pool = new AccountPoolService(db);
+    // dev/CI:mock 适配器;真实引擎适配器在 AgentBay PoC 后按 strategy 落地(docs/07 §13)
+    for (const engine of WEB_ENGINES) {
+      this.registry.register(MockEngineAdapter.withDefaultFixtures(engine));
+    }
+  }
+
+  start(concurrency: number): Worker<CollectJobData> {
+    return new Worker<CollectJobData>(
+      COLLECT_QUEUE,
+      (job) => this.process(job),
+      { connection: bullConnection(), concurrency },
+    );
+  }
+
+  async process(job: Job<CollectJobData>): Promise<{ status: AskStatus | 'deferred' }> {
+    const data = job.data;
+    const engine = data.engine;
+
+    // 熔断(docs/04 §5):该引擎通道维护中 → 延迟重排,不产生 failed 污染口径
+    if (await this.breaker.isTripped(engine)) {
+      await this.requeue.add('collect', data, { delay: 60_000, priority: data.priority });
+      return { status: 'deferred' };
+    }
+
+    const profile = await this.pool.acquire(engine);
+    if (!profile) {
+      // 账号池耗尽(docs/04 §3.2):延迟重排,扩容与冗余由运营策略解决
+      await this.requeue.add('collect', data, { delay: 120_000, priority: data.priority });
+      return { status: 'deferred' };
+    }
+
+    const ranAt = new Date();
+    const adapter = this.registry.get(engine as never, 'web');
+
+    let ask;
+    try {
+      const session = await this.broker.acquire({
+        profileKey: profile.profileKey,
+        contextRef: profile.contextRef ?? undefined,
+        fingerprint: profile.fingerprint,
+        proxyHint: profile.proxyHint ?? undefined,
+      });
+      try {
+        ask = await adapter.ask(
+          {
+            mode: process.env.BROWSER_MODE === 'agentbay' ? 'browser' : 'mock',
+            page: undefined, // browser 模式:worker 在此 connectOverCDP(session.cdpUrl) 后注入 Page
+            fingerprint: profile.fingerprint,
+            proxyHint: profile.proxyHint ?? undefined,
+            profileKey: profile.profileKey,
+          },
+          data.questionText,
+        );
+      } finally {
+        await session.release();
+      }
+    } catch (err) {
+      ask = {
+        status: 'failed' as const,
+        answerText: '',
+        rawHtml: null,
+        citations: [],
+        timing: { queuedAt: ranAt.toISOString(), firstTokenAt: ranAt.toISOString(), completedAt: new Date().toISOString() },
+        engineMeta: { error: (err as Error).message },
+      };
+    }
+
+    await this.breaker.record(engine, ask.status !== 'failed');
+    await this.pool.report(engine, profile.id, ask.status !== 'failed');
+
+    // ===== QueryRun 四态回写(docs/02 §1.1)=====
+    // 先落行拿真实 id,再以 evidence/{runId}/ 前缀构建并上传证据包,最后回填 refs
+    const runRow = (
+      await this.db
+        .insert(queryRuns)
+        .values({
+          brandId: data.brandId,
+          questionId: data.questionId,
+          engine,
+          surface: 'web',
+          roundId: data.roundId,
+          status: ask.status,
+          adapterVersion: adapter.schemaVersion,
+          accountFingerprint: fingerprintHash(profile.profileKey),
+          ranAt,
+        })
+        .returning({ id: queryRuns.id })
+    )[0]!;
+
+    const pack = buildEvidencePack({
+      runId: String(runRow.id),
+      brandId: data.brandId,
+      engine,
+      surface: 'web',
+      adapterVersion: adapter.schemaVersion,
+      question: data.questionText,
+      accountFingerprint: fingerprintHash(profile.profileKey),
+      status: ask.status,
+      answerText: ask.answerText,
+      rawHtml: ask.rawHtml,
+      citations: ask.citations,
+      timing: ask.timing,
+      engineMeta: ask.engineMeta,
+    });
+    for (const f of pack.files) await this.storage.put(f.path, f.body);
+
+    await this.db
+      .update(queryRuns)
+      .set({
+        answerRef: pack.refs.answerRef,
+        snapshotRef: pack.refs.snapshotRef,
+        recordingRef: pack.refs.recordingRef,
+        evidenceHash: pack.manifestHash,
+        meta: { priority: data.priority, strategy: adapter.strategy },
+      })
+      .where(eq(queryRuns.id, runRow.id));
+
+    // ===== 即时抽取(ok_* 才进口径)=====
+    if (ask.status !== 'failed') {
+      const subjects = await this.loadSubjects(data.brandId);
+      const ownedDomains = (await this.db.select({ website: brands.website }).from(brands).where(eq(brands.id, data.brandId)).limit(1))[0]?.website;
+      const ownedHost = ownedDomains ? ownedDomains.replace(/^https?:\/\//, '').split('/')[0] : '';
+
+      const { facts } = await runInstantExtraction({
+        db: this.db,
+        runId: runRow.id,
+        brandId: data.brandId,
+        questionId: data.questionId,
+        engine,
+        ranAt,
+        answerText: ask.answerText,
+        citations: ask.citations,
+        subjects,
+        ownedDomains: ownedHost ? [ownedHost] : [],
+      });
+
+      await this.db
+        .update(queryRuns)
+        .set({ meta: { priority: data.priority, strategy: adapter.strategy, facts: facts.length } })
+        .where(eq(queryRuns.id, runRow.id));
+
+      // 竞品自动发现(未匹配高频实体,异步低优先)
+      void discoverCompetitors({ db: this.db, brandId: data.brandId, answerText: ask.answerText, subjects }).catch(
+        () => undefined,
+      );
+
+      if (data.questionType === 'reputation' && ask.answerText) {
+        await enqueueReputation({
+          runId: runRow.id,
+          brandId: data.brandId,
+          answerText: ask.answerText,
+          ranAt: ranAt.toISOString(),
+        });
+      }
+    }
+
+    await this.publishProgress(data, ask.status, runRow.id);
+    await this.bumpRound(data.roundId, ask.status);
+    return { status: ask.status };
+  }
+
+  private async loadSubjects(brandId: number): Promise<SubjectDef[]> {
+    const rows = (await this.db
+      .select()
+      .from(recognitionEntries)
+      .where(and(eq(recognitionEntries.brandId, brandId), eq(recognitionEntries.confirmed, true)))) as SubjectRow[];
+    const brandName = (await this.db.select({ name: brands.name }).from(brands).where(eq(brands.id, brandId)).limit(1))[0]?.name ?? '';
+    return toSubjects(rows, brandName);
+  }
+
+  private async publishProgress(data: CollectJobData, status: AskStatus | 'deferred', runId: number): Promise<void> {
+    const redis = new Redis(bullConnection().url, { lazyConnect: true, maxRetriesPerRequest: 1 });
+    try {
+      await redis.connect();
+      const q = await this.db
+        .select({ text: monitoringQuestions.textExpanded })
+        .from(monitoringQuestions)
+        .where(eq(monitoringQuestions.id, data.questionId))
+        .limit(1);
+      await redis.publish(
+        REDIS_PROGRESS_CHANNEL,
+        JSON.stringify({
+          accountId: data.accountId,
+          payload: {
+            brandId: data.brandId,
+            roundId: data.roundId,
+            runId,
+            engine: data.engine,
+            question: q[0]?.text ?? data.questionText,
+            status,
+            at: new Date().toISOString(),
+          },
+        }),
+      );
+    } finally {
+      redis.disconnect();
+    }
+  }
+
+  private async bumpRound(roundId: number, status: AskStatus | 'deferred'): Promise<void> {
+    await this.db.execute(sql`
+      update collection_rounds
+      set totals = jsonb_set(jsonb_set(totals, '{done}',
+            (coalesce((totals->>'done')::int, 0) + 1)::text::jsonb),
+          '{ok}',
+            (coalesce((totals->>'ok')::int, 0) + ${status === 'failed' || status === 'deferred' ? 0 : 1})::text::jsonb)
+      ${status === 'failed' ? sql`, totals = jsonb_set(totals, '{failed}', (coalesce((totals->>'failed')::int, 0) + 1)::text::jsonb)` : sql``}
+      where id = ${roundId}
+    `);
+    const round = (await this.db.select().from(collectionRounds).where(eq(collectionRounds.id, roundId)).limit(1))[0];
+    const totals = round?.totals as { total?: number; done?: number } | null;
+    if (totals && totals.total && (totals.done ?? 0) >= totals.total) {
+      await this.db
+        .update(collectionRounds)
+        .set({ finishedAt: new Date() })
+        .where(eq(collectionRounds.id, roundId));
+    }
+  }
+}
+
+/** 口碑异步队列入队(独立连接,消费器在 main.ts 启动)。 */
+async function enqueueReputation(data: { runId: number; brandId: number; answerText: string; ranAt: string }) {
+  const queue = new Queue(REPUTATION_QUEUE, { connection: bullConnection() });
+  await queue.add('extract', data, { attempts: 3, removeOnComplete: 100 });
+  await queue.close();
+}

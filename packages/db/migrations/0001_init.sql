@@ -1,11 +1,7 @@
 -- 0001_init · GeoLens 初始 schema(docs/05 §5 数据模型;docs/07 §8 修正已并入:
 -- mention_facts 冗余 ran_at/engine/surface/question_id,全部事实表带 parser_version)
 
-CREATE TABLE schema_migrations (
-  version text PRIMARY KEY,
-  applied_at timestamptz NOT NULL DEFAULT now()
-);
-
+-- 注:schema_migrations 由迁移器引导创建,不在迁移文件内。
 -- ============ 账号与认证 ============
 CREATE TABLE accounts (
   id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

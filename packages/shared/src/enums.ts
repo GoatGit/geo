@@ -23,10 +23,11 @@ export type QuestionType = 'ranking' | 'reputation';
 export type SubjectKind = 'self' | 'competitor' | 'discovered';
 export type Sentiment = 'pos' | 'neu' | 'neg';
 export type PlanTier = 'free' | 'starter' | 'standard' | 'pro' | 'custom';
-export type ReportType = 'weekly' | 'monthly' | 'diagnostic';
-
 /** 适配器采集态(QueryRun 四态的执行侧子集,docs/04 §2)。 */
 export type AskStatus = 'ok_with_answer' | 'ok_empty' | 'failed';
+
+export const REPORT_TYPES = ['weekly', 'monthly', 'diagnostic'] as const;
+export type ReportType = (typeof REPORT_TYPES)[number];
 
 /** 回答附带的原始引用(结构化抓取,docs/04 §2.1)。 */
 export interface RawCitation {

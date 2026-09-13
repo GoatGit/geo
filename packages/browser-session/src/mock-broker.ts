@@ -7,7 +7,7 @@ export class MockSessionBroker implements SessionBroker {
 
   constructor(private readonly maxConcurrent = 50) {}
 
-  async acquire(profile: SessionProfile): Promise<SessionHandle> {
+  async acquire(_profile: SessionProfile): Promise<SessionHandle> {
     if (this.active.size >= this.maxConcurrent) {
       throw new BrokerError('mock broker: concurrent limit reached', 429);
     }

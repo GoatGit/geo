@@ -68,9 +68,13 @@ export function classifyDomain(
   return { platform: host, category: 'unknown' };
 }
 
-/** 自有域名判定:精确或子域归属(docs/05 §3.1 是否自有域名)。 */
+/** 自有域名判定:精确或子域归属,双方归一协议/www/路径(docs/05 §3.1 是否自有域名)。 */
 export function isOwnedDomain(domain: string, ownedDomains: string[]): boolean {
-  return ownedDomains.some(
-    (o) => domain === o || domain.endsWith(`.${o.replace(/^www\./, '')}`),
-  );
+  return ownedDomains.some((o) => {
+    const oo = o
+      .replace(/^https?:\/\//, '')
+      .replace(/^www\./, '')
+      .split('/')[0];
+    return domain === oo || domain.endsWith(`.${oo}`);
+  });
 }

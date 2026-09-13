@@ -71,6 +71,11 @@ export class MockEngineAdapter implements EngineAdapter {
 
   private pickFixture(question: string): MockFixture {
     const answered = this.fixtures.filter((f) => (f.status ?? 'ok_with_answer') === 'ok_with_answer');
+    // 口碑类问题优先回放口碑 fixture(问题分类→内容相关性,贴近真实语义)
+    if (/口碑|质量|评价|怎么样|售后|服务/.test(question)) {
+      const reputation = answered.find((f) => f.answerMarkdown.includes('口碑'));
+      if (reputation) return reputation;
+    }
     // 哈希选择:确定性问题 → 确定性回答;每第 5 个问题(哈希尾数)用 empty 态,
     // 驱动 ok_empty 口径路径的测试(docs/02 §1.1)
     const hash = createHash('sha256').update(`${this.engine}:${question}`).digest();

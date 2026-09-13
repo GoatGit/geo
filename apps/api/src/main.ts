@@ -1,0 +1,23 @@
+import 'reflect-metadata';
+import { Logger, ValidationPipe } from '@nestjs/common';
+import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { AppModule } from './app.module';
+import { AppExceptionFilter } from './common/app-exception.filter';
+import { loadEnv } from './config/env';
+
+async function bootstrap() {
+  const env = loadEnv();
+  (globalThis as { __geoEnv?: unknown }).__geoEnv = env;
+
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
+  app.useGlobalFilters(new AppExceptionFilter());
+  app.enableCors({ origin: env.nodeEnv === 'production' ? true : true, credentials: true });
+  app.set('trust proxy', 1);
+
+  await app.listen(env.port, '0.0.0.0');
+  new Logger('bootstrap').log(`GeoLens API listening on :${env.port} (${env.nodeEnv})`);
+}
+
+void bootstrap();
