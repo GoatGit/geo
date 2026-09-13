@@ -1,0 +1,20 @@
+{
+  "name": "@geo/engine-adapters",
+  "version": "0.1.0",
+  "description": "引擎适配器接口与版本化注册表(docs/04 §2);Mock 适配器回放 fixtures,dev/CI 全链路可跑",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs --dts --clean",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@geo/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.5",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}

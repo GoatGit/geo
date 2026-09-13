@@ -1,0 +1,31 @@
+{
+  "name": "geo",
+  "private": true,
+  "packageManager": "pnpm@10.24.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r build && pnpm -r test",
+    "lint": "eslint .",
+    "db:migrate": "pnpm --filter @geo/db migrate",
+    "db:partitions": "pnpm --filter @geo/db partitions",
+    "dev:api": "pnpm --filter @geo/api dev",
+    "dev:worker": "pnpm --filter @geo/worker-web dev",
+    "dev:web": "pnpm --filter @geo/web dev"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "eslint": "^9.15.0",
+    "eslint-config-prettier": "^9.1.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.15.0",
+    "vitest": "^2.1.5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  }
+}

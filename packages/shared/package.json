@@ -1,0 +1,17 @@
+{
+  "name": "@geo/shared",
+  "version": "0.1.0",
+  "description": "领域类型、四态状态机与平台常量(docs/02 口径的唯一代码化出处之一)",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs --dts --clean",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.5",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}
