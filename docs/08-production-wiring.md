@@ -47,6 +47,8 @@ scripts/wire-sms.sh   # 自动等资质审核通过 → 提交签名「青柠GEO
   「阿里云短信测试」"并绑定测试手机号 → `SMS_PROVIDER=aliyun` +
   `ALIYUN_SMS_SIGN_NAME=阿里云短信测试` + `ALIYUN_SMS_TEMPLATE_CODE=SMS_154950909`
   → 绑定的手机号即可收到真实短信(生产用户仍需走正式资质流程)。
+  绑定测试手机号也可 CLI 完成:`aliyun dysmsapi send-test-verification --api-version 2017-05-25 --phone <你的手机号>`
+  (会向你手机发验证码,输入即完成绑定)。
 
 ## 3. 支付(微信支付 / 支付宝)——待商户凭证
 
