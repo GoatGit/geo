@@ -183,8 +183,8 @@ function RadarChart({ axes, series }: Extract<InsightBlock, { type: 'radar' }>) 
   };
   const ring = (v: number) => axes.map((_, ai) => pt(ai, v).join(',')).join(' ');
   return (
-    <div className="flex items-start gap-4">
-      <svg width={W - 70} height={H} role="img">
+    <div className="flex flex-wrap items-start gap-4">
+      <svg viewBox={`0 0 ${W - 70} ${H}`} className="w-full max-w-[350px]" role="img">
         {[0.25, 0.5, 0.75, 1].map((v) => (
           <polygon key={v} points={ring(v)} fill="none" stroke="#e2e8f0" strokeWidth={v === 1 ? 1.2 : 0.8} strokeDasharray={v === 1 ? undefined : '3 3'} />
         ))}

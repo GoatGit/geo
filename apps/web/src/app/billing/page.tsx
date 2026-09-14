@@ -220,12 +220,13 @@ export default function BillingPage() {
       </section>
 
       {/* 账单 */}
-      <section className="card p-6">
+      <section className="card p-4 md:p-6">
         <h2 className="mb-4 font-semibold text-slate-900">账单记录</h2>
         {(orders.data ?? []).length === 0 ? (
           <EmptyState text="还没有订单:选择上方档位即可升级会员,支付后配额立即生效。" />
         ) : (
-          <table className="w-full text-left text-[13px]">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-left text-[13px]">
             <thead>
               <tr className="border-b border-slate-100 text-xs text-slate-400">
                 <th className="py-2 font-medium">订单号</th>
@@ -256,6 +257,7 @@ export default function BillingPage() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </section>
 

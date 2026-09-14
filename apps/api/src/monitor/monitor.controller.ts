@@ -57,10 +57,18 @@ export class MonitorController {
   }
 
   @Get('citations')
-  async citations(@Req() req: Request, @Query('brand') brand: string, @Query('days') days = '7') {
+  async citations(
+    @Req() req: Request,
+    @Query('brand') brand: string,
+    @Query('days') days = '7',
+    @Query('page') page = '1',
+    @Query('pageSize') pageSize = '20',
+  ) {
     const brandId = Number(brand);
     await this.owned(req, brandId);
-    return this.monitorService.citations(brandId, Number(days) || 7);
+    const p = Math.min(Math.max(Number(page) || 1, 1), 500);
+    const size = Math.min(Math.max(Number(pageSize) || 20, 5), 100);
+    return this.monitorService.citations(brandId, Number(days) || 7, p, size);
   }
 
   @Get('reputation')

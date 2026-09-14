@@ -1,21 +1,32 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 import { api, useBrandId } from '@/lib/queries';
 import { EmptyState, PageHeader, Skeleton } from '@/components/ui';
+
+const PAGE_SIZE = 20;
 
 interface CitationsDto {
   items: Array<{ url: string; domain: string; title: string | null; isOwned: boolean; engine: string; extractedAt: string }>;
   preference: Array<{ domain: string; category: string; hits: number; owned: number }>;
   totals: { citations: number; owned: number; ownedShare: number | null };
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
 }
 
 export default function CitationsPage() {
   const brandId = useBrandId();
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['citations', brandId],
-    queryFn: () => api<CitationsDto>(`/monitor/citations?brand=${brandId}&days=7`),
+  const [page, setPage] = useState(1);
+  // 切换品牌后回到第 1 页(分页参数不跨品牌残留)
+  useEffect(() => setPage(1), [brandId]);
+  const { data, isLoading, error, isFetching, refetch } = useQuery({
+    queryKey: ['citations', brandId, page],
+    queryFn: () => api<CitationsDto>(`/monitor/citations?brand=${brandId}&days=7&page=${page}&pageSize=${PAGE_SIZE}`),
     enabled: !!brandId,
+    placeholderData: (prev) => prev,
   });
 
   if (isLoading) return <Skeleton />;
@@ -79,6 +90,32 @@ export default function CitationsPage() {
             )}
           </tbody>
         </table>
+
+        {/* 分页(服务端分页;切换时保留旧数据避免跳动) */}
+        <div className="flex items-center justify-between gap-3 border-t px-4 py-3 text-xs text-slate-500">
+          <span className="metric-num">
+            共 {data.total} 条 · 第 {data.page}/{data.totalPages} 页
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPage((v) => Math.max(1, v - 1))}
+              disabled={data.page <= 1 || isFetching}
+              className="btn-soft h-8 px-3 disabled:opacity-40"
+            >
+              上一页
+            </button>
+            <button
+              onClick={() => setPage((v) => Math.min(data.totalPages, v + 1))}
+              disabled={data.page >= data.totalPages || isFetching}
+              className="btn-soft h-8 px-3 disabled:opacity-40"
+            >
+              下一页
+            </button>
+            <button onClick={() => refetch()} disabled={isFetching} className="h-8 px-2 text-slate-400 hover:text-slate-600 disabled:opacity-40">
+              刷新
+            </button>
+          </div>
+        </div>
       </section>
     </div>
   );

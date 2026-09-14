@@ -109,6 +109,9 @@ const ROUTE_TITLES: Array<[RegExp, string]> = [
 function ConsoleShell({ pathname, children }: { pathname: string; children: React.ReactNode }) {
   const router = useRouter();
   const [ready, setReady] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
+  // 路由变化时收起移动端抽屉(点击链接后自动关闭)
+  useEffect(() => setNavOpen(false), [pathname]);
   useEffect(() => {
     const hit = ROUTE_TITLES.find(([re]) => re.test(pathname));
     document.title = hit ? `${hit[1]} · 青柠GEO` : '青柠GEO · AI 搜索品牌可见性监测';
@@ -132,10 +135,14 @@ function ConsoleShell({ pathname, children }: { pathname: string; children: Reac
 
   return (
     <div className="flex min-h-screen bg-slate-50">
-      <Sidebar pathname={pathname} />
+      {/* 桌面侧栏;窄屏隐藏,由顶栏汉堡唤起抽屉 */}
+      <div className="hidden md:block">
+        <Sidebar pathname={pathname} />
+      </div>
+      <MobileNav pathname={pathname} open={navOpen} onClose={() => setNavOpen(false)} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar />
-        <main key={pathname} className="animate-fade-in mx-auto w-full max-w-6xl flex-1 px-8 py-7">
+        <TopBar onMenu={() => setNavOpen(true)} />
+        <main key={pathname} className="animate-fade-in mx-auto w-full max-w-6xl flex-1 px-4 py-5 md:px-8 md:py-7">
           {children}
         </main>
       </div>
@@ -332,14 +339,71 @@ function NavCollapsible({
 
 /* ============ 顶栏:品牌切换器 + 账户 ============ */
 
-function TopBar() {
+function TopBar({ onMenu }: { onMenu: () => void }) {
   return (
-    <header className="sticky top-0 z-10 border-b border-slate-200/70 bg-slate-50/80 px-8 py-3 backdrop-blur">
-      <div className="mx-auto flex w-full max-w-6xl items-center justify-between">
-        <BrandSwitcher />
+    <header className="sticky top-0 z-10 border-b border-slate-200/70 bg-slate-50/80 px-4 py-3 backdrop-blur md:px-8">
+      <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <button
+            onClick={onMenu}
+            aria-label="打开导航菜单"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:border-brand-300 hover:text-brand-600 md:hidden"
+          >
+            <IconPanel width={16} height={16} />
+          </button>
+          <BrandSwitcher />
+        </div>
         <AccountMenu />
       </div>
     </header>
+  );
+}
+
+/* ============ 移动端抽屉导航(md 以下) ============ */
+
+function MobileNav({ pathname, open, onClose }: { pathname: string; open: boolean; onClose: () => void }) {
+  if (!open) return null;
+  const nav = isAdmin() ? [...NAV, ADMIN_NAV] : NAV;
+  return (
+    <div className="fixed inset-0 z-40 md:hidden">
+      <div className="absolute inset-0 bg-ink-950/50 backdrop-blur-sm" onClick={onClose} />
+      <aside className="absolute left-0 top-0 flex h-full w-[272px] flex-col bg-ink-950 text-slate-300 shadow-2xl">
+        <div className="flex items-center gap-2.5 px-5 pb-2 pt-6">
+          <Link href="/dashboard" className="flex items-center gap-2.5" onClick={onClose}>
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-glow">
+              <IconLogo width={18} height={18} />
+            </span>
+            <span className="block text-[15px] font-semibold tracking-wide text-white">青柠GEO</span>
+          </Link>
+          <button
+            onClick={onClose}
+            aria-label="关闭导航菜单"
+            className="ml-auto flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-white/5 hover:text-slate-100"
+          >
+            <IconChevron width={16} height={16} className="rotate-180" />
+          </button>
+        </div>
+        <nav className="mt-4 flex-1 space-y-0.5 overflow-y-auto px-3 pb-4">
+          {nav.map((g) =>
+            g.kind === 'item' ? (
+              <NavLink key={g.item.href} item={g.item} pathname={pathname} rail={false} />
+            ) : (
+              <NavCollapsible key={g.label} group={g} pathname={pathname} rail={false} />
+            ),
+          )}
+        </nav>
+        <div className="border-t border-white/5 p-3">
+          <Link
+            href="/"
+            onClick={onClose}
+            className="flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] text-slate-400 transition-colors hover:bg-white/5 hover:text-brand-300"
+          >
+            <IconSwap width={15} height={15} />
+            返回官网
+          </Link>
+        </div>
+      </aside>
+    </div>
   );
 }
 

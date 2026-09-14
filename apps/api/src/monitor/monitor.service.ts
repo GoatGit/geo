@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, gte, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import {
   brands,
@@ -337,13 +337,25 @@ export class MonitorService {
   }
 
   /** 引用源分析(docs/01 §3.5):明细 + 信源平台偏好 + 自有占比。 */
-  async citations(brandId: number, days: number, limit = 200) {
+  async citations(brandId: number, days: number, page = 1, pageSize = 20) {
     const since = new Date(Date.now() - days * 24 * 3600 * 1000);
+    const where = and(eq(citationFacts.brandId, brandId), gte(citationFacts.extractedAt, since));
     const rows = await this.db
       .select()
       .from(citationFacts)
-      .where(and(eq(citationFacts.brandId, brandId), gte(citationFacts.extractedAt, since)))
-      .limit(limit);
+      .where(where)
+      .orderBy(desc(citationFacts.extractedAt))
+      .offset((page - 1) * pageSize)
+      .limit(pageSize);
+    const totalRow = await this.db
+      .select({
+        n: sql<number>`count(*)::int`,
+        ownedN: sql<number>`count(*) filter (where is_owned)::int`,
+      })
+      .from(citationFacts)
+      .where(where);
+    const total = totalRow[0]?.n ?? 0;
+    const ownedTotal = totalRow[0]?.ownedN ?? 0;
 
     const pref = await this.db.execute(sql`
       select domain, platform_category, count(*) as hits,
@@ -355,8 +367,6 @@ export class MonitorService {
       limit 20
     `);
 
-    const total = rows.length;
-    const owned = rows.filter((r) => r.isOwned).length;
     return {
       items: rows.map((r) => ({
         url: r.rawUrl,
@@ -374,9 +384,13 @@ export class MonitorService {
       }),
       totals: {
         citations: total,
-        owned,
-        ownedShare: total > 0 ? Math.round((owned / total) * 1000) / 1000 : null,
+        owned: ownedTotal,
+        ownedShare: total > 0 ? Math.round((ownedTotal / total) * 1000) / 1000 : null,
       },
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
     };
   }
 
@@ -417,7 +431,7 @@ export class MonitorService {
     const since = new Date(Date.now() - days * 24 * 3600 * 1000);
     const rows = await this.matrix(brandId, since);
     const eng = await this.engineRates(brandId, since);
-    const cite = await this.citations(brandId, days, 500);
+    const cite = await this.citations(brandId, days, 1, 500);
     const rep = await this.reputation(brandId, days);
     const ranking = await this.rankings({ brandId, days });
 

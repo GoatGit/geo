@@ -289,7 +289,8 @@ export default function AdminInsightsPage() {
         {(list.data ?? []).length === 0 ? (
           <EmptyState text="还没有洞察报告:添加行业后点「新建洞察报告」。" />
         ) : (
-          <table className="w-full text-left text-[13px]">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[620px] text-left text-[13px]">
             <thead>
               <tr className="border-b border-slate-100 text-xs text-slate-400">
                 <th className="py-2 font-medium">标题</th>
@@ -330,6 +331,7 @@ export default function AdminInsightsPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
         <p className="mt-3 text-[10px] text-slate-400">内容块类型:{INSIGHT_BLOCK_TYPES.join(' / ')} —— 结构口径见 @geo/shared/insights。</p>
       </section>
