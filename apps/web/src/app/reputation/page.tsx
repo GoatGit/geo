@@ -30,7 +30,23 @@ export default function ReputationPage() {
     <div className="space-y-6">
       <PageHeader title="口碑分析" />
 
-      <section className="grid gap-4 lg:grid-cols-2 rise-1">
+      <div className="card rise flex items-center gap-8 p-6">
+        <ScoreRing value={data.totals.sentimentScore} />
+        <div>
+          <h2 className="font-semibold text-slate-900">情绪得分</h2>
+          <p className="mt-1 text-sm leading-6 text-slate-500">
+            口碑词有效回答 <b className="metric-num text-slate-700">{data.totals.runs}</b> 条 ·
+            正面 <b className="metric-num text-good">{data.totals.pos}</b> / 中性{' '}
+            <b className="metric-num text-slate-700">{data.totals.neu}</b> / 负面{' '}
+            <b className="metric-num text-bad">{data.totals.neg}</b>
+          </p>
+          <p className="mt-1 text-[11px] text-slate-400">
+            得分 = round(正面数 / 有效数 × 100),口径见 docs/02 §4;低置信判定已进入人工抽检池。
+          </p>
+        </div>
+      </div>
+
+      <section className="grid gap-4 lg:grid-cols-2">
         <div className="card p-6">
           <h2 className="mb-3 font-semibold text-good">优势印象 · 巩固</h2>
           <ul className="space-y-1.5 text-sm">
@@ -74,5 +90,38 @@ export default function ReputationPage() {
         </p>
       </section>
     </div>
+  );
+}
+
+function ScoreRing({ value }: { value: number | null }) {
+  const r = 40;
+  const c = 2 * Math.PI * r;
+  const v = value ?? 0;
+  return (
+    <svg width="112" height="112" viewBox="0 0 100 100" className="shrink-0">
+      <defs>
+        <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#93a492" />
+          <stop offset="1" stopColor="#5c675b" />
+        </linearGradient>
+      </defs>
+      <circle cx="50" cy="50" r={r} fill="none" stroke="#e7ebe4" strokeWidth="9" />
+      <circle
+        cx="50"
+        cy="50"
+        r={r}
+        fill="none"
+        stroke="url(#ring)"
+        strokeWidth="9"
+        strokeLinecap="round"
+        strokeDasharray={c}
+        strokeDashoffset={c * (1 - v / 100)}
+        transform="rotate(-90 50 50)"
+        className="transition-all duration-700"
+      />
+      <text x="50" y="57" textAnchor="middle" fontSize="21" fontWeight="600" fill="#3f453e" className="metric-num">
+        {value ?? '—'}
+      </text>
+    </svg>
   );
 }

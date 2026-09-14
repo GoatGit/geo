@@ -48,6 +48,15 @@ export default function RankingsPage() {
         <MetricCardView title="平均名次" card={data.cards.find((c) => c.metric === 'avgRank')} lowerBetter />
       </section>
 
+      <div className="rise flex flex-wrap items-center gap-4 text-[11px] text-slate-500">
+        <span className="font-medium text-slate-600">图例</span>
+        <span className="inline-flex items-center gap-1.5"><span className="metric-num rounded bg-good-50 px-1.5 py-0.5 text-good">#1</span>首推</span>
+        <span className="inline-flex items-center gap-1.5"><span className="metric-num rounded bg-brand-50 px-1.5 py-0.5 text-brand-700">#2-3</span>进 Top3</span>
+        <span className="inline-flex items-center gap-1.5"><span className="metric-num rounded bg-slate-100 px-1.5 py-0.5">#4+</span>上榜靠后</span>
+        <span className="inline-flex items-center gap-1.5"><span className="rounded bg-bad-50 px-1.5 py-0.5 text-bad">未上榜</span>出局</span>
+        <span className="text-slate-400">综合名次 = 未上榜记 N+1 取中位数(docs/02 §1.3)</span>
+      </div>
+
       <section className="table-wrap rise-1">
         <table className="w-full text-sm">
           <thead className="table-head">
@@ -124,7 +133,7 @@ export default function RankingsPage() {
                 </div>
                 <div className="mt-1 h-2 rounded bg-slate-100">
                   <div
-                    className="h-2 rounded bg-brand"
+                    className="h-2 animate-grow-w rounded bg-gradient-to-r from-brand-400 to-brand-600"
                     style={{ width: `${(s.rate ?? 0) * 100}%` }}
                   />
                 </div>

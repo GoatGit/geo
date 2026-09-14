@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, brandStore } from '@/lib/api';
+import { useToast } from '@/components/toast';
 import { PageHeader, Skeleton } from '@/components/ui';
 
 interface RecognitionRow {
@@ -20,6 +21,7 @@ interface RecognitionRow {
  */
 export default function RecognitionPage() {
   const qc = useQueryClient();
+  const toast = useToast();
   const brandId = brandStore.get();
   const [name, setName] = useState('');
   const [aliases, setAliases] = useState('');
@@ -38,6 +40,7 @@ export default function RecognitionPage() {
         json: { kind, name, aliases: aliases.split(/[,、]/).map((s) => s.trim()).filter(Boolean) },
       }),
     onSuccess: () => {
+      toast('识别口径已保存,版本快照已记录');
       setName('');
       setAliases('');
       void qc.invalidateQueries({ queryKey: ['recognition'] });

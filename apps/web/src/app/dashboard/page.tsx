@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { MetricCardView } from '@/components/metric-card';
-import { Badge, PageHeader, Skeleton, pct } from '@/components/ui';
+import { Badge, EmptyState, PageHeader, Skeleton, pct } from '@/components/ui';
 import { IconArrowRight, IconCheck, IconList, IconLogo, IconPulse, IconShield } from '@/components/icons';
 import { api, useBrandId, useRankings } from '@/lib/queries';
 
@@ -56,11 +56,10 @@ export default function DashboardPage() {
   });
 
   if (rankings.isLoading) return <Skeleton />;
-  if (rankings.error || !rankings.data) {
-    return (
-      <Skeleton />
-    );
+  if (rankings.error) {
+    return <EmptyState text={`数据加载失败:${rankings.error.message}(可在顶栏切换品牌后重试)`} />;
   }
+  if (!rankings.data) return <Skeleton />;
   const data = rankings.data;
   const hasData = (data.cards.find((c) => c.metric === 'mentionRate')?.denominator ?? 0) > 0;
   const questionsConfigured =

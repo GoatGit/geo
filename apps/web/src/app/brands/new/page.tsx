@@ -4,11 +4,13 @@ import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { api, brandStore } from '@/lib/api';
+import { useToast } from '@/components/toast';
 
 /** 品牌初始化(docs/01 §3.1):自然语言 → 档案 + 识别口径预填(含自有产品线别名)。 */
 export default function NewBrandPage() {
   const router = useRouter();
   const qc = useQueryClient();
+  const toast = useToast();
   const [description, setDescription] = useState('');
   const [result, setResult] = useState<{
     brand: { id: number; name: string };
@@ -27,6 +29,7 @@ export default function NewBrandPage() {
       } | null>('/brands', { method: 'POST', json: { description } }),
     onSuccess: (r) => {
       if (r) {
+        toast('品牌创建成功,识别口径已预填');
         setResult(r);
         brandStore.set(r.brand.id);
         void qc.invalidateQueries({ queryKey: ['brands'] });

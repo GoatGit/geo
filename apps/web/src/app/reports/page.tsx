@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, brandStore } from '../../lib/queries';
 import { PageHeader, Skeleton } from '@/components/ui';
+import { useToast } from '@/components/toast';
 
 interface ReportRow {
   id: number;
@@ -16,6 +17,7 @@ interface ReportRow {
 /** 报告中心(docs/01 §3.8):列表 + 手动生成;周报每周一自动生成(worker cron)。 */
 export default function ReportsPage() {
   const qc = useQueryClient();
+  const toast = useToast();
   const brandId = brandStore.get();
   const reports = useQuery({
     queryKey: ['reports', brandId],
@@ -25,7 +27,11 @@ export default function ReportsPage() {
   const generate = useMutation({
     mutationFn: (type: string) =>
       api('/reports/generate', { method: 'POST', json: { brandId, type } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['reports'] }),
+    onSuccess: () => {
+      toast('报告已加入生成队列');
+      qc.invalidateQueries({ queryKey: ['reports'] });
+    },
+    onError: (e) => toast((e as Error).message, 'err'),
   });
 
   if (!brandId) return <Skeleton />;

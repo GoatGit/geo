@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, brandStore } from '@/lib/api';
+import { useToast } from '@/components/toast';
 import { PageHeader, Skeleton } from '@/components/ui';
 
 interface QuestionRow {
@@ -22,6 +23,7 @@ interface QuotaDto {
 /** 监控问题管理(docs/01 §3.2):批量添加 + AI 分类/拓写 + 分池配额条(教训 #4 对策)。 */
 export default function QuestionsPage() {
   const qc = useQueryClient();
+  const toast = useToast();
   const brandId = brandStore.get();
   const [input, setInput] = useState('');
   const [message, setMessage] = useState('');
@@ -45,6 +47,8 @@ export default function QuestionsPage() {
       ),
     onSuccess: (r) => {
       const rejected = (r as { rejected: Array<{ reason: string }> }).rejected ?? [];
+      if (rejected.length > 0) toast(`部分未添加:${rejected[0].reason}`, 'err');
+      else toast(`已添加 ${(r as { created: unknown[] }).created.length} 个问题,首轮采集已排队`);
       setMessage(
         rejected.length > 0
           ? `部分未添加:${rejected[0].reason}`
@@ -54,7 +58,10 @@ export default function QuestionsPage() {
       void qc.invalidateQueries({ queryKey: ['questions'] });
       void qc.invalidateQueries({ queryKey: ['quota'] });
     },
-    onError: (e) => setMessage((e as Error).message),
+    onError: (e) => {
+      toast((e as Error).message, 'err');
+      setMessage((e as Error).message);
+    },
   });
 
   if (!brandId) return <Skeleton />;
@@ -134,9 +141,12 @@ export default function QuestionsPage() {
                   <button
                     className="text-xs text-bad hover:underline"
                     onClick={() =>
-                      api(`/brands/${brandId}/questions/${row.id}`, { method: 'DELETE' }).then(() =>
-                        qc.invalidateQueries({ queryKey: ['questions'] }),
-                      )
+                      api(`/brands/${brandId}/questions/${row.id}`, { method: 'DELETE' })
+                        .then(() => {
+                          toast('问题已归档,历史数据保留');
+                          qc.invalidateQueries({ queryKey: ['questions'] });
+                        })
+                        .catch((e) => toast((e as Error).message, 'err'))
                     }
                   >
                     删除

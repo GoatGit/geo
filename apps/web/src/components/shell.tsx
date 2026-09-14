@@ -247,6 +247,20 @@ function BrandSwitcher() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
+  // 健壮性:切换账号/数据重灌后 localStorage 里可能残留失效的 brandId → 自动落到首个可用品牌。
+  // 必须整页刷新:各页面经 useBrandId() 非响应式读取,router.refresh() 不会让已挂载的客户端查询换 key 重取。
+  const corrected = useRef(false);
+  useEffect(() => {
+    if (query.isLoading || corrected.current) return;
+    if (brands.length > 0 && current !== brand?.id) {
+      corrected.current = true;
+      if (brand) {
+        brandStore.set(brand.id);
+        window.location.reload();
+      }
+    }
+  }, [brands, brand, current, query.isLoading]);
+
   useEffect(() => {
     const close = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
