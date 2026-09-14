@@ -150,3 +150,18 @@ export const IconSwords = (p: SVGProps<SVGSVGElement>) => (
     <path d="M14.5 14.5 20 9l-1-4-4-1-5.5 5.5M14.5 14.5 9 20l-5 1 1-5 5.5-5.5M14.5 14.5 9.5 9.5" />
   </svg>
 );
+
+export const IconWallet = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M20 7H5a2 2 0 0 1 0-4h13v4" />
+    <path d="M20 7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5" />
+    <path d="M16.5 13.5h.01" />
+  </svg>
+);
+
+export const IconPanel = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <path d="M9 3v18" />
+  </svg>
+);

@@ -261,6 +261,9 @@ importers:
       '@geo/shared':
         specifier: workspace:*
         version: link:../shared
+      playwright-core:
+        specifier: ^1.63.0
+        version: 1.63.0
     devDependencies:
       tsup:
         specifier: ^8.3.5

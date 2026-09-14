@@ -13,6 +13,7 @@ import {
   IconList,
   IconLogo,
   IconLogout,
+  IconPanel,
   IconPlus,
   IconPulse,
   IconRank,
@@ -22,6 +23,7 @@ import {
   IconSwap,
   IconVoice,
   IconSwords,
+  IconWallet,
 } from './icons';
 
 interface BrandRow {
@@ -49,6 +51,7 @@ const NAV: NavGroup[] = [
   },
   { kind: 'item', item: { href: '/reputation', label: '口碑分析', icon: <IconVoice /> } },
   { kind: 'item', item: { href: '/reports', label: '报告中心', icon: <IconReport /> } },
+  { kind: 'item', item: { href: '/billing', label: '套餐与账单', icon: <IconWallet /> } },
   {
     kind: 'group',
     label: '配置',
@@ -108,49 +111,101 @@ function ConsoleShell({ pathname, children }: { pathname: string; children: Reac
 
 /* ============ 侧栏 ============ */
 
+const SIDEBAR_COLLAPSED_KEY = 'geo.sidebarCollapsed';
+
 function Sidebar({ pathname }: { pathname: string }) {
   const nav = isAdmin() ? [...NAV, ADMIN_NAV] : NAV;
+  // 折叠状态持久化;折叠时悬停自动浮层展开
+  const [collapsed, setCollapsed] = useState(
+    () => typeof window !== 'undefined' && localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1',
+  );
+  const [hovered, setHovered] = useState(false);
+  const rail = collapsed && !hovered;
+
+  const toggle = () =>
+    setCollapsed((v) => {
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, v ? '0' : '1');
+      return !v;
+    });
+
   return (
-    <aside className="sticky top-0 flex h-screen w-[232px] shrink-0 flex-col bg-ink-950 text-slate-300">
-      <Link href="/dashboard" className="rise flex items-center gap-2.5 px-5 pb-2 pt-6">
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-glow">
-          <IconLogo width={18} height={18} />
-        </span>
-        <span>
-          <span className="block text-[15px] font-semibold leading-4 tracking-wide text-white">GeoLens</span>
-          <span className="block text-[10px] leading-4 text-slate-500">AI 搜索品牌可见性监测</span>
-        </span>
-      </Link>
+    <div className={`${rail ? 'w-[68px]' : 'w-[232px]'} shrink-0 transition-[width] duration-200`}>
+      <aside
+        onMouseEnter={() => collapsed && setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        className={`sticky top-0 flex h-screen flex-col bg-ink-950 text-slate-300 transition-[width,box-shadow] duration-200 ${
+          rail ? 'w-[68px]' : 'w-[232px]'
+        } ${collapsed && hovered ? 'relative z-30 shadow-2xl' : ''}`}
+      >
+        <div className={`flex items-center gap-2.5 pb-2 pt-6 ${rail ? 'flex-col px-2' : 'px-5'}`}>
+          <Link href="/dashboard" className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-glow">
+              <IconLogo width={18} height={18} />
+            </span>
+            {!rail && (
+              <span>
+                <span className="block text-[15px] font-semibold leading-4 tracking-wide text-white">GeoLens</span>
+                <span className="block text-[10px] leading-4 text-slate-500">AI 搜索品牌可见性监测</span>
+              </span>
+            )}
+          </Link>
+          {!rail && (
+            <button
+              onClick={toggle}
+              title="收起侧栏"
+              className="ml-auto flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-white/5 hover:text-brand-300"
+            >
+              <IconPanel width={15} height={15} />
+            </button>
+          )}
+        </div>
 
-      <nav className="mt-4 flex-1 space-y-0.5 overflow-y-auto px-3 pb-4">
-        {nav.map((g) =>
-          g.kind === 'item' ? (
-            <NavLink key={g.item.href} item={g.item} pathname={pathname} />
-          ) : (
-            <NavCollapsible key={g.label} group={g} pathname={pathname} />
-          ),
+        {rail && (
+          <button
+            onClick={toggle}
+            title="展开侧栏"
+            className="mb-1 flex h-8 w-8 items-center justify-center self-center rounded-md text-slate-500 transition-colors hover:bg-white/5 hover:text-brand-300"
+          >
+            <IconPanel width={15} height={15} />
+          </button>
         )}
-      </nav>
 
-      <div className="border-t border-white/5 p-3">
-        <Link
-          href="/"
-          className="flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] text-slate-400 transition-colors hover:bg-white/5 hover:text-brand-300"
-        >
-          <IconSwap width={15} height={15} />
-          返回官网
-        </Link>
-      </div>
-    </aside>
+        <nav className={`mt-4 flex-1 space-y-0.5 overflow-y-auto overflow-x-visible pb-4 ${rail ? 'px-2' : 'px-3'}`}>
+          {nav.map((g) =>
+            g.kind === 'item' ? (
+              <NavLink key={g.item.href} item={g.item} pathname={pathname} rail={rail} />
+            ) : (
+              <NavCollapsible key={g.label} group={g} pathname={pathname} rail={rail} />
+            ),
+          )}
+        </nav>
+
+        <div className={`border-t border-white/5 p-3 ${rail ? 'flex justify-center' : ''}`}>
+          <Link
+            href="/"
+            title="返回官网"
+            className={`flex items-center rounded-lg text-[13px] text-slate-400 transition-colors hover:bg-white/5 hover:text-brand-300 ${
+              rail ? 'h-9 w-9 justify-center' : 'gap-2 px-3 py-2'
+            }`}
+          >
+            <IconSwap width={15} height={15} />
+            {!rail && '返回官网'}
+          </Link>
+        </div>
+      </aside>
+    </div>
   );
 }
 
-function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
+function NavLink({ item, pathname, rail }: { item: NavItem; pathname: string; rail: boolean }) {
   const active = item.exact ? pathname === item.href : pathname.startsWith(item.href);
   return (
     <Link
       href={item.href}
-      className={`group relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium transition-all duration-150 ${
+      title={rail ? item.label : undefined}
+      className={`group relative flex items-center gap-2.5 rounded-lg text-[13px] font-medium transition-all duration-150 ${
+        rail ? 'h-9 justify-center' : 'px-3 py-2'
+      } ${
         active
           ? 'bg-gradient-to-r from-brand-600/90 to-brand-500/70 text-white shadow-sm'
           : 'text-slate-400 hover:bg-white/5 hover:text-slate-100'
@@ -159,7 +214,7 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
       <span className={active ? 'text-brand-200' : 'text-slate-500 transition-colors group-hover:text-brand-300'}>
         {item.icon}
       </span>
-      {item.label}
+      {!rail && item.label}
     </Link>
   );
 }
@@ -167,14 +222,31 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
 function NavCollapsible({
   group,
   pathname,
+  rail,
 }: {
   group: Extract<NavGroup, { kind: 'group' }>;
   pathname: string;
+  rail: boolean;
 }) {
   const match = (i: NavItem) => (i.exact ? pathname === i.href : pathname.startsWith(i.href));
   const expandedByDefault = group.items.some(match);
   const [open, setOpen] = useState(expandedByDefault);
   const active = group.items.some(match);
+
+  if (rail) {
+    return (
+      <div className="flex justify-center">
+        <button
+          title={group.label}
+          className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
+            active ? 'text-brand-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-100'
+          }`}
+        >
+          <span className={active ? 'text-brand-300' : 'text-slate-500'}>{group.icon}</span>
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div>

@@ -10,7 +10,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@geo/shared": "workspace:*"
+    "@geo/shared": "workspace:*",
+    "playwright-core": "^1.63.0"
   },
   "devDependencies": {
     "tsup": "^8.3.5",

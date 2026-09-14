@@ -55,10 +55,10 @@ const STEPS = [
 ];
 
 const PRICING = [
-  { name: '免费版', price: '¥0', note: '3 排名词 + 1 口碑词 · 3 引擎', cta: '免费开始', hot: false },
-  { name: '入门', price: '¥79', note: '10 题 · 5 引擎 · 周报', cta: '选择入门', hot: false },
-  { name: '标准', price: '¥199', note: '38 题 · 5 引擎 · 周/月报', cta: '选择标准', hot: true },
-  { name: '专业', price: '¥499', note: '130 题 · 优先队列 · 多品牌', cta: '选择专业', hot: false },
+  { name: '免费版', price: '¥0', note: '3 排名词 + 1 口碑词 · 3 引擎', cta: '免费开始', hot: false, plan: null },
+  { name: '入门', price: '¥79', note: '10 题 · 5 引擎 · 周报', cta: '选择入门', hot: false, plan: 'starter' },
+  { name: '标准', price: '¥199', note: '38 题 · 5 引擎 · 周/月报', cta: '选择标准', hot: true, plan: 'standard' },
+  { name: '专业', price: '¥499', note: '130 题 · 优先队列 · 多品牌', cta: '选择专业', hot: false, plan: 'pro' },
 ];
 
 /** 官网落地页(匿名访客;原创文案,docs/00 价值主张)。 */
@@ -68,6 +68,8 @@ export default function LandingPage() {
   useEffect(() => setLogged(!!tokenStore.access), []);
 
   const startHref = logged ? '/dashboard' : '/login';
+  // 付费档位直达套餐页(登录后);未登录先进登录页
+  const planHref = (plan: string | null) => (plan === null ? startHref : logged ? `/billing?plan=${plan}` : '/login');
 
   return (
     <div className="min-h-screen bg-white">
@@ -295,7 +297,7 @@ export default function LandingPage() {
                 </p>
                 <p className={`mt-2 text-xs leading-5 ${p.hot ? 'text-slate-400' : 'text-slate-500'}`}>{p.note}</p>
                 <Link
-                  href={startHref}
+                  href={planHref(p.plan)}
                   className={`mt-5 w-full ${p.hot ? 'btn-primary' : 'btn-ghost'}`}
                 >
                   {p.cta}
