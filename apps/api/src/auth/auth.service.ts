@@ -86,11 +86,19 @@ export class AuthService {
     return true;
   }
 
-  async upsertAccountByPhone(phone: string): Promise<{ id: number; phone: string }> {
+  async upsertAccountByPhone(phone: string): Promise<{ id: number; phone: string; role: string }> {
+    const env = loadEnv();
+    const role = env.adminPhones.includes(phone) ? 'admin' : 'user';
     const existing = (await this.db.select().from(accounts).where(eq(accounts.phone, phone)).limit(1))[0];
-    if (existing) return { id: existing.id, phone: existing.phone };
+    if (existing) {
+      // 名单新增时给已有账号补授角色;移出名单不自动降级(降级需显式操作,避免误伤在用管理员)
+      if (existing.role !== role && role === 'admin') {
+        await this.db.update(accounts).set({ role }).where(eq(accounts.id, existing.id));
+      }
+      return { id: existing.id, phone: existing.phone, role: role === 'admin' ? 'admin' : existing.role };
+    }
     const inserted = (
-      await this.db.insert(accounts).values({ phone }).returning({ id: accounts.id, phone: accounts.phone })
+      await this.db.insert(accounts).values({ phone, role }).returning({ id: accounts.id, phone: accounts.phone, role: accounts.role })
     )[0]!;
     return inserted;
   }

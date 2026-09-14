@@ -58,10 +58,14 @@ const NAV: NavGroup[] = [
   },
 ];
 
+/** 公开路由:官网首页与登录页不套控制台壳(未登录访问首页不再跳登录)。 */
+const PUBLIC_ROUTES = ['/', '/login'];
+
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isLogin = pathname === '/login';
-  if (isLogin) return <div className="min-h-screen">{children}</div>;
+  if (PUBLIC_ROUTES.includes(pathname)) {
+    return <div className="min-h-screen">{children}</div>;
+  }
   return <ConsoleShell pathname={pathname}>{children}</ConsoleShell>;
 }
 

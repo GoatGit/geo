@@ -22,6 +22,8 @@ export const accounts = pgTable('accounts', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   phone: text('phone').notNull().unique(),
   passwordHash: text('password_hash'),
+  /** 平台角色:'user' 租户 / 'admin' 平台运营(ADMIN_PHONES 登录时自动授予) */
+  role: text('role').notNull().default('user'),
   status: text('status').notNull().default('active'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -297,4 +299,12 @@ export const auditTasks = pgTable('audit_tasks', {
   labeler: text('labeler'),
   label: jsonb('label').$type<Record<string, unknown> | null>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** 平台配置(key-value,管理后台读写;未写入的键取 @geo/shared 默认值)。 */
+export const platformSettings = pgTable('platform_settings', {
+  key: text('key').primaryKey(),
+  value: jsonb('value').$type<unknown>().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedBy: bigint('updated_by', { mode: 'number' }),
 });

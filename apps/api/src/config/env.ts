@@ -21,6 +21,8 @@ export interface AppEnv {
   jwtRefreshTtl: string;
   smsProvider: 'console' | 'aliyun';
   evidenceStorage: 'local' | 's3';
+  /** 平台管理员手机号(逗号分隔):登录注册时自动授予 admin 角色 */
+  adminPhones: string[];
 }
 
 export function loadEnv(env: NodeJS.ProcessEnv = process.env): AppEnv {
@@ -41,5 +43,9 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): AppEnv {
     jwtRefreshTtl: env.JWT_REFRESH_TTL ?? '30d',
     smsProvider: (env.SMS_PROVIDER as AppEnv['smsProvider']) ?? 'console',
     evidenceStorage: (env.EVIDENCE_STORAGE as AppEnv['evidenceStorage']) ?? 'local',
+    adminPhones: (env.ADMIN_PHONES ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
   };
 }

@@ -128,6 +128,59 @@ export const CREDIT_COSTS = {
   reportPdfExpress: 20,
 } as const;
 
+// ===== 平台配置(管理后台读写,worker 调度与 API 配额校验共同遵守;docs/03 §3.2) =====
+
+export type AccountRole = 'user' | 'admin';
+
+/**
+ * 平台级配置:管理后台的"全局旋钮"。持久化在 platform_settings(key-value),
+ * 未写入的键取 DEFAULT_PLATFORM_SETTINGS —— 新增键只需扩展本接口与默认值。
+ */
+export interface PlatformSettings {
+  /** 调度总开关(kill switch):false 时轮次调度器停止派发,在途任务不受影响 */
+  schedulerEnabled: boolean;
+  /** 全平台每日任务上限(QueryRun 数,自然日);0 = 不限 */
+  globalDailyRunCap: number;
+  /** 每引擎每日任务上限;0 或缺省 = 不限 */
+  engineDailyCaps: Record<string, number>;
+}
+
+export const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
+  schedulerEnabled: true,
+  globalDailyRunCap: 0,
+  engineDailyCaps: {},
+};
+
+export const PLATFORM_SETTING_KEYS = ['schedulerEnabled', 'globalDailyRunCap', 'engineDailyCaps'] as const;
+export type PlatformSettingKey = (typeof PLATFORM_SETTING_KEYS)[number];
+
+/** 深合并存储值与默认值,并做类型与边界净化(脏数据不致命,回退默认)。 */
+export function mergePlatformSettings(stored: Partial<Record<string, unknown>> | Record<string, unknown>[]): PlatformSettings {
+  const byKey = new Map<string, unknown>();
+  if (Array.isArray(stored)) {
+    for (const row of stored as Array<{ key?: string; value?: unknown }>) {
+      if (row && typeof row.key === 'string') byKey.set(row.key, row.value);
+    }
+  }
+  const num = (v: unknown, fallback: number): number => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
+  };
+  const capsRaw = byKey.get('engineDailyCaps');
+  const engineDailyCaps: Record<string, number> = {};
+  if (capsRaw && typeof capsRaw === 'object' && !Array.isArray(capsRaw)) {
+    for (const [k, v] of Object.entries(capsRaw as Record<string, unknown>)) {
+      const n = Number(v);
+      if (Number.isFinite(n) && n >= 0) engineDailyCaps[k] = Math.floor(n);
+    }
+  }
+  return {
+    schedulerEnabled: byKey.get('schedulerEnabled') === undefined ? true : Boolean(byKey.get('schedulerEnabled')),
+    globalDailyRunCap: num(byKey.get('globalDailyRunCap'), 0),
+    engineDailyCaps,
+  };
+}
+
 // ===== 指标 DTO(docs/05 §6 约定:所有指标响应携带分母/excluded/asOf/source) =====
 
 export type MetricSource = 'realtime' | 'daily';
