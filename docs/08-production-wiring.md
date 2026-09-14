@@ -7,7 +7,7 @@
 | 组件 | 资源 | 状态 |
 |---|---|---|
 | 接入 | 经典 CLB `lb-bp1fzv3byjp3gdnc9q4ym`(公网 120.26.225.215),80→3001、443→3001(HTTPS) | ✅ |
-| 证书 | Let's Encrypt RSA 2048,`CN=geo.gemux.cn`,至 2026-12-13 | ✅ |
+| 证书 | Let's Encrypt RSA 2048,`CN=geo.gemux.cn`,至 2026-12-13;续期脚本 `scripts/renew-https-cert.sh` | ✅ |
 | DNS | `geo.gemux.cn` → 120.26.225.215 | ✅ |
 | Web | SAE `geo-web`(cn-hangzhou:geoprod),Next.js,镜像 `web:v3` | ✅ |
 | API | SAE `geo-api`,内网 CLB `10.115.0.73:3000` | ✅ |
@@ -23,7 +23,8 @@
 ## 2. 短信(阿里云 SMS)——待资质材料
 
 代码侧已就绪:`apps/api/src/auth/auth.service.ts` `AliyunSmsProvider`(POP RPC + HMAC-SHA1)。
-当前 `SMS_PROVIDER=console`(验证码进日志,`NODE_ENV=staging` 时接口返回 `devCode`),登录不受影响。
+**预埋已完成**:geo-api 已带 `ALIYUN_SMS_ACCESS_KEY_ID/SECRET`、`ALIYUN_SMS_SIGN_NAME=青柠GEO` 重启生效;
+`SMS_PROVIDER` 当前仍为 `console`(`NODE_ENV=staging` 时接口返回 `devCode`),登录不受影响。
 
 步骤(控制台或等价 OpenAPI):
 
@@ -31,16 +32,9 @@
 2. **签名**:名称建议 `青柠GEO`,来源"网站名"(需 gemux.cn ICP 备案可查)。审核约 2h–2 天。
 3. **模板**:类型"验证码",内容:
    `您的验证码为${code}，5分钟内有效，请勿泄露。`
-4. **审核通过后**,在 SAE `geo-api` 环境变量中新增/修改,并重启:
-
-```text
-SMS_PROVIDER=aliyun
-NODE_ENV=production            # 同时停发 devCode,防止验证码回显
-ALIYUN_SMS_ACCESS_KEY_ID=<有 dysmsapi SendSms 权限的 AK>
-ALIYUN_SMS_ACCESS_KEY_SECRET=<同上>
-ALIYUN_SMS_SIGN_NAME=青柠GEO
-ALIYUN_SMS_TEMPLATE_CODE=SMS_xxxxxxxx
-```
+4. **审核通过后**,只需两步:
+   - SAE `geo-api` 环境变量加 `ALIYUN_SMS_TEMPLATE_CODE=SMS_xxxxxxxx`(模板审核通过后分配的 code),并把 `SMS_PROVIDER` 改为 `aliyun`、`NODE_ENV` 改为 `production`(停发 devCode);
+   - 重启 geo-api。
 
 回滚:把 `SMS_PROVIDER` 改回 `console` 即可,登录立即恢复。
 
@@ -80,8 +74,13 @@ ALIPAY_PUBLIC_KEY_PATH=/app/certs/alipay/alipay_public_key.pem
 
 代码侧已就绪:`packages/browser-session/src/agentbay-broker.ts`(create → 等待 ready → 取 CDP wss 端点 → 释放),worker `connectOverCDP` 已支持。
 
+**API Key 获取(本机已装 AgentBay CLI)**:
+```bash
+~/.aliyun/agentbay login                 # 浏览器 OAuth(阿里云账号授权)
+~/.aliyun/agentbay apikey create --name geo-prod
+```
 1. 开通 AgentBay(百炼云沙箱/Browser Use),确认可用 `browser_latest` 镜像与 CDP 端点能力。
-2. 创建 API Token。
+2. 按 CLI 流程创建 API Token(`geo-prod`)。
 3. SAE `geo-worker` 环境变量:
 
 ```text
@@ -102,7 +101,9 @@ AGENTBAY_IMAGE_ID=browser_latest
 
 ## 5. 日常运维备忘
 
-- **证书续期**(到期前 30 天,2026-11-13 起):`acme.sh --issue -d geo.gemux.cn --dns dns_ali --keylength 2048`(必须 RSA;ECC 证书经典 CLB 不支持),然后重跑"拼接 leaf+中间链 → `UploadServerCertificate` → 443 监听换证书 ID"。曾因单 leaf(缺链)与 ECC 两次踩坑,见本文档第 1 节。
+- **证书续期**(到期前 30 天,2026-11-13 起):执行 `scripts/renew-https-cert.sh`(签发 RSA → 拼 leaf+中间链 → 上传 → 切换 443 监听 → 验证)。曾因单 leaf(缺链)与 ECC 两次踩坑,脚本已内建规避。
+- **80 端口**:SAE BindSlb 管理的是 TCP 监听,CLB 层无法做 HTTP→HTTPS 跳转;如需强制跳转,在 Next.js 层按 `x-forwarded-proto` 做(CLB 健康检查 3xx 视为成功,不影响)。
+- **支付回调**:`/api/billing/notify/wechat|alipay` 已在 HTTPS 下可达(对无签名请求返回 401 属预期验签行为);staging 下未配置凭证时下单自动落 mock 通道,凭证配置后真实通道自动激活。
 - **Redis**:已设 `maxmemory-policy=noeviction`(BullMQ 队列状态不允许被淘汰;内存告警优先扩容而非换策略)。
 - **账号池**:mock 模式启动自动补种;真实浏览器模式人工录入,健康分 ≤30 退役、<60 冷却 24h。
 - **首轮采集触发**:问题配置完成时 API 会把 `collection_plans.next_run_at` 置 now;调度器 60s tick 派发。手工补触发:`update collection_plans set next_run_at=now() where brand_id=<id>`。
