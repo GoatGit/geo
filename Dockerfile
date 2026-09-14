@@ -1,6 +1,6 @@
 # GeoLens 应用镜像(web / api / worker 同一基础镜像,以启动命令区分)
 # 部署目标:阿里云 SAE(docs/07 §3)——单应用多实例,按需弹性
-FROM node:22-slim AS base
+FROM node:24-alpine AS base
 RUN corepack enable && corepack prepare pnpm@10.24.0 --activate
 WORKDIR /app
 
@@ -21,7 +21,7 @@ FROM deps AS build
 COPY . .
 RUN pnpm -r build
 
-FROM node:22-slim AS runtime
+FROM node:24-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app ./

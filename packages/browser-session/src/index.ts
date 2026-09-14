@@ -33,7 +33,13 @@ export function createBrokerFromEnv(env: NodeJS.ProcessEnv = process.env): Sessi
       headless: (env.LOCAL_BROWSER_HEADED ?? '') !== '1',
       idleCloseMs: Number(env.LOCAL_BROWSER_IDLE_MS ?? 120_000) || 0,
       maxConcurrent: Number(env.LOCAL_BROWSER_MAX_CONCURRENT ?? 8) || 8,
+      viewerLogin: env.LOGIN_VIEWER === '1',
     });
   }
   return new MockSessionBroker();
+}
+
+/** 远程可视化登录是否启用(agentbay 天然远程;local 由 LOGIN_VIEWER 开关)。 */
+export function viewerLoginFromEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+  return browserModeFromEnv(env) === 'agentbay' || env.LOGIN_VIEWER === '1';
 }

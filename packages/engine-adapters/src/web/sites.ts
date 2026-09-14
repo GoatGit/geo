@@ -36,9 +36,14 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
   doubao: {
     engine: 'doubao',
     displayName: '豆包',
+    // ✅ 已通关(2026-09,登录态有头采集,run 1373 ok_with_answer)。风控要点:
+    // ① headless 提交即被服务端强制登出(URL 变 ?from_logout=1)——必须 LOCAL_BROWSER_HEADED=1;
+    // ② 输入必须 keyboard.insertText(真实输入事件),fill/type 合成事件无效;
+    // ③ 回答容器为 message 节点(无 markdown 类),提交后先有 ~40s 本地会话空窗再流式回答,
+    //    ASK_TIMEOUT 需 ≥150s;loginUrlPatterns 的 from_logout 用于被登出后快速失败。
     chatUrl: 'https://www.doubao.com/chat/',
     loginHints: ['button:has-text("登录")', 'a:has-text("登录")', '[data-testid="login_button"]'],
-    loginUrlPatterns: [],
+    loginUrlPatterns: ['from_logout'],
     inputSelectors: [
       '[contenteditable="true"]',
       'textarea[data-testid="chat_text_input"]',
@@ -46,7 +51,9 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
       'textarea[placeholder]',
     ],
     submitSelectors: ['[data-testid="send_button"]', 'button[type="submit"]', 'button:has-text("发送")'],
-    answerSelectors: ['[data-testid="receive_message"]', 'div[class*="answer"]', 'div[class*="markdown-body"]'],
+    // 实测(2026-09,登录态有头):回答流在 message 节点(无 markdown 类);提交后先有
+    // ~40s 本地会话空窗(local_xxx)再同步服务端,ASK_TIMEOUT 需 ≥150s
+    answerSelectors: ['div[class*="message"]', '[data-testid="receive_message"]', 'div[class*="answer"]', 'div[class*="markdown-body"]'],
     stopSelectors: ['[data-testid="stop_button"]', 'button:has-text("停止")'],
     answerNoisePatterns: [],
     completionStableMs: BASE_COMPLETION_STABLE_MS,

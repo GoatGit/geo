@@ -19,6 +19,8 @@ import {
   WORKER_HEARTBEAT_STALE_MS,
   breakerManualKey,
   breakerTrippedKey,
+  loginCmdKey,
+  loginFrameKey,
   loginStatusKey,
   type LoginRequest,
 } from '@geo/shared';
@@ -267,6 +269,33 @@ export class AdminController implements OnModuleDestroy {
     return { account: profile };
   }
 
+  /** 批量登记账号档案(账号池按批量供给运营,docs/04 §3.2);一次最多 20 个。 */
+  @Post('accounts/batch')
+  async createAccountsBatch(
+    @Req() req: Request,
+    @Body() dto: { engine?: string; count?: number },
+  ) {
+    void currentAccount(req);
+    const engine = dto.engine ?? '';
+    this.assertEngine(engine);
+    const count = Math.min(Math.max(Math.floor(Number(dto.count) || 1), 1), 20);
+    const created = await this.db
+      .insert(accountProfiles)
+      .values(
+        Array.from({ length: count }, () => ({
+          engine,
+          fingerprint: {
+            ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+            viewport: '1366x850',
+            locale: 'zh-CN',
+          },
+          status: 'pending_login',
+        })),
+      )
+      .returning({ id: accountProfiles.id });
+    return { created: created.length, ids: created.map((r) => r.id) };
+  }
+
   /**
    * 发起人工登录:请求入 Redis 队列,worker(拥有浏览器)开出有头会话并轮询登录态。
    * 返回 sessionId 供后台轮询 GET /admin/login/:sessionId 展示进度。
@@ -303,12 +332,43 @@ export class AdminController implements OnModuleDestroy {
     return { sessionId, engine: profile.engine, profileId: profile.id };
   }
 
-  /** 登录会话状态轮询(queued/running/done/timeout/error)。 */
+  /** 登录会话状态轮询(queued/running/done/timeout/error;viewer=true 时展示实时画面)。 */
   @Get('login/:sessionId')
   async loginStatus(@Param('sessionId') sessionId: string) {
     const raw = await this.redis.get(loginStatusKey(sessionId));
     if (!raw) throw new NotFoundException('登录会话不存在或已过期');
-    return JSON.parse(raw) as { state: string; detail?: string; updatedAt: string };
+    return JSON.parse(raw) as { state: string; detail?: string; viewer?: boolean; updatedAt: string };
+  }
+
+  /** viewer 模式最新截帧(JPEG base64;viewerLoginFromEnv 的远程登录画面)。 */
+  @Get('login/:sessionId/frame')
+  async loginFrame(@Param('sessionId') sessionId: string) {
+    const frame = await this.redis.get(loginFrameKey(sessionId));
+    return { frame };
+  }
+
+  /** viewer 模式输入转发:点击/文字/回车 → worker 经 CDP 注入远程页面。 */
+  @Post('login/:sessionId/input')
+  async loginInput(
+    @Param('sessionId') sessionId: string,
+    @Body() cmd: { type?: string; x?: number; y?: number; text?: string; key?: string },
+  ) {
+    if (cmd.type === 'click') {
+      const x = Math.max(0, Math.floor(Number(cmd.x) || 0));
+      const y = Math.max(0, Math.floor(Number(cmd.y) || 0));
+      await this.redis.lpush(loginCmdKey(sessionId), JSON.stringify({ type: 'click', x, y }));
+    } else if (cmd.type === 'type') {
+      const text = String(cmd.text ?? '').slice(0, 200);
+      if (text) await this.redis.lpush(loginCmdKey(sessionId), JSON.stringify({ type: 'type', text }));
+    } else if (cmd.type === 'key') {
+      const key = String(cmd.key ?? '');
+      if (/^[a-zA-Z0-9]$/.test(key) || ['Enter', 'Backspace', 'Escape', 'Tab'].includes(key)) {
+        await this.redis.lpush(loginCmdKey(sessionId), JSON.stringify({ type: 'key', key }));
+      }
+    } else {
+      throw new BadRequestException('未知指令类型');
+    }
+    return { ok: true };
   }
 
   @Post('accounts/:id/disable')

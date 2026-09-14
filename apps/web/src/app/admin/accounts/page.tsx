@@ -22,6 +22,7 @@ interface AccountRow {
 interface LoginState {
   state: 'queued' | 'running' | 'done' | 'timeout' | 'error';
   detail?: string;
+  viewer?: boolean;
   updatedAt: string;
 }
 
@@ -36,15 +37,105 @@ const STATUS_META: Record<string, { label: string; tone: 'good' | 'warn' | 'bad'
 const ENGINE_LABELS: Record<string, string> = {
   doubao: '豆包',
   deepseek: 'DeepSeek',
-  wenxin: '文心一言',
+  wenxin: '百度文心助手',
   qwen: '通义千问',
   yuanbao: '腾讯元宝',
 };
 
 /**
+ * 远程登录实时画面(viewer):worker 把远程/无头浏览器页面截帧写 Redis,
+ * 这里轮询展示;点击画面转发为远程鼠标点击,文字/回车按钮转发键盘输入——
+ * 生产 agentbay 云端浏览器与本地无头模式统一走此通道完成人工扫码/验证码登录。
+ */
+function ViewerPanel({ sessionId }: { sessionId: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [text, setText] = useState('');
+  const [hint, setHint] = useState('');
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  useEffect(() => {
+    const t = setInterval(async () => {
+      try {
+        const r = await api<{ frame: string | null }>(`/admin/login/${sessionId}/frame`);
+        if (r.frame) setSrc(`data:image/jpeg;base64,${r.frame}`);
+      } catch {
+        // 单帧失败忽略,下一轮重取
+      }
+    }, 1_000);
+    return () => clearInterval(t);
+  }, [sessionId]);
+
+  const send = (cmd: Record<string, unknown>) =>
+    api(`/admin/login/${sessionId}/input`, { method: 'POST', json: cmd }).catch((e) => setHint((e as Error).message));
+
+  const onClickImage = (e: React.MouseEvent<HTMLImageElement>) => {
+    const img = imgRef.current;
+    if (!img || !img.naturalWidth) return;
+    const rect = img.getBoundingClientRect();
+    const x = Math.round(((e.clientX - rect.left) * img.naturalWidth) / rect.width);
+    const y = Math.round(((e.clientY - rect.top) * img.naturalHeight) / rect.height);
+    void send({ type: 'click', x, y });
+  };
+
+  return (
+    <section className="card rise-2 p-4">
+      <h3 className="mb-2 text-sm font-semibold text-slate-900">远程登录实时画面</h3>
+      <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+        {src ? (
+          <img
+            ref={imgRef}
+            src={src}
+            alt="远程浏览器实时画面"
+            className="w-full cursor-crosshair select-none"
+            onClick={onClickImage}
+            draggable={false}
+          />
+        ) : (
+          <div className="flex h-64 items-center justify-center text-xs text-slate-400">等待第一帧…</div>
+        )}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <input
+          className="input h-9 flex-1 min-w-48"
+          placeholder="输入文字(手机号/验证码等),发送到画面中已聚焦的输入框"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && text) {
+              void send({ type: 'type', text });
+              setText('');
+            }
+          }}
+        />
+        <button
+          className="btn-primary h-9 px-4"
+          onClick={() => {
+            if (text) void send({ type: 'type', text });
+            setText('');
+          }}
+        >
+          发送文字
+        </button>
+        <button className="h-9 px-4 text-sm text-slate-600 hover:text-slate-900" onClick={() => void send({ type: 'key', key: 'Enter' })}>
+          回车
+        </button>
+        <button className="h-9 px-4 text-sm text-slate-600 hover:text-slate-900" onClick={() => void send({ type: 'key', key: 'Backspace' })}>
+          退格
+        </button>
+      </div>
+      <p className="mt-2 text-xs leading-5 text-slate-500">
+        操作方式:点击画面任意位置 = 远程鼠标点击;先用「点击」聚焦输入框,再「发送文字」;
+        手机扫码请对准画面中的二维码。画面约 1 秒一帧。
+        {hint && <span className="ml-2 text-bad">{hint}</span>}
+      </p>
+    </section>
+  );
+}
+
+/**
  * 平台后台 · 账号池人工登录(docs/04 §3.1 账号供给):
  * 登录需要真人扫码/验证码 → 后台登记账号档案后点「人工登录」,
- * worker 弹出真实浏览器窗口,操作者在窗口内完成登录,登录态持久化进账号档案。
+ * worker 打开浏览器(本地弹窗或远程 viewer 画面),操作者完成登录,登录态持久化进账号档案。
  */
 export default function AdminAccountsPage() {
   const queryClient = useQueryClient();
@@ -55,8 +146,9 @@ export default function AdminAccountsPage() {
   });
 
   const [newEngine, setNewEngine] = useState<string>('doubao');
+  const [newCount, setNewCount] = useState<number>(1);
   const [message, setMessage] = useState('');
-  const [loginStates, setLoginStates] = useState<Record<number, LoginState>>({});
+  const [loginStates, setLoginStates] = useState<Record<number, LoginState & { sessionId: string }>>({});
   const pollingRef = useRef<Map<number, NodeJS.Timeout>>(new Map());
 
   useEffect(
@@ -75,7 +167,7 @@ export default function AdminAccountsPage() {
     const timer = setInterval(async () => {
       try {
         const st = await api<LoginState>(`/admin/login/${sessionId}`);
-        setLoginStates((prev) => ({ ...prev, [profileId]: st }));
+        setLoginStates((prev) => ({ ...prev, [profileId]: { ...st, sessionId } }));
         if (st.state === 'done' || st.state === 'timeout' || st.state === 'error') {
           clearInterval(timer);
           pollingRef.current.delete(profileId);
@@ -87,7 +179,13 @@ export default function AdminAccountsPage() {
         pollingRef.current.delete(profileId);
         setLoginStates((prev) => ({
           ...prev,
-          [profileId]: { state: 'error', detail: '登录会话状态查询失败', updatedAt: new Date().toISOString() },
+          [profileId]: {
+            ...(prev[profileId] ?? { viewer: false }),
+            sessionId,
+            state: 'error' as const,
+            detail: '登录会话状态查询失败',
+            updatedAt: new Date().toISOString(),
+          },
         }));
       }
     }, 2_500);
@@ -100,7 +198,7 @@ export default function AdminAccountsPage() {
       const r = await api<{ sessionId: string }>(`/admin/accounts/${id}/login`, { method: 'POST' });
       setLoginStates((prev) => ({
         ...prev,
-        [id]: { state: 'queued', detail: '已提交,等待 worker 打开浏览器…', updatedAt: new Date().toISOString() },
+        [id]: { state: 'queued', sessionId: r.sessionId, detail: '已提交,等待 worker 打开浏览器…', updatedAt: new Date().toISOString() },
       }));
       startPolling(id, r.sessionId);
     } catch (e) {
@@ -111,9 +209,12 @@ export default function AdminAccountsPage() {
   const createAccount = async () => {
     setMessage('');
     try {
-      await api('/admin/accounts', { method: 'POST', json: { engine: newEngine } });
+      const r = await api<{ created: number }>('/admin/accounts/batch', {
+        method: 'POST',
+        json: { engine: newEngine, count: newCount },
+      });
       void queryClient.invalidateQueries({ queryKey: ['admin-accounts'] });
-      setMessage(`已登记 ${ENGINE_LABELS[newEngine] ?? newEngine} 账号档案,点「人工登录」完成账号态注入`);
+      setMessage(`已添加 ${r.created} 个 ${ENGINE_LABELS[newEngine] ?? newEngine} 账号(待登录),逐个点「人工登录」完成扫码`);
     } catch (e) {
       setMessage((e as Error).message);
     }
@@ -128,16 +229,39 @@ export default function AdminAccountsPage() {
     }
   };
 
+  // 每引擎存量统计(供给水位一目了然)
+  const engineSummary = WEB_ENGINES.map((e) => {
+    const rows = accounts.filter((a) => a.engine === e);
+    return {
+      engine: e,
+      total: rows.length,
+      available: rows.filter((a) => a.status === 'available').length,
+      pending: rows.filter((a) => a.status === 'pending_login' || a.status === 'login_required').length,
+    };
+  });
+
+  const viewerEntries = Object.entries(loginStates).filter(
+    ([, st]) => st.viewer && st.sessionId && (st.state === 'running' || st.state === 'queued'),
+  );
+
   return (
     <>
       <PageHeader
         title="账号池"
-        desc="五引擎账号档案与人工登录:登录需真人完成,登录态持久化后由采集 worker 复用"
+        desc="五引擎账号档案与人工登录:本地弹窗或远程实时画面(viewer)完成扫码/验证码,登录态持久化后由采集 worker 复用"
       />
 
       <section className="card rise p-6">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          {engineSummary.map((s) => (
+            <span key={s.engine} className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
+              {ENGINE_LABELS[s.engine] ?? s.engine}:{s.available}/{s.total} 可用
+              {s.pending > 0 && <span className="ml-1 text-warn">(待登录 {s.pending})</span>}
+            </span>
+          ))}
+        </div>
         <div className="mb-2 flex flex-wrap items-center gap-3">
-          <h2 className="font-semibold text-slate-900">登记新账号</h2>
+          <h2 className="font-semibold text-slate-900">添加账号</h2>
           <select className="input h-9 w-40" value={newEngine} onChange={(e) => setNewEngine(e.target.value)}>
             {WEB_ENGINES.map((e) => (
               <option key={e} value={e}>
@@ -145,16 +269,30 @@ export default function AdminAccountsPage() {
               </option>
             ))}
           </select>
+          <input
+            type="number"
+            min={1}
+            max={20}
+            className="input h-9 w-20"
+            value={newCount}
+            onChange={(e) => setNewCount(Math.min(Math.max(Math.floor(Number(e.target.value) || 1), 1), 20))}
+          />
+          <span className="text-xs text-slate-500">个</span>
           <button className="btn-primary h-9 px-5" onClick={() => void createAccount()}>
-            登记档案
+            添加账号
           </button>
           {message && <span className="text-xs text-slate-500">{message}</span>}
         </div>
         <p className="text-xs leading-5 text-slate-500">
-          流程:登记档案 → 点该行「人工登录」→ worker 弹出浏览器窗口(BROWSER_MODE=local 或 agentbay)→
-          在窗口内完成扫码/验证码 → 系统检测到登录成功后自动入可用池。登录等待上限 5 分钟,超时可重试。
+          流程:添加账号(待登录)→ 点该行「人工登录」→ 本地模式弹出浏览器窗口 / agentbay 与
+          LOGIN_VIEWER=1 模式在下方实时画面中操作(点击画面 = 远程鼠标,发送文字 = 远程键盘)→
+          系统检测到登录成功后自动入可用池。登录等待上限 5 分钟,超时可重试。
         </p>
       </section>
+
+      {viewerEntries.map(([profileId, st]) => (
+        <ViewerPanel key={profileId} sessionId={st.sessionId} />
+      ))}
 
       <section className="card rise-1 overflow-hidden">
         <table className="w-full text-sm">

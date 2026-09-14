@@ -11,7 +11,8 @@
     "start": "node dist/main.js",
     "seed:profiles": "tsx src/seed.ts",
     "seed:mock": "tsx src/seed-mock.ts",
-    "calibrate": "tsx scripts/calibrate.ts"
+    "calibrate": "tsx scripts/calibrate.ts",
+    "doubao-live": "tsx scripts/doubao-live.ts"
   },
   "dependencies": {
     "@geo/browser-session": "workspace:*",

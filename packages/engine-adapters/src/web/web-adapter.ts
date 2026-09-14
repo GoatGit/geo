@@ -84,6 +84,14 @@ export class DomWebAdapter implements EngineAdapter {
         timeout: this.site.navigationTimeoutMs,
       });
       await page.waitForTimeout(1_500);
+      // SPA 挂载等待:输入框就绪(最多 15s)再提问,否则输入会打在未初始化的编辑器上(豆包实测)
+      for (const sel of this.site.inputSelectors) {
+        const ready = await page
+          .waitForSelector(sel, { state: 'visible', timeout: 15_000 })
+          .then(() => true)
+          .catch(() => false);
+        if (ready) break;
+      }
 
       const login = await checkLogin(page, this.site);
       if (login.loggedIn === false) {
@@ -134,6 +142,7 @@ export class DomWebAdapter implements EngineAdapter {
         continue;
       }
       for (const attempt of [1, 2]) {
+        await page.waitForTimeout(800); // 输入事件落地缓冲(诊断实测:立即回车会丢提交)
         for (const send of this.site.submitSelectors) {
           try {
             const btn = page.locator(send).first();
@@ -159,13 +168,14 @@ export class DomWebAdapter implements EngineAdapter {
 
   /**
    * contenteditable 输入实测(qianwen/doubao):fill/type 的合成事件不被站点输入组件识别,
-   * 必须 keyboard.insertText(浏览器级输入事件,元素需已聚焦);fill 仅作降级。
+   * 必须 keyboard.insertText(浏览器级输入事件,元素需已聚焦)。
+   * ⚠ 不做回显校验回退:豆包输入框 innerText 读不出插入文本,误回退成 fill 会覆盖有效输入。
    */
   private async typeInto(page: Page, input: Locator, text: string): Promise<void> {
     await input.fill('', { timeout: 3_000 }).catch(() => undefined);
-    await page.keyboard.insertText(text);
-    const echoed = await input.innerText({ timeout: 1_000 }).catch(() => '');
-    if (!echoed.trim()) {
+    try {
+      await page.keyboard.insertText(text);
+    } catch {
       await input.fill(text, { timeout: 3_000 }).catch(() => undefined);
     }
   }

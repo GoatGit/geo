@@ -8,6 +8,15 @@ import { loadEnv } from './config/env';
 
 async function bootstrap() {
   const env = loadEnv();
+  // 生产环境启动即执行幂等 SQL 迁移 + 分区预建(docs/07 §13:发布流水线可替代)
+  if (process.env.AUTO_MIGRATE === '1') {
+    const { createDb, runMigrations, ensurePartitions } = await import('@geo/db');
+    const pool = createDb(env.databaseUrl, 2).pool;
+    await runMigrations(pool);
+    await ensurePartitions(pool);
+    await pool.end();
+    new Logger('migrate').log('migrations + partitions ready');
+  }
   (globalThis as { __geoEnv?: unknown }).__geoEnv = env;
 
   // rawBody:微信支付回调需对原始报文验签(docs/07 §9 STS/验签语义)

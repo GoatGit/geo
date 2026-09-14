@@ -1,0 +1,12 @@
+node_modules
+dist
+.next
+.git
+coverage
+*.tsbuildinfo
+docs
+scripts
+infra/local-data
+.env
+.env.*
+README.md

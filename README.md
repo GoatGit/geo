@@ -49,10 +49,14 @@ worker 调度采集(mock 回放 5 引擎)→ 排名透视/漏斗/口碑/引用�
 `BROWSER_MODE=local` 用本机 Chrome 按账号档案持久化浏览器 profile(自建降级路径);
 `BROWSER_MODE=agentbay` 走无影云端浏览器(需 Pro 权益包,先过 docs/07 §13 PoC 闸门)。
 两者都以 DOM 适配器(`@geo/engine-adapters` 的 `DomWebAdapter` + 五引擎站点配置)真实采集。
-流程:平台后台「账号池」登记档案 → 点「人工登录」→ worker 弹出浏览器窗口 →
+流程:平台后台「账号池」登记档案 → 点「人工登录」→ 本地模式弹出浏览器窗口 /
+**远程 viewer 模式(agentbay 自动启用,local 可设 `LOGIN_VIEWER=1`)在后台页面展示实时画面:
+点击画面 = 远程鼠标点击,发送文字/回车 = 远程键盘,云端 CDP 浏览器无需本地窗口** →
 操作者扫码/验证码登录 → 登录态持久化、档案转可用 → 调度采集即走真实引擎。
 采集期间登录态失效会被标记 `login_required`(不扣健康分),在账号池页一键重登。
-选择器为多级回退链,页面改版只需校准 `sites.ts` 并升 schemaVersion(docs/04 §7)。
+选择器为多级回退链,页面改版只需校准 `sites.ts` 并升 schemaVersion(docs/04 §7);
+实测校准要点已按引擎固化在该文件注释中(豆包 headless 登出/message 容器、qwen insertText
+输入与 aria 发送按钮、yuanbao agent-dialogue 容器等)。
 
 ## 测试与质量
 

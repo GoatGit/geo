@@ -28,6 +28,23 @@ export const loginStatusKey = (sessionId: string) => `geo:login:status:${session
 /** 登录状态 key 保留 1h:后台展示窗口足够,避免 Redis 残留。 */
 export const LOGIN_STATUS_TTL_SEC = 3600;
 
+/**
+ * 远程登录可视化操控(生产 BROWSER_MODE=agentbay 时浏览器在云端,操作者无法触碰本地窗口):
+ * worker 把远程页面截帧(JPEG base64)写 frame key,后台轮询展示;
+ * 后台把点击/文字/回车指令 LPUSH 进 cmd 队列,worker 经 CDP 注入远程页面。
+ * 本地模式同样适用(无头 + viewer,不再依赖弹窗)。
+ */
+export const loginFrameKey = (sessionId: string) => `geo:login:frame:${sessionId}`;
+export const loginCmdKey = (sessionId: string) => `geo:login:cmd:${sessionId}`;
+/** 截帧 key 保留 120s:覆盖后台轮询间隔,避免崩溃残留。 */
+export const LOGIN_FRAME_TTL_SEC = 120;
+
+/** 后台 → worker 的远程操控指令。 */
+export type LoginInputCommand =
+  | { type: 'click'; x: number; y: number }
+  | { type: 'type'; text: string }
+  | { type: 'key'; key: string };
+
 /** API → Worker 登录请求载荷。 */
 export interface LoginRequest {
   sessionId: string;
@@ -44,5 +61,7 @@ export interface LoginRequest {
 export interface LoginStatus {
   state: 'queued' | 'running' | 'done' | 'timeout' | 'error';
   detail?: string;
+  /** true = viewer 远程操控模式:后台应展示实时画面并转发输入 */
+  viewer?: boolean;
   updatedAt: string;
 }

@@ -17,6 +17,8 @@ export interface LocalBrokerConfig {
   /** 空闲多久后关闭浏览器进程(ms);0 = 用完即关 */
   idleCloseMs: number;
   maxConcurrent: number;
+  /** 远程可视化登录模式:登录会话也无头,操作者经后台 viewer 操控(生产 agentbay 同构) */
+  viewerLogin?: boolean;
 }
 
 /**
@@ -98,7 +100,8 @@ export class LocalSessionBroker implements SessionBroker {
     try {
       const context = await chromium.launchPersistentContext(userDataDir, {
         channel: this.config.channel,
-        headless: profile.purpose === 'login' ? false : this.config.headless,
+        // viewer 登录模式:登录会话也无头(操作者经后台 viewer 操控,生产与 agentbay 同构)
+        headless: profile.purpose === 'login' && this.config.viewerLogin ? true : this.config.headless,
         viewport: readViewport(profile.fingerprint) ?? { width: 1366, height: 850 },
         locale: 'zh-CN',
         args: ['--disable-blink-features=automation-controlled'],
