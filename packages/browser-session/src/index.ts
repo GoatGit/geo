@@ -3,7 +3,7 @@ import { LocalSessionBroker } from './local-broker';
 import { MockSessionBroker } from './mock-broker';
 import type { SessionBroker } from './types';
 
-export { AgentBaySessionBroker, AgentBayClient, fingerprintHash } from './agentbay-broker';
+export { AgentBaySessionBroker, fingerprintHash } from './agentbay-broker';
 export { MockSessionBroker } from './mock-broker';
 export { LocalSessionBroker, type LocalBrokerConfig } from './local-broker';
 export * from './types';

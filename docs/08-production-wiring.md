@@ -72,19 +72,22 @@ ALIPAY_PUBLIC_KEY_PATH=/app/certs/alipay/alipay_public_key.pem
 
 **回调地址**:支付回调经 `X-Forwarded-Proto` 组装,域名走 `https://geo.gemux.cn/api/billing/notify/...`;确认 CLB 443 已透传该头(当前配置已透传)。密钥文件路径以镜像内为准,Dockerfile 部署时用 build secret 注入,不要写进仓库。
 
-## 4. 远程 CDP 浏览器(AgentBay)——待 OAuth 授权
+## 4. 远程 CDP 浏览器(AgentBay)——待控制台复制密钥
 
-代码侧已就绪:`packages/browser-session/src/agentbay-broker.ts`(create → 等待 ready → 取 CDP wss 端点 → 释放),worker `connectOverCDP` 已支持。
+代码侧已校准(W1-2 完成):broker 按 POP RPC 协议重写——端点 `agentbay.cn-shanghai.aliyuncs.com`、
+Version 2025-05-06、`Authorization: Bearer <akm-key>` 在 form body(与官方 wuying-agentbay-sdk 一致)。
 
-一键脚本(浏览器弹出阿里云授权页,完成登录后自动走完全部接线 + PoC):
+**密钥双层结构(实测)**:`ak-` KeyId 仅用于管理,会话鉴权必须用 `akm-` 完整密钥;
+完整值仅在控制台创建时展示一次,API 只回 KeyId、列表打码。
+
+唯一的人工步骤(约 1 分钟):
+> AgentBay 控制台(无影 AI)→ API Key → 创建(或查看已有)→ 复制 `akm-` 完整值
+
+之后一键接线:
 ```bash
-scripts/wire-agentbay.sh
-# 已有 Key 时:AGENTBAY_TOKEN=<key> scripts/wire-agentbay.sh --skip-login
+AGENTBAY_TOKEN=akm-xxxx scripts/wire-agentbay.sh
+# 脚本会:本地验证密钥(建/删测试会话)→ SAE geo-worker 切 agentbay 模式 → 触发采集 PoC 对比 query_runs
 ```
-脚本内容:OAuth 登录 → `apikey create --name geo-prod` → SAE geo-worker 环境变量切换
-(`BROWSER_MODE=agentbay` + `AGENTBAY_API_TOKEN` + 端点/镜像)→ 触发一轮采集 PoC 并对比 `query_runs`。
-
-前提:账号已开通 AgentBay(百炼云沙箱/Browser Use),且可用 `browser_latest` 镜像与 CDP 端点能力。
 
 4. **PoC 验证清单**(脚本跑完后人工复核):
    - 单引擎手工触发一轮,确认 `query_runs.adapter_version` 与快照落 OSS;
