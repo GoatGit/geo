@@ -26,15 +26,17 @@
 **预埋已完成**:geo-api 已带 `ALIYUN_SMS_ACCESS_KEY_ID/SECRET`、`ALIYUN_SMS_SIGN_NAME=青柠GEO` 重启生效;
 `SMS_PROVIDER` 当前仍为 `console`(`NODE_ENV=staging` 时接口返回 `devCode`),登录不受影响。
 
-步骤(控制台或等价 OpenAPI):
+依赖链(实测确认):验证码模板 → 关联签名 → 资质 → 证件材料;且**资质创建无 OpenAPI**(仅有查询/删除/更换),必须控制台上传。
 
-1. **资质**(create-sms-qualification):上传营业执照(企业)或身份证(个人)。签名审核必须挂资质,无资质无法提交。
-2. **签名**:名称建议 `青柠GEO`,来源"网站名"(需 gemux.cn ICP 备案可查)。审核约 2h–2 天。
-3. **模板**:类型"验证码",内容:
-   `您的验证码为${code}，5分钟内有效，请勿泄露。`
-4. **审核通过后**,只需两步:
-   - SAE `geo-api` 环境变量加 `ALIYUN_SMS_TEMPLATE_CODE=SMS_xxxxxxxx`(模板审核通过后分配的 code),并把 `SMS_PROVIDER` 改为 `aliyun`、`NODE_ENV` 改为 `production`(停发 devCode);
-   - 重启 geo-api。
+唯一的人工步骤(约 3 分钟):
+> 阿里云短信控制台 → 国内消息 → 资质管理 → 添加资质(上传营业执照或身份证照片)→ 提交审核
+
+之后一切自动化:
+```bash
+scripts/wire-sms.sh   # 自动等资质审核通过 → 提交签名「青柠GEO」→ 提交验证码模板 → 轮询审核 → 打印收尾环境变量
+```
+签名/模板审核通过后,把脚本打印的 `ALIYUN_SMS_TEMPLATE_CODE` 加到 SAE geo-api,
+同时改 `SMS_PROVIDER=aliyun`、`NODE_ENV=production`(停发 devCode),重启 geo-api。
 
 回滚:把 `SMS_PROVIDER` 改回 `console` 即可,登录立即恢复。
 
@@ -70,27 +72,21 @@ ALIPAY_PUBLIC_KEY_PATH=/app/certs/alipay/alipay_public_key.pem
 
 **回调地址**:支付回调经 `X-Forwarded-Proto` 组装,域名走 `https://geo.gemux.cn/api/billing/notify/...`;确认 CLB 443 已透传该头(当前配置已透传)。密钥文件路径以镜像内为准,Dockerfile 部署时用 build secret 注入,不要写进仓库。
 
-## 4. 远程 CDP 浏览器(AgentBay)——待订阅与 Token
+## 4. 远程 CDP 浏览器(AgentBay)——待 OAuth 授权
 
 代码侧已就绪:`packages/browser-session/src/agentbay-broker.ts`(create → 等待 ready → 取 CDP wss 端点 → 释放),worker `connectOverCDP` 已支持。
 
-**API Key 获取(本机已装 AgentBay CLI)**:
+一键脚本(浏览器弹出阿里云授权页,完成登录后自动走完全部接线 + PoC):
 ```bash
-~/.aliyun/agentbay login                 # 浏览器 OAuth(阿里云账号授权)
-~/.aliyun/agentbay apikey create --name geo-prod
+scripts/wire-agentbay.sh
+# 已有 Key 时:AGENTBAY_TOKEN=<key> scripts/wire-agentbay.sh --skip-login
 ```
-1. 开通 AgentBay(百炼云沙箱/Browser Use),确认可用 `browser_latest` 镜像与 CDP 端点能力。
-2. 按 CLI 流程创建 API Token(`geo-prod`)。
-3. SAE `geo-worker` 环境变量:
+脚本内容:OAuth 登录 → `apikey create --name geo-prod` → SAE geo-worker 环境变量切换
+(`BROWSER_MODE=agentbay` + `AGENTBAY_API_TOKEN` + 端点/镜像)→ 触发一轮采集 PoC 并对比 `query_runs`。
 
-```text
-BROWSER_MODE=agentbay
-AGENTBAY_API_TOKEN=<token>
-AGENTBAY_API_ENDPOINT=https://agentbay.cn-shanghai.aliyuncs.com
-AGENTBAY_IMAGE_ID=browser_latest
-```
+前提:账号已开通 AgentBay(百炼云沙箱/Browser Use),且可用 `browser_latest` 镜像与 CDP 端点能力。
 
-4. **PoC 验证清单**(切换后先小流量,docs/07 §13):
+4. **PoC 验证清单**(脚本跑完后人工复核):
    - 单引擎手工触发一轮,确认 `query_runs.adapter_version` 与快照落 OSS;
    - 引用抽取命中(normalize/parse 无乱码);
    - 会话释放后 AgentBay 控制台实例数回落;
