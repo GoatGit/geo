@@ -82,7 +82,6 @@ export default function LandingPage() {
             </span>
             <span>
               <span className="block text-[15px] font-semibold leading-4 text-white">青柠GEO</span>
-              <span className="block text-[10px] leading-3.5 text-slate-500">AI 搜索品牌可见性监测</span>
             </span>
           </Link>
           <nav className="hidden items-center gap-7 text-sm text-slate-300 md:flex">

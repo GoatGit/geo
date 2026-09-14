@@ -146,7 +146,6 @@ function Sidebar({ pathname }: { pathname: string }) {
             {!rail && (
               <span>
                 <span className="block text-[15px] font-semibold leading-4 tracking-wide text-white">青柠GEO</span>
-                <span className="block text-[10px] leading-4 text-slate-500">AI 搜索品牌可见性监测</span>
               </span>
             )}
           </Link>

@@ -82,7 +82,6 @@ export default function LoginPage() {
             </span>
             <span>
               <span className="block text-base font-semibold leading-4 text-white">青柠GEO</span>
-              <span className="block text-[10px] text-slate-500">AI 搜索品牌可见性监测</span>
             </span>
           </Link>
 
