@@ -285,8 +285,7 @@ export default function BillingPage() {
                 {activeOrder.qrDataUrl ? (
                   <div className="mx-auto mt-4 w-fit rounded-xl border border-slate-100 bg-white p-2">
                     {/* 服务端签发的收银台二维码(data URL),扫码后由渠道异步回调发货 */}
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={activeOrder.qrDataUrl} alt="支付二维码" width={216} height={216} />
+                                  <img src={activeOrder.qrDataUrl} alt="支付二维码" width={216} height={216} />
                   </div>
                 ) : (
                   <p className="mt-6 rounded-lg bg-slate-50 px-3 py-4 text-xs leading-5 text-slate-500">
