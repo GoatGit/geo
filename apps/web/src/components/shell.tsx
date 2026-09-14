@@ -2,99 +2,348 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, brandStore, tokenStore } from '../lib/api';
+import {
+  IconChevron,
+  IconConfig,
+  IconCite,
+  IconDashboard,
+  IconList,
+  IconLogo,
+  IconLogout,
+  IconPlus,
+  IconPulse,
+  IconRank,
+  IconReport,
+  IconShield,
+  IconSwap,
+  IconVoice,
+} from './icons';
 
 interface BrandRow {
   id: number;
   name: string;
 }
 
-const NAV = [
-  { href: '/dashboard', label: '总览' },
-  { href: '/monitor/rankings', label: '排名透视' },
-  { href: '/monitor/citations', label: '引用源' },
-  { href: '/reputation', label: '口碑分析' },
-  { href: '/config/questions', label: '监控问题' },
-  { href: '/config/recognition', label: '识别口径' },
-  { href: '/config/collection', label: '采集状态' },
-  { href: '/reports', label: '报告中心' },
+type NavItem = { href: string; label: string; icon: React.ReactNode };
+type NavGroup =
+  | { kind: 'item'; item: NavItem }
+  | { kind: 'group'; label: string; icon: React.ReactNode; items: NavItem[] };
+
+/** 导航重组(docs/01 IA):一级只留主干,细碎功能收进「配置」分组。 */
+const NAV: NavGroup[] = [
+  { kind: 'item', item: { href: '/dashboard', label: '总览', icon: <IconDashboard /> } },
+  {
+    kind: 'group',
+    label: '监测',
+    icon: <IconRank />,
+    items: [
+      { href: '/monitor/rankings', label: '排名透视', icon: <IconRank /> },
+      { href: '/monitor/citations', label: '引用源分析', icon: <IconCite /> },
+    ],
+  },
+  { kind: 'item', item: { href: '/reputation', label: '口碑分析', icon: <IconVoice /> } },
+  { kind: 'item', item: { href: '/reports', label: '报告中心', icon: <IconReport /> } },
+  {
+    kind: 'group',
+    label: '配置',
+    icon: <IconConfig />,
+    items: [
+      { href: '/config/questions', label: '监控问题', icon: <IconList /> },
+      { href: '/config/recognition', label: '识别口径', icon: <IconShield /> },
+      { href: '/config/collection', label: '采集状态', icon: <IconPulse /> },
+    ],
+  },
 ];
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const router = useRouter();
   const isLogin = pathname === '/login';
-
-  const brands = useQuery({
-    queryKey: ['brands'],
-    queryFn: () => api<BrandRow[]>('/brands'),
-    enabled: !isLogin && !!tokenStore.access,
-  });
-
   if (isLogin) return <div className="min-h-screen">{children}</div>;
+  return <ConsoleShell pathname={pathname}>{children}</ConsoleShell>;
+}
+
+function ConsoleShell({ pathname, children }: { pathname: string; children: React.ReactNode }) {
+  const router = useRouter();
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if (!tokenStore.access) router.replace('/login');
+    else setReady(true);
+  }, [router]);
+  if (!ready) return null;
 
   return (
-    <div className="flex min-h-screen">
-      <aside className="flex w-56 flex-col bg-slate-900 text-slate-200">
-        <div className="px-5 py-5">
-          <div className="text-lg font-semibold tracking-wide text-white">GeoLens</div>
-          <div className="text-xs text-slate-400">AI 搜索品牌可见性监测</div>
-        </div>
-        <BrandSwitcher brands={brands} />
-        <nav className="mt-4 flex-1 space-y-0.5 px-2">
-          {NAV.map((n) => {
-            const active = pathname.startsWith(n.href);
-            return (
-              <Link
-                key={n.href}
-                href={n.href}
-                className={`block rounded px-3 py-2 text-sm ${active ? 'bg-brand text-white' : 'hover:bg-slate-800'}`}
-              >
-                {n.label}
-              </Link>
-            );
-          })}
-        </nav>
-        <button
-          className="m-4 rounded px-3 py-2 text-left text-sm text-slate-400 hover:bg-slate-800"
-          onClick={() => {
-            tokenStore.clear();
-            router.replace('/login');
-          }}
-        >
-          退出登录
-        </button>
-      </aside>
-      <main className="flex-1 overflow-x-auto p-6">{children}</main>
+    <div className="flex min-h-screen bg-slate-50">
+      <Sidebar pathname={pathname} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <TopBar />
+        <main key={pathname} className="animate-fade-in mx-auto w-full max-w-6xl flex-1 px-8 py-7">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }
 
-function BrandSwitcher({ brands: query }: { brands: { data?: BrandRow[] } }) {
-  const current = brandStore.get();
-  const rows = query.data ?? [];
+/* ============ 侧栏 ============ */
+
+function Sidebar({ pathname }: { pathname: string }) {
   return (
-        <div className="px-4">
-          <label className="mb-1 block text-xs text-slate-400">品牌工作区</label>
-          <select
-            className="w-full rounded bg-slate-800 px-2 py-1.5 text-sm text-white"
-            value={current ?? rows[0]?.id ?? ''}
-            onChange={(e) => {
-              brandStore.set(Number(e.target.value));
-              window.location.reload();
-            }}
+    <aside className="sticky top-0 flex h-screen w-[232px] shrink-0 flex-col bg-ink-950 text-slate-300">
+      <Link href="/dashboard" className="rise flex items-center gap-2.5 px-5 pb-2 pt-6">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-glow">
+          <IconLogo width={18} height={18} />
+        </span>
+        <span>
+          <span className="block text-[15px] font-semibold leading-4 tracking-wide text-white">GeoLens</span>
+          <span className="block text-[10px] leading-4 text-slate-500">AI 搜索品牌可见性监测</span>
+        </span>
+      </Link>
+
+      <nav className="mt-4 flex-1 space-y-0.5 overflow-y-auto px-3 pb-4">
+        {NAV.map((g) =>
+          g.kind === 'item' ? (
+            <NavLink key={g.item.href} item={g.item} pathname={pathname} />
+          ) : (
+            <NavCollapsible key={g.label} group={g} pathname={pathname} />
+          ),
+        )}
+      </nav>
+
+      <div className="border-t border-white/5 p-3">
+        <Link
+          href="/brands/new"
+          className="flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] text-slate-400 transition-colors hover:bg-white/5 hover:text-brand-300"
+        >
+          <IconPlus width={15} height={15} />
+          新建品牌
+        </Link>
+        <Link
+          href="/"
+          className="flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] text-slate-400 transition-colors hover:bg-white/5 hover:text-brand-300"
+        >
+          <IconSwap width={15} height={15} />
+          返回官网
+        </Link>
+      </div>
+    </aside>
+  );
+}
+
+function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
+  const active = pathname.startsWith(item.href);
+  return (
+    <Link
+      href={item.href}
+      className={`group relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium transition-all duration-150 ${
+        active
+          ? 'bg-gradient-to-r from-brand-600/90 to-brand-500/70 text-white shadow-sm'
+          : 'text-slate-400 hover:bg-white/5 hover:text-slate-100'
+      }`}
+    >
+      <span className={active ? 'text-brand-200' : 'text-slate-500 transition-colors group-hover:text-brand-300'}>
+        {item.icon}
+      </span>
+      {item.label}
+    </Link>
+  );
+}
+
+function NavCollapsible({
+  group,
+  pathname,
+}: {
+  group: Extract<NavGroup, { kind: 'group' }>;
+  pathname: string;
+}) {
+  const expandedByDefault = group.items.some((i) => pathname.startsWith(i.href));
+  const [open, setOpen] = useState(expandedByDefault);
+  const active = group.items.some((i) => pathname.startsWith(i.href));
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={`group flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors ${
+          active ? 'text-brand-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-100'
+        }`}
+      >
+        <span className={active ? 'text-brand-300' : 'text-slate-500 transition-colors group-hover:text-brand-300'}>
+          {group.icon}
+        </span>
+        <span className="flex-1 text-left">{group.label}</span>
+        <IconChevron
+          width={14}
+          height={14}
+          className={`text-slate-500 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+      <div
+        className="grid overflow-hidden transition-[grid-template-rows] duration-200 ease-out"
+        style={{ gridTemplateRows: open ? '1fr' : '0fr' }}
+      >
+        <div className="min-h-0">
+          <div className="ml-5 space-y-0.5 border-l border-white/10 py-1 pl-2">
+            {group.items.map((item) => {
+              const itemActive = pathname.startsWith(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`relative flex items-center gap-2 rounded-md px-3 py-1.5 text-[13px] transition-colors ${
+                    itemActive ? 'text-brand-300' : 'text-slate-400 hover:text-slate-100'
+                  }`}
+                >
+                  {itemActive && (
+                    <span className="absolute -left-px top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-brand-400" />
+                  )}
+                  <span className="text-slate-500">{item.icon}</span>
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============ 顶栏:品牌切换器 + 账户 ============ */
+
+function TopBar() {
+  return (
+    <header className="sticky top-0 z-10 border-b border-slate-200/70 bg-slate-50/80 px-8 py-3 backdrop-blur">
+      <div className="mx-auto flex w-full max-w-6xl items-center justify-between">
+        <BrandSwitcher />
+        <AccountMenu />
+      </div>
+    </header>
+  );
+}
+
+function BrandSwitcher() {
+  const query = useQuery({
+    queryKey: ['brands'],
+    queryFn: () => api<BrandRow[]>('/brands'),
+  });
+  const brands = query.data ?? [];
+  const current = brandStore.get();
+  const brand = brands.find((b) => b.id === current) ?? brands[0];
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const close = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, []);
+
+  const pick = (id: number) => {
+    brandStore.set(id);
+    setOpen(false);
+    window.location.reload();
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm transition-all hover:border-brand-300 hover:shadow-card-hover"
+      >
+        <span className="flex h-5 w-5 items-center justify-center rounded bg-gradient-to-br from-brand-400 to-brand-600 text-[10px] font-bold text-white">
+          {(brand?.name ?? '?').slice(0, 1)}
+        </span>
+        {brand?.name ?? '选择品牌'}
+        {brands.length > 0 && (
+          <span className="rounded bg-slate-100 px-1 text-[10px] text-slate-500">{brands.length}</span>
+        )}
+        <IconChevron
+          width={13}
+          height={13}
+          className={`text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      {open && (
+        <div className="card rise absolute left-0 top-full z-20 mt-2 w-60 p-1.5">
+          {brands.length === 0 && <p className="px-3 py-2 text-xs text-slate-400">还没有品牌</p>}
+          {brands.map((b) => (
+            <button
+              key={b.id}
+              onClick={() => pick(b.id)}
+              className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-brand-50 ${
+                brand?.id === b.id ? 'text-brand-700' : 'text-slate-700'
+              }`}
+            >
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-brand-400 to-brand-600 text-[10px] font-bold text-white">
+                {b.name.slice(0, 1)}
+              </span>
+              <span className="flex-1 truncate">{b.name}</span>
+              {brand?.id === b.id && <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />}
+            </button>
+          ))}
+          <div className="my-1 border-t border-slate-100" />
+          <Link
+            href="/brands/new"
+            onClick={() => setOpen(false)}
+            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 transition-colors hover:bg-brand-50 hover:text-brand-700"
           >
-            {rows.length === 0 && <option value="">暂无品牌</option>}
-            {rows.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </select>
-          <Link href="/brands/new" className="mt-2 block text-xs text-brand-muted hover:underline">
-            + 新建品牌
+            <IconPlus width={14} height={14} />
+            新建品牌
           </Link>
         </div>
+      )}
+    </div>
+  );
+}
+
+function AccountMenu() {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const close = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-ink-700 to-ink-900 text-xs font-semibold text-white shadow-sm transition-transform hover:scale-105"
+      >
+        我
+      </button>
+      {open && (
+        <div className="card rise absolute right-0 top-full z-20 mt-2 w-44 p-1.5">
+          <Link
+            href="/"
+            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-brand-50 hover:text-brand-700"
+          >
+            <IconSwap width={14} height={14} />
+            返回官网
+          </Link>
+          <button
+            onClick={() => {
+              tokenStore.clear();
+              router.replace('/login');
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-600 hover:bg-red-50 hover:text-bad"
+          >
+            <IconLogout width={14} height={14} />
+            退出登录
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

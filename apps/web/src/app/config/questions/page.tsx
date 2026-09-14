@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, brandStore } from '@/lib/api';
-import { Skeleton } from '@/components/ui';
+import { PageHeader, Skeleton } from '@/components/ui';
 
 interface QuestionRow {
   id: number;
@@ -73,18 +73,21 @@ export default function QuestionsPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">监控问题管理</h1>
-        {q && (
-          <div className="flex gap-4 text-xs text-slate-500">
-            <QuotaBar label="排名词" used={q.ranking.used} limit={q.ranking.limit} />
-            <QuotaBar label="口碑词" used={q.reputation.used} limit={q.reputation.limit} />
-            <span className="rounded bg-slate-100 px-2 py-1">套餐:{q.plan}</span>
-          </div>
-        )}
-      </header>
+      <PageHeader
+        title="监控问题管理"
+        desc="排名词驱动排名透视,口碑词驱动口碑分析;AI 自动分类并拓写为用户真实问法。"
+        actions={
+          q && (
+            <div className="flex items-center gap-4 text-xs text-slate-500">
+              <QuotaBar label="排名词" used={q.ranking.used} limit={q.ranking.limit} />
+              <QuotaBar label="口碑词" used={q.reputation.used} limit={q.reputation.limit} />
+              <span className="rounded-md bg-slate-100 px-2 py-1 font-medium capitalize text-slate-600">{q.plan}</span>
+            </div>
+          )
+        }
+      />
 
-      <section className="rounded-lg border bg-white p-5">
+      <section className="card rise-1 p-6">
         <h2 className="mb-2 text-sm font-medium">批量添加(每行一条,AI 自动分类排名词/口碑词并拓写为自然问法)</h2>
         <textarea
           className="h-32 w-full rounded border p-3 text-sm"
@@ -104,9 +107,9 @@ export default function QuestionsPage() {
         </div>
       </section>
 
-      <section className="overflow-hidden rounded-lg border bg-white">
+      <section className="table-wrap rise-2">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs text-slate-500">
+          <thead className="table-head">
             <tr>
               <th className="px-4 py-2.5">类型</th>
               <th className="px-4 py-2.5">原文</th>

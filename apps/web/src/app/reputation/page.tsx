@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { api, useBrandId } from '@/lib/queries';
-import { Skeleton, EmptyState } from '@/components/ui';
+import { EmptyState, PageHeader, Skeleton } from '@/components/ui';
 
 interface ReputationDto {
   totals: { runs: number; pos: number; neu: number; neg: number; sentimentScore: number | null; hasData: boolean };
@@ -28,19 +28,21 @@ export default function ReputationPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold">口碑分析</h1>
-        <p className="text-sm text-slate-500">
-          情绪得分 <span className="metric-num text-2xl font-semibold">{data.totals.sentimentScore}</span>
-          <span className="ml-3">
-            正 {data.totals.pos} / 中 {data.totals.neu} / 负 {data.totals.neg}
-          </span>
-        </p>
-      </header>
+      <PageHeader
+        title="口碑分析"
+        desc={
+          <>
+            情绪得分 <b className="metric-num text-lg text-slate-800">{data.totals.sentimentScore}</b>
+            <span className="ml-3 text-slate-500">
+              正 {data.totals.pos} / 中 {data.totals.neu} / 负 {data.totals.neg}
+            </span>
+          </>
+        }
+      />
 
-      <section className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-lg border bg-white p-5">
-          <h2 className="mb-2 font-medium text-good">优势印象(巩固)</h2>
+      <section className="grid gap-4 lg:grid-cols-2 rise-1">
+        <div className="card p-6">
+          <h2 className="mb-3 font-semibold text-good">优势印象 · 巩固</h2>
           <ul className="space-y-1.5 text-sm">
             {data.strengths.map((s) => (
               <li key={s.term} className="flex justify-between" title={s.excerpts[0]}>
@@ -51,8 +53,8 @@ export default function ReputationPage() {
             {data.strengths.length === 0 && <li className="text-slate-400">暂无</li>}
           </ul>
         </div>
-        <div className="rounded-lg border bg-white p-5">
-          <h2 className="mb-2 font-medium text-warn">待攻印象(攻坚)</h2>
+        <div className="card p-6">
+          <h2 className="mb-3 font-semibold text-warn">待攻印象 · 攻坚</h2>
           <ul className="space-y-1.5 text-sm">
             {data.weaknesses.map((s) => (
               <li key={s.term} className="flex justify-between" title={s.excerpts[0]}>
@@ -65,8 +67,8 @@ export default function ReputationPage() {
         </div>
       </section>
 
-      <section className="rounded-lg border bg-white p-5">
-        <h2 className="mb-2 font-medium">原文证据</h2>
+      <section className="card rise-2 p-6">
+        <h2 className="mb-3 font-semibold text-slate-900">原文证据</h2>
         <ul className="space-y-2">
           {data.samples.map((s, i) => (
             <li key={i} className="rounded border-l-4 border-brand bg-slate-50 px-3 py-2 text-sm">

@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { api, useBrandId } from '@/lib/queries';
-import { Skeleton, EmptyState } from '@/components/ui';
+import { EmptyState, PageHeader, Skeleton } from '@/components/ui';
 
 interface StatusDto {
   plan: { engines: string[]; surfaces: string[]; freq: number; nextRunAt: string | null; active: boolean } | null;
@@ -26,20 +26,20 @@ export default function CollectionPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold">采集状态</h1>
-        <p className="text-sm text-slate-500">
-          {data.plan
+      <PageHeader
+        title="采集状态"
+        desc={
+          data.plan
             ? `计划:每日 ${data.plan.freq} 轮 · 引擎 ${data.plan.engines.join(' / ')}${
                 data.plan.nextRunAt ? ` · 下轮 ${new Date(data.plan.nextRunAt).toLocaleString('zh-CN')}` : ' · 待问题配置后触发首轮'
               }`
-            : '无采集计划'}
-        </p>
-      </header>
+            : '无采集计划'
+        }
+      />
 
       <section className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-lg border bg-white p-5">
-          <h2 className="mb-3 font-medium">引擎通道健康度</h2>
+        <div className="card rise-1 p-6">
+          <h2 className="mb-4 font-semibold text-slate-900">引擎通道健康度</h2>
           <table className="w-full text-xs">
             <thead className="text-left text-slate-400">
               <tr>
@@ -70,8 +70,8 @@ export default function CollectionPage() {
           </table>
         </div>
 
-        <div className="rounded-lg border bg-white p-5">
-          <h2 className="mb-3 font-medium">最近轮次</h2>
+        <div className="card p-6">
+          <h2 className="mb-4 font-semibold text-slate-900">最近轮次</h2>
           <ul className="space-y-2 text-sm">
             {data.rounds.map((r) => {
               const t = r.totals ?? {};
@@ -94,8 +94,8 @@ export default function CollectionPage() {
         </div>
       </section>
 
-      <section className="rounded-lg border bg-white p-5">
-        <h2 className="mb-2 font-medium">最近任务</h2>
+      <section className="card rise-2 p-6">
+        <h2 className="mb-3 font-semibold text-slate-900">最近任务</h2>
         <div className="flex flex-wrap gap-1.5">
           {data.lastRuns.slice(0, 60).map((r, i) => (
             <span

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, brandStore } from '@/lib/api';
-import { Skeleton } from '@/components/ui';
+import { PageHeader, Skeleton } from '@/components/ui';
 
 interface RecognitionRow {
   id: number;
@@ -51,15 +51,12 @@ export default function RecognitionPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold">识别口径管理</h1>
-        <p className="text-sm text-slate-500">
-          告诉系统哪些说法算「你」、哪些算「对手」——榜单与统计口径由此决定。自有产品线别名务必登记,
-          避免自家产品被当成竞品(竞品实测教训 A1)。
-        </p>
-      </header>
+      <PageHeader
+        title="识别口径管理"
+        desc="告诉系统哪些说法算「你」、哪些算「对手」——榜单与统计口径由此决定。自有产品线别名务必登记,避免自家产品被当成竞品。"
+      />
 
-      <section className="rounded-lg border bg-white p-5">
+      <section className="card rise-1 p-6">
         <h2 className="mb-2 text-sm font-medium">本品识别口径</h2>
         {self ? (
           <p className="text-sm">
@@ -71,7 +68,7 @@ export default function RecognitionPage() {
         )}
       </section>
 
-      <section className="rounded-lg border bg-white p-5">
+      <section className="card p-6">
         <h2 className="mb-2 text-sm font-medium">竞品清单({competitors.length})</h2>
         <ul className="space-y-1.5 text-sm">
           {competitors.map((c) => (
@@ -85,7 +82,7 @@ export default function RecognitionPage() {
         </ul>
       </section>
 
-      <section className="rounded-lg border bg-white p-5">
+      <section className="card rise-2 p-6">
         <h2 className="mb-3 text-sm font-medium">新增 / 更新口径</h2>
         <div className="flex flex-wrap items-center gap-2">
           <select className="rounded border px-2 py-1.5 text-sm" value={kind} onChange={(e) => setKind(e.target.value as never)}>

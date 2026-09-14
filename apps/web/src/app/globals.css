@@ -2,10 +2,88 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-slate-50 text-slate-900;
+@layer base {
+  html {
+    @apply antialiased;
+  }
+  body {
+    @apply bg-slate-50 text-slate-900;
+  }
+  ::selection {
+    @apply bg-brand-200/60;
+  }
+  /* 细滚动条(数据工作台气质) */
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-400;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
 }
 
-.metric-num {
-  @apply font-mono tabular-nums;
+@layer components {
+  /* 数据卡片 */
+  .card {
+    @apply rounded-xl border border-slate-200/70 bg-white shadow-card;
+  }
+  .card-hover {
+    @apply transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card-hover;
+  }
+
+  /* 按钮 */
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium
+      transition-all duration-150 active:scale-[.98] disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-brand-600 text-white shadow-sm hover:bg-brand-700 hover:shadow-md;
+  }
+  .btn-ghost {
+    @apply btn border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50;
+  }
+  .btn-soft {
+    @apply btn bg-brand-50 text-brand-700 hover:bg-brand-100;
+  }
+
+  /* 输入 */
+  .input {
+    @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400
+      transition-all duration-150 focus:border-brand-400 focus:outline-none focus:ring-4 focus:ring-brand-100;
+  }
+
+  /* 表格 */
+  .table-wrap {
+    @apply overflow-hidden rounded-xl border border-slate-200/70 bg-white shadow-card;
+  }
+  .table-head {
+    @apply bg-slate-50/80 text-left text-xs font-medium text-slate-500;
+  }
+  .table-row {
+    @apply border-t border-slate-100 transition-colors hover:bg-brand-50/30;
+  }
+
+  /* 段落进场(可加 delay-stagger) */
+  .rise {
+    @apply animate-fade-up;
+  }
+  .rise-1 {
+    @apply animate-fade-up [animation-delay:60ms];
+  }
+  .rise-2 {
+    @apply animate-fade-up [animation-delay:120ms];
+  }
+  .rise-3 {
+    @apply animate-fade-up [animation-delay:180ms];
+  }
+
+  .metric-num {
+    @apply font-mono tabular-nums;
+  }
 }

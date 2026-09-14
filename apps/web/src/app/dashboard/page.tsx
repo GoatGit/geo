@@ -1,8 +1,10 @@
 'use client';
 
+import Link from 'next/link';
 import { MetricCardView } from '@/components/metric-card';
-import { Badge, EmptyState, Skeleton, pct } from '@/components/ui';
-import { useRankings } from '../../lib/queries';
+import { Badge, EmptyState, PageHeader, Skeleton, pct } from '@/components/ui';
+import { IconArrowRight } from '@/components/icons';
+import { useRankings } from '@/lib/queries';
 
 /** 总览(docs/01 ①):品牌健康卡 + 今日关键指标 + 行动清单。 */
 export default function DashboardPage() {
@@ -13,13 +15,21 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold">总览</h1>
-        <p className="text-sm text-slate-500">
-          数据截至 <span className="metric-num">{new Date(data.asOf).toLocaleString('zh-CN')}</span>
-          <Badge label={data.source === 'realtime' ? '实时' : '日结'} />
-        </p>
-      </header>
+      <PageHeader
+        title="总览"
+        desc={
+          <>
+            数据截至 <span className="metric-num">{new Date(data.asOf).toLocaleString('zh-CN')}</span>
+            <Badge label={data.source === 'realtime' ? '实时' : '日结'} tone="brand" />
+          </>
+        }
+        actions={
+          <Link href="/monitor/rankings" className="btn-ghost">
+            查看排名透视
+            <IconArrowRight width={14} height={14} />
+          </Link>
+        }
+      />
 
       <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <MetricCardView title="提及率" card={data.cards.find((c) => c.metric === 'mentionRate')!} />

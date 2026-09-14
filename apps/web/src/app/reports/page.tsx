@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, brandStore } from '../../lib/queries';
-import { Skeleton } from '@/components/ui';
+import { PageHeader, Skeleton } from '@/components/ui';
 
 interface ReportRow {
   id: number;
@@ -32,24 +32,24 @@ export default function ReportsPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">报告中心</h1>
-          <p className="text-sm text-slate-500">周报每周一 08:00 自动生成;报告内证据随报告归档,不受快照 7 天保留限制。</p>
-        </div>
-        <div className="flex gap-2">
-          <button className="rounded border px-3 py-1.5 text-sm hover:bg-slate-50" onClick={() => generate.mutate('weekly')}>
-            生成周报
-          </button>
-          <button className="rounded border px-3 py-1.5 text-sm hover:bg-slate-50" onClick={() => generate.mutate('monthly')}>
-            生成月报
-          </button>
-        </div>
-      </header>
+      <PageHeader
+        title="报告中心"
+        desc="周报每周一 08:00 自动生成;报告内证据随报告归档,不受快照 7 天保留限制。"
+        actions={
+          <>
+            <button className="btn-ghost" onClick={() => generate.mutate('weekly')}>
+              生成周报
+            </button>
+            <button className="btn-primary" onClick={() => generate.mutate('monthly')}>
+              生成月报
+            </button>
+          </>
+        }
+      />
 
-      <section className="overflow-hidden rounded-lg border bg-white">
+      <section className="table-wrap rise-1">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs text-slate-500">
+          <thead className="table-head">
             <tr>
               <th className="px-4 py-2.5">类型</th>
               <th className="px-4 py-2.5">周期</th>

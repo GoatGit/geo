@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { api, useBrandId } from '@/lib/queries';
-import { Skeleton, EmptyState } from '@/components/ui';
+import { EmptyState, PageHeader, Skeleton } from '@/components/ui';
 
 interface CitationsDto {
   items: Array<{ url: string; domain: string; title: string | null; isOwned: boolean; engine: string; extractedAt: string }>;
@@ -23,21 +23,23 @@ export default function CitationsPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold">引用源分析</h1>
-        <p className="text-sm text-slate-500">
-          总被引 <span className="metric-num">{data.totals.citations}</span> · 自有域名{' '}
-          <span className="metric-num">{data.totals.owned}</span>
-          {data.totals.ownedShare != null && (
-            <>
-              {' '}· 自有占比 <span className="metric-num">{Math.round(data.totals.ownedShare * 100)}%</span>
-            </>
-          )}
-        </p>
-      </header>
+      <PageHeader
+        title="引用源分析"
+        desc={
+          <>
+            近 7 天总被引 <b className="metric-num text-slate-700">{data.totals.citations}</b> · 自有域名被引{' '}
+            <b className="metric-num text-slate-700">{data.totals.owned}</b>
+            {data.totals.ownedShare != null && (
+              <>
+                {' '}· 自有占比 <b className="metric-num text-slate-700">{Math.round(data.totals.ownedShare * 100)}%</b>
+              </>
+            )}
+          </>
+        }
+      />
 
-      <section className="rounded-lg border bg-white p-5">
-        <h2 className="mb-2 font-medium">信源平台偏好(TOP 20)</h2>
+      <section className="card rise-1 p-6">
+        <h2 className="mb-4 font-semibold text-slate-900">信源平台偏好(TOP 20)</h2>
         <div className="space-y-1.5">
           {data.preference.map((p) => (
             <div key={p.domain} className="flex items-center gap-2 text-xs">
@@ -55,9 +57,9 @@ export default function CitationsPage() {
         </div>
       </section>
 
-      <section className="overflow-hidden rounded-lg border bg-white">
+      <section className="table-wrap rise-2">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs text-slate-500">
+          <thead className="table-head">
             <tr>
               <th className="px-4 py-2.5">标题</th>
               <th className="px-3 py-2.5">域名</th>

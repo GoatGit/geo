@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { MetricCardView } from '@/components/metric-card';
-import { Skeleton, EmptyState } from '@/components/ui';
+import { EmptyState, PageHeader, Skeleton } from '@/components/ui';
 import { useRankings } from '@/lib/queries';
 
 const LAYER_LABEL: Record<string, string> = {
@@ -22,26 +22,32 @@ export default function RankingsPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">排名透视</h1>
-          <p className="text-sm text-slate-500">
+      <PageHeader
+        title="排名透视"
+        desc={
+          <>
             数据截至 <span className="metric-num">{new Date(data.asOf).toLocaleString('zh-CN')}</span>
-            <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px]">
+            <span className="ml-2 rounded-md bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-700">
               {data.source === 'realtime' ? '实时' : '日结'}
             </span>
-          </p>
-        </div>
-        <select
-          className="rounded border px-2 py-1.5 text-sm"
-          value={days}
-          onChange={(e) => setDays(Number(e.target.value))}
-        >
-          <option value={1}>今日</option>
-          <option value={7}>近 7 天</option>
-          <option value={30}>近 30 天</option>
-        </select>
-      </header>
+          </>
+        }
+        actions={
+          <div className="flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
+            {[[1, '今日'], [7, '近 7 天'], [30, '近 30 天']].map(([v, label]) => (
+              <button
+                key={v}
+                onClick={() => setDays(v as number)}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
+                  days === v ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        }
+      />
 
       <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <MetricCardView title="提及率" card={data.cards.find((c) => c.metric === 'mentionRate')} />
@@ -50,11 +56,11 @@ export default function RankingsPage() {
         <MetricCardView title="平均名次" card={data.cards.find((c) => c.metric === 'avgRank')} lowerBetter />
       </section>
 
-      <section className="overflow-hidden rounded-lg border bg-white">
+      <section className="table-wrap rise-1">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs text-slate-500">
+          <thead className="table-head">
             <tr>
-              <th className="px-4 py-2.5">监控问题</th>
+              <th className="px-4 py-3">监控问题</th>
               {data.engineStats.length > 0 &&
                 data.engineStats.map((e) => (
                   <th key={e.engine} className="px-3 py-2.5">
@@ -113,8 +119,8 @@ export default function RankingsPage() {
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-lg border bg-white p-5">
-          <h2 className="mb-3 font-medium">可见性漏斗</h2>
+        <div className="card rise-2 p-6">
+          <h2 className="mb-4 font-semibold text-slate-900">可见性漏斗</h2>
           <div className="space-y-2">
             {data.funnel.map((s, i) => (
               <div key={s.key}>
@@ -136,8 +142,8 @@ export default function RankingsPage() {
           </div>
         </div>
 
-        <div className="rounded-lg border bg-white p-5">
-          <h2 className="mb-3 font-medium">分引擎三率</h2>
+        <div className="card rise-3 p-6">
+          <h2 className="mb-4 font-semibold text-slate-900">分引擎三率</h2>
           <table className="w-full text-xs">
             <thead className="text-left text-slate-400">
               <tr>
