@@ -81,7 +81,7 @@ export default function LandingPage() {
               <IconLogo width={18} height={18} />
             </span>
             <span>
-              <span className="block text-[15px] font-semibold leading-4 text-white">GeoLens</span>
+              <span className="block text-[15px] font-semibold leading-4 text-white">青柠GEO</span>
               <span className="block text-[10px] leading-3.5 text-slate-500">AI 搜索品牌可见性监测</span>
             </span>
           </Link>
@@ -138,7 +138,7 @@ export default function LandingPage() {
             </span>
           </h1>
           <p className="rise-1 mx-auto mt-5 max-w-2xl text-[15px] leading-7 text-slate-400 md:text-base">
-            GeoLens 用中立账号向主流 AI 引擎批量提问,量化品牌的提及率、推荐位次、
+            青柠GEO 用中立账号向主流 AI 引擎批量提问,量化品牌的提及率、推荐位次、
             口碑倾向与引用来源 —— 每一个数字都能回放到原始回答与快照。
           </p>
 
@@ -182,7 +182,7 @@ export default function LandingPage() {
       {/* ===== 三大价值 ===== */}
       <section id="values" className="mx-auto max-w-6xl px-6 py-24">
         <SectionHead
-          eyebrow="为什么是 GeoLens"
+          eyebrow="为什么是 青柠GEO"
           title="看见 · 可信 · 可行动"
           sub="不是又一个看板,而是一套可以拿去汇报、经得起质疑的证据体系。"
         />
@@ -212,7 +212,7 @@ export default function LandingPage() {
                 拿证据说话。
               </h2>
               <p className="mt-4 text-[15px] leading-7 text-slate-400">
-                「数据被质疑」是这个品类最致命的风险。GeoLens 把可信做成工程:全链路存证、
+                「数据被质疑」是这个品类最致命的风险。青柠GEO 把可信做成工程:全链路存证、
                 口径透明、失败态诚实呈现——这也是我们与同类产品最本质的区别。
               </p>
               <Link href={startHref} className="btn-soft mt-7">
@@ -335,7 +335,7 @@ export default function LandingPage() {
             <span className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-brand-400 to-brand-700 text-white">
               <IconLogo width={13} height={13} />
             </span>
-            <span>© 2026 GeoLens · AI 搜索品牌可见性监测</span>
+            <span>© 2026 青柠GEO · AI 搜索品牌可见性监测</span>
           </div>
           <div className="flex items-center gap-5">
             <span className="inline-flex items-center gap-1">

@@ -76,7 +76,7 @@ export class ReportRenderService {
 
     return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"/>
-<title>GeoLens ${esc(tpl.name)} · ${esc(payload.brand?.name ?? '')} · ${esc(payload.period ?? '')}</title>
+<title>青柠GEO ${esc(tpl.name)} · ${esc(payload.brand?.name ?? '')} · ${esc(payload.period ?? '')}</title>
 <style>
   :root { --ink:#3f453e; --brand:#6f7c6d; --brand-50:#f4f6f3; --line:#e4e0d8; --bad:#bf8e88; --warn:#c2a26b; }
   * { box-sizing: border-box; }
@@ -105,7 +105,7 @@ export class ReportRenderService {
   @media print { body { background:#fff; padding:0; } .page { box-shadow:none; padding:12mm; border-radius:0; } }
 </style></head>
 <body><div class="page">
-  <div class="brandbar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6f7c6d" stroke-width="2.4" stroke-linecap="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M21 16v3a2 2 0 0 1-2 2h-3"/><circle cx="12" cy="12" r="3.5"/></svg><b>GeoLens</b><span style="color:#8a877e;font-size:12px">AI 搜索品牌可见性监测</span></div>
+  <div class="brandbar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6f7c6d" stroke-width="2.4" stroke-linecap="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M21 16v3a2 2 0 0 1-2 2h-3"/><circle cx="12" cy="12" r="3.5"/></svg><b>青柠GEO</b><span style="color:#8a877e;font-size:12px">AI 搜索品牌可见性监测</span></div>
   <h1>${esc(tpl.name)} · ${esc(payload.brand?.name ?? '')}</h1>
   <p class="meta">周期 ${esc(payload.period ?? '')} · 生成于 ${esc(payload.generatedAt ?? '')}${payload.brand?.website ? ' · ' + esc(payload.brand.website) : ''}</p>
   ${sections}

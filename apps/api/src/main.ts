@@ -18,7 +18,7 @@ async function bootstrap() {
   app.set('trust proxy', 1);
 
   await app.listen(env.port, '0.0.0.0');
-  new Logger('bootstrap').log(`GeoLens API listening on :${env.port} (${env.nodeEnv})`);
+  new Logger('bootstrap').log(`青柠GEO API listening on :${env.port} (${env.nodeEnv})`);
 }
 
 void bootstrap();

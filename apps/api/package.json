@@ -1,7 +1,7 @@
 {
   "name": "@geo/api",
   "version": "0.1.0",
-  "description": "GeoLens API/BFF(NestJS 单体:auth/brands/questions/recognition/monitor/runs/account/reports/WS)",
+  "description": "青柠GEO API/BFF(NestJS 单体:auth/brands/questions/recognition/monitor/runs/account/reports/WS)",
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

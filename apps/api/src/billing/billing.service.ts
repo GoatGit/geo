@@ -155,7 +155,7 @@ export class BillingService {
     const channelOrder = await provider.createOrder({
       outTradeNo,
       amountCents,
-      subject: `GeoLens ${PLAN_LABELS[input.plan]}会员 · ${input.period === 'yearly' ? '年付' : '月付'}`,
+      subject: `青柠GEO ${PLAN_LABELS[input.plan]}会员 · ${input.period === 'yearly' ? '年付' : '月付'}`,
       notifyUrl: provider.channel === 'mock' || !notifyBase ? undefined : `${notifyBase}/${provider.channel}`,
       returnUrl:
         input.channel === 'alipay' && notifyBase

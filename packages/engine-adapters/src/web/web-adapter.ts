@@ -1,4 +1,5 @@
 import type { Page, Locator } from 'playwright-core';
+
 import type { AskStatus, EngineId, RawCitation } from '@geo/shared';
 import type { AskOptions, AskResult, EngineAdapter, SessionContext } from '../types';
 import { siteConfigOf, type EngineSiteConfig } from './sites';
@@ -128,7 +129,7 @@ export class DomWebAdapter implements EngineAdapter {
       try {
         if (!(await input.isVisible({ timeout: 800 }))) continue;
         await input.click({ timeout: 3_000 });
-        await this.typeInto(input, question);
+        await this.typeInto(page, input, question);
       } catch {
         continue;
       }
@@ -149,19 +150,24 @@ export class DomWebAdapter implements EngineAdapter {
         await page.waitForTimeout(1_200);
         const remaining = await input.innerText({ timeout: 1_000 }).catch(() => '');
         if (!remaining.trim()) return true;
-        if (attempt === 1) await this.typeInto(input, question); // 重新填入再试
+        if (attempt === 1) await this.typeInto(page, input, question); // 重新填入再试
       }
       return false; // 此输入框提交失败:换下一个候选
     }
     return false;
   }
 
-  /** contenteditable 对 fill 的合成事件不敏感(豆包实测):keyboard.insertText 走真实 input 事件。 */
-  private async typeInto(input: Locator, text: string): Promise<void> {
+  /**
+   * contenteditable 输入实测(qianwen/doubao):fill/type 的合成事件不被站点输入组件识别,
+   * 必须 keyboard.insertText(浏览器级输入事件,元素需已聚焦);fill 仅作降级。
+   */
+  private async typeInto(page: Page, input: Locator, text: string): Promise<void> {
     await input.fill('', { timeout: 3_000 }).catch(() => undefined);
-    await input.type(text, { delay: 20, timeout: 30_000 }).catch(async () => {
-      await input.fill(text, { timeout: 3_000 });
-    });
+    await page.keyboard.insertText(text);
+    const echoed = await input.innerText({ timeout: 1_000 }).catch(() => '');
+    if (!echoed.trim()) {
+      await input.fill(text, { timeout: 3_000 }).catch(() => undefined);
+    }
   }
 
   /**

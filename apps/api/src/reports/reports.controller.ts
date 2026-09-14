@@ -93,7 +93,7 @@ export class ReportsController {
   async download(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
     const { row, payload } = await this.loadPayload(req, id);
     const html = this.renderer.render(payload, row.type as ReportType);
-    const name = `GeoLens-${row.type}-${row.period}-${id}.html`;
+    const name = `青柠GEO-${row.type}-${row.period}-${id}.html`;
     return {
       filename: name,
       contentBase64: Buffer.from(html, 'utf8').toString('base64'),

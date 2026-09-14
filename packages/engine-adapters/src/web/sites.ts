@@ -92,7 +92,8 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     loginHints: ['button:has-text("登录")', 'a:has-text("登录")'],
     loginUrlPatterns: [],
     inputSelectors: ['[contenteditable="true"]', 'div[id*="chat-input"]', 'textarea'],
-    submitSelectors: ['button:has-text("发送")', 'button[type="submit"]'],
+    // 实测(2026-09,登录态):发送按钮 aria-label="发送消息"
+    submitSelectors: ['button[aria-label="发送消息"]', 'button:has-text("发送")', 'button[type="submit"]'],
     answerSelectors: ['div[class*="answer"]', 'div[class*="markdown"]'],
     stopSelectors: ['button:has-text("停止")'],
     answerNoisePatterns: [],
@@ -107,7 +108,8 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     loginUrlPatterns: [],
     inputSelectors: ['[contenteditable="true"]', 'textarea'],
     submitSelectors: ['button:has-text("发送")', 'button[class*="send"]'],
-    answerSelectors: ['div[class*="agent-chat"] div[class*="markdown"]', 'div[class*="markdown"]'],
+    // 实测(2026-09,登录态):回答被拆成数十个 markdown 小块,须取整轮对话容器
+    answerSelectors: ['div[class*="agent-dialogue"]', 'div[class*="agent-chat"]', 'div[class*="markdown"]'],
     stopSelectors: ['button:has-text("停止")'],
     answerNoisePatterns: [],
     completionStableMs: BASE_COMPLETION_STABLE_MS,
