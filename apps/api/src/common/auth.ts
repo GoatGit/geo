@@ -38,15 +38,25 @@ export function signRefreshToken(env: AppEnv, p: AccountPrincipal): string {
 }
 
 export function verifyAccessToken(env: AppEnv, token: string): AccountPrincipal {
-  const payload = jwt.verify(token, env.jwtAccessSecret) as AccountPrincipal & { exp: number };
-  if (!payload.accountId || !payload.phone) throw new UnauthorizedException('invalid token payload');
-  return { accountId: Number(payload.accountId), phone: payload.phone, role: payload.role };
+  try {
+    const payload = jwt.verify(token, env.jwtAccessSecret) as AccountPrincipal & { exp: number };
+    if (!payload.accountId || !payload.phone) throw new UnauthorizedException('invalid token payload');
+    return { accountId: Number(payload.accountId), phone: payload.phone, role: payload.role };
+  } catch (err) {
+    // 过期/非法 token 统一 401(前端据此清会话跳登录),不落 500
+    if (err instanceof UnauthorizedException) throw err;
+    throw new UnauthorizedException('invalid or expired token');
+  }
 }
 
 export function verifyRefreshToken(env: AppEnv, token: string): AccountPrincipal {
-  const payload = jwt.verify(token, env.jwtRefreshSecret) as AccountPrincipal & { exp: number };
-  if (!payload.accountId || !payload.phone) throw new UnauthorizedException('invalid token payload');
-  return { accountId: Number(payload.accountId), phone: payload.phone, role: payload.role };
+  try {
+    const payload = jwt.verify(token, env.jwtRefreshSecret) as AccountPrincipal & { exp: number };
+    if (!payload.accountId || !payload.phone) throw new UnauthorizedException('invalid token payload');
+    return { accountId: Number(payload.accountId), phone: payload.phone, role: payload.role };
+  } catch {
+    throw new UnauthorizedException('invalid or expired refresh token');
+  }
 }
 
 /** 全局 Bearer JWT 守卫;@Public() 放行(auth/health)。 */

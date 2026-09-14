@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { InsightSummaryDto } from '@geo/shared';
 import { api, tokenStore } from '../lib/api';
+import { buildLoginUrl } from '../lib/login-reasons';
 import {
   IconArrowRight,
   IconCheck,
@@ -69,14 +70,16 @@ export default function LandingPage() {
   const [brand, setBrand] = useState('');
   useEffect(() => setLogged(!!tokenStore.access), []);
 
-  const startHref = logged ? '/dashboard' : '/login';
+  // 场景化登录:免费开始→控制台;选套餐→开通会员;登录后各自回跳原目标
+  const startHref = logged ? '/dashboard' : buildLoginUrl('console', '/dashboard');
   // 官网精选行业洞察(公开接口;docs/01 §3.10 扩展)
   const featured = useQuery({
     queryKey: ['insights-featured'],
-    queryFn: () => api<InsightSummaryDto[]>('/insights/featured'),
+    queryFn: () => api<InsightSummaryDto[]>('/insights/featured', { auth: false }),
   });
-  // 付费档位直达套餐页(登录后);未登录先进登录页
-  const planHref = (plan: string | null) => (plan === null ? startHref : logged ? `/billing?plan=${plan}` : '/login');
+  // 付费档位直达套餐页(登录后);未登录先进登录页并说明理由
+  const planHref = (plan: string | null) =>
+    plan === null ? startHref : logged ? `/billing?plan=${plan}` : buildLoginUrl('plan', `/billing?plan=${plan}`);
 
   return (
     <div className="min-h-screen bg-white">
@@ -94,6 +97,7 @@ export default function LandingPage() {
           <nav className="hidden items-center gap-7 text-sm text-slate-300 md:flex">
             <a href="#values" className="transition-colors hover:text-white">产品</a>
             <a href="#how" className="transition-colors hover:text-white">如何工作</a>
+            <a href="#insights" className="transition-colors hover:text-white">行业洞察</a>
             <a href="#pricing" className="transition-colors hover:text-white">定价</a>
           </nav>
           <div className="flex items-center gap-3">

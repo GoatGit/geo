@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, brandStore, isAdmin, tokenStore } from '../lib/api';
+import { buildLoginUrl } from '../lib/login-reasons';
 import {
   IconChevron,
   IconConfig,
@@ -92,9 +93,18 @@ function ConsoleShell({ pathname, children }: { pathname: string; children: Reac
   const router = useRouter();
   const [ready, setReady] = useState(false);
   useEffect(() => {
-    if (!tokenStore.access) router.replace('/login');
-    else setReady(true);
-  }, [router]);
+    if (!tokenStore.access) {
+      // 场景化理由:洞察报告/套餐页/普通控制台各自说明「为什么登录」,登录后回跳原页
+      const reason = pathname.startsWith('/insights/')
+        ? 'insight'
+        : pathname.startsWith('/billing') || pathname.startsWith('/reports')
+          ? 'plan'
+          : 'console';
+      router.replace(buildLoginUrl(reason, pathname));
+      return;
+    }
+    setReady(true);
+  }, [router, pathname]);
   if (!ready) return null;
 
   return (

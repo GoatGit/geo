@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, accountStore, tokenStore, type SessionAccount } from '../../lib/api';
-import { IconArrowRight, IconCheck, IconLogo } from '../../components/icons';
+import { LOGIN_REASONS, loginReasonKey, safeNext } from '../../lib/login-reasons';
+import { IconArrowRight, IconCheck, IconLogo, IconShield } from '../../components/icons';
 
 const VALUE_POINTS = [
   { title: '看见', text: '中立账号向 5 大 AI 引擎批量提问,量化提及率、推荐位次与引用来源' },
@@ -21,6 +22,15 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [countdown, setCountdown] = useState(0);
+  const [reasonKey, setReasonKey] = useState<string | null>(null);
+  const [next, setNext] = useState<string | null>(null);
+
+  // 跳转场景:所有跳登录的入口都带 reason(为什么登录)+ next(登录后回跳)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setReasonKey(loginReasonKey(params.get('reason')));
+    setNext(params.get('next'));
+  }, []);
 
   useEffect(() => {
     if (countdown <= 0) return;
@@ -52,7 +62,7 @@ export default function LoginPage() {
       });
       tokenStore.save(r.accessToken, r.refreshToken);
       if (r.account) accountStore.save(r.account);
-      router.replace('/dashboard');
+      router.replace(safeNext(next));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -129,6 +139,20 @@ export default function LoginPage() {
           </div>
           <h2 className="text-2xl font-semibold tracking-tight text-slate-900">登录 / 注册</h2>
           <p className="mt-1.5 text-sm text-slate-500">未注册的手机号验证后将自动创建账号</p>
+
+          {reasonKey && LOGIN_REASONS[reasonKey] && (
+            <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-brand-100 bg-brand-50 px-3.5 py-3">
+              <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-white text-brand-600 shadow-sm">
+                <IconShield width={13} height={13} />
+              </span>
+              <span>
+                <p className="text-[13px] font-semibold leading-5 text-brand-700">{LOGIN_REASONS[reasonKey].title}</p>
+                {LOGIN_REASONS[reasonKey].desc && (
+                  <p className="mt-0.5 text-xs leading-5 text-brand-600/80">{LOGIN_REASONS[reasonKey].desc}</p>
+                )}
+              </span>
+            </div>
+          )}
 
           <div className="mt-8 space-y-4">
             <div>

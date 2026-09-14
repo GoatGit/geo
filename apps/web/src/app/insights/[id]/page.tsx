@@ -18,7 +18,7 @@ export default function InsightDetailPage() {
   const id = Number(params?.id);
   const query = useQuery({
     queryKey: ['insight', id],
-    queryFn: () => api<InsightDetailDto>(`/insights/${id}`),
+    queryFn: () => api<InsightDetailDto>(`/insights/${id}`, { auth: false }),
     enabled: Number.isFinite(id),
   });
 

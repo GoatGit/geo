@@ -64,8 +64,11 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
-  const token = tokenStore.access;
+export async function api<T>(
+  path: string,
+  init?: RequestInit & { json?: unknown; /** 公开接口:不携带凭证,401 也不触发跳登录(如官网首页) */ auth?: boolean },
+): Promise<T> {
+  const token = init?.auth === false ? null : tokenStore.access;
   const res = await fetch(`/api${path}`, {
     ...init,
     headers: {
@@ -75,9 +78,10 @@ export async function api<T>(path: string, init?: RequestInit & { json?: unknown
     },
     body: init?.json !== undefined ? JSON.stringify(init.json) : init?.body,
   });
-  if (res.status === 401 && typeof window !== 'undefined') {
+  if (res.status === 401 && init?.auth !== false && typeof window !== 'undefined') {
     tokenStore.clear();
-    window.location.href = '/login';
+    const { buildLoginUrl } = await import('./login-reasons');
+    window.location.href = buildLoginUrl('session', location.pathname + location.search);
     throw new ApiError(401, '未登录');
   }
   const body = await res.json().catch(() => ({}));
