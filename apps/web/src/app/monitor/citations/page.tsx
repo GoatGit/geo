@@ -12,13 +12,16 @@ interface CitationsDto {
 
 export default function CitationsPage() {
   const brandId = useBrandId();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['citations', brandId],
     queryFn: () => api<CitationsDto>(`/monitor/citations?brand=${brandId}&days=7`),
     enabled: !!brandId,
   });
 
   if (isLoading) return <Skeleton />;
+  if (error) {
+    return <EmptyState title="数据加载失败" text={`${(error as Error).message} —— 请稍后重试,或在顶栏切换品牌。`} />;
+  }
   if (!data) return <EmptyState text="暂无引用数据" />;
 
   return (

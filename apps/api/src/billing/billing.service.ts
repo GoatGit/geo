@@ -1,4 +1,5 @@
 import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { and, desc, eq } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import QRCode from 'qrcode';
@@ -147,7 +148,8 @@ export class BillingService {
 
     const provider = this.providerFor(input.channel);
     const amountCents = PLAN_PRICING[input.plan as Exclude<PlanTier, 'free' | 'custom'>][input.period];
-    const outTradeNo = `GL${Date.now()}${Math.floor(Math.random() * 9000 + 1000)}`;
+    // 商户单号:时间戳 + 8 位随机(微信要求 6-32 位字母数字;撞唯一约束会 500 拒绝下单)
+    const outTradeNo = `GL${Date.now()}${randomUUID().replace(/-/g, '').slice(0, 8)}`;
     const expireAt = new Date(Date.now() + 2 * 3600 * 1000);
     const env = loadEnv();
     const notifyBase = env.publicBaseUrl ? `${env.publicBaseUrl.replace(/\/$/, '')}/billing/notify` : '';
@@ -260,7 +262,15 @@ export class BillingService {
     const result = await this.wechat.verifyNotify(headers, rawBody, {});
     if (!result.ok) return { status: HttpStatus.UNAUTHORIZED, body: '{"code":"FAIL","message":"验签失败"}' };
     if (result.paid && result.outTradeNo) {
-      await this.settleByOutTradeNo(result.outTradeNo, 'wechat', result.channelTradeId, result.amountCents);
+      // 金额不一致属永久性差异:ack 成功止住渠道重试风暴,订单保留 created 供人工对账
+      try {
+        await this.settleByOutTradeNo(result.outTradeNo, 'wechat', result.channelTradeId, result.amountCents);
+      } catch (err) {
+        if (err instanceof HttpException && err.getStatus() === HttpStatus.CONFLICT) {
+          return { status: HttpStatus.OK, body: result.ackBody };
+        }
+        throw err; // 瞬时错误(如 DB 抖动)回 fail,让渠道重试
+      }
     }
     return { status: HttpStatus.OK, body: result.ackBody };
   }
@@ -269,7 +279,14 @@ export class BillingService {
     const result = await this.alipay.verifyNotify({}, '', body);
     if (!result.ok) return { status: HttpStatus.UNAUTHORIZED, body: 'fail' };
     if (result.paid && result.outTradeNo) {
-      await this.settleByOutTradeNo(result.outTradeNo, 'alipay', result.channelTradeId, result.amountCents);
+      try {
+        await this.settleByOutTradeNo(result.outTradeNo, 'alipay', result.channelTradeId, result.amountCents);
+      } catch (err) {
+        if (err instanceof HttpException && err.getStatus() === HttpStatus.CONFLICT) {
+          return { status: HttpStatus.OK, body: result.ackBody };
+        }
+        throw err;
+      }
     }
     return { status: HttpStatus.OK, body: result.ackBody };
   }

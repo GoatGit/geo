@@ -18,6 +18,8 @@ COPY apps/web/package.json apps/web/
 RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
+ARG API_ORIGIN=http://localhost:3000
+ENV API_ORIGIN=$API_ORIGIN
 COPY . .
 RUN pnpm -r build
 

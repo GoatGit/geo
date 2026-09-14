@@ -18,7 +18,10 @@ export default function RankingsPage() {
   const { data, isLoading, error } = useRankings(days);
 
   if (isLoading) return <Skeleton />;
-  if (error || !data) return <EmptyState text="暂无数据:完成品牌与问题配置后,首轮采集结果将在此展示" />;
+  if (error) {
+    return <EmptyState title="数据加载失败" text={`${(error as Error).message} —— 请稍后重试,或在顶栏切换品牌。`} />;
+  }
+  if (!data) return <EmptyState text="暂无数据:完成品牌与问题配置后,首轮采集结果将在此展示" />;
 
   return (
     <div className="space-y-6">

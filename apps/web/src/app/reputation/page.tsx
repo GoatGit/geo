@@ -14,13 +14,16 @@ interface ReputationDto {
 /** 口碑分析(docs/01 §3.6):优势印象 vs 待攻印象 + 原文证据;空态显示引导而非结论(A5 对策)。 */
 export default function ReputationPage() {
   const brandId = useBrandId();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['reputation', brandId],
     queryFn: () => api<ReputationDto>(`/monitor/reputation?brand=${brandId}&days=7`),
     enabled: !!brandId,
   });
 
   if (isLoading) return <Skeleton />;
+  if (error) {
+    return <EmptyState title="数据加载失败" text={`${(error as Error).message} —— 请稍后重试,或在顶栏切换品牌。`} />;
+  }
   if (!data || !data.totals.hasData)
     return (
       <EmptyState text="暂无口碑数据:在「监控问题」添加口碑词类型的问题(如「XX的口碑怎么样?」),采集完成后此处展示" />

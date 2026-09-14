@@ -384,12 +384,20 @@ export default function LandingPage() {
             </span>
             <span>© 2026 青柠GEO · AI 搜索品牌可见性监测</span>
           </div>
-          <div className="flex items-center gap-5">
+          <div className="flex flex-wrap items-center gap-5">
             <span className="inline-flex items-center gap-1">
               <IconCite width={13} height={13} />
               数据口径与方法论文档
             </span>
             <span>中立监测 · 不干预排名 · 过程可审计</span>
+            <a
+              href="https://beian.miit.gov.cn/"
+              target="_blank"
+              rel="noreferrer"
+              className="transition-colors hover:text-slate-600"
+            >
+              京ICP备2024074563号-9
+            </a>
           </div>
         </div>
       </footer>

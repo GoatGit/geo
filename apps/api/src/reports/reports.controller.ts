@@ -10,13 +10,13 @@ import {
   Post,
   Req,
 } from '@nestjs/common';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, inArray } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Request } from 'express';
 import { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
 import { REPORT_TYPES, type ReportType } from '@geo/shared';
-import { reports } from '@geo/db';
+import { brands, reports } from '@geo/db';
 import { createStorageFromEnv, type EvidenceStorage } from '@geo/evidence';
 import { currentAccount } from '../common/auth';
 import { DB, REDIS } from '../common/infra.module';
@@ -37,9 +37,22 @@ export class ReportsController {
     this.queue = new Queue('reports', { connection: this.connOptions(redis) });
   }
 
+  /** 仅返回本人品牌下的报告(跨租户隔离;admin 走平台后台总览)。 */
   @Get()
-  async list() {
-    return this.db.select().from(reports).orderBy(desc(reports.createdAt)).limit(50);
+  async list(@Req() req: Request) {
+    const accountId = currentAccount(req).accountId;
+    const owned = await this.db
+      .select({ id: brands.id })
+      .from(brands)
+      .where(eq(brands.accountId, accountId));
+    const ids = owned.map((b) => b.id);
+    if (ids.length === 0) return [];
+    return this.db
+      .select()
+      .from(reports)
+      .where(inArray(reports.brandId, ids))
+      .orderBy(desc(reports.createdAt))
+      .limit(50);
   }
 
   @Get('templates')

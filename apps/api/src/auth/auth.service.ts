@@ -1,6 +1,7 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { HttpException, Inject, Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
-import { createHash, randomInt } from 'node:crypto';
+import { createHmac } from 'node:crypto';
+import { createHash, randomInt, randomUUID } from 'node:crypto';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { smsCodes, accounts } from '@geo/db';
 import { loadEnv } from '../config/env';
@@ -18,8 +19,10 @@ export class ConsoleSmsProvider implements SmsProvider {
   }
 }
 
-/** 阿里云短信(签名/模板报备后接入;HTTP 签名调用在 M0 W9-10 联调,接口先收敛在此)。 */
+/** 阿里云短信真实实现(Dysmsapi POP RPC + HMAC-SHA1 签名;签名/模板需报备通过)。 */
 export class AliyunSmsProvider implements SmsProvider {
+  private readonly endpoint = 'dysmsapi.aliyuncs.com';
+
   constructor(
     private readonly accessKeyId: string,
     private readonly accessKeySecret: string,
@@ -27,11 +30,39 @@ export class AliyunSmsProvider implements SmsProvider {
     private readonly templateCode: string,
   ) {}
 
-  async send(_phone: string, _code: string): Promise<void> {
-    // TODO(M0-W9): 接 dysmsapi SendSms(POP 签名)。未配置前显式失败,避免"以为发了"。
-    throw new Error(
-      `aliyun sms not configured yet (key=${this.accessKeyId ? 'set' : 'unset'}, sign=${this.signName || 'unset'})`,
-    );
+  async send(phone: string, code: string): Promise<void> {
+    const params: Record<string, string> = {
+      Action: 'SendSms',
+      Version: '2017-05-25',
+      RegionId: 'cn-hangzhou',
+      PhoneNumbers: phone,
+      SignName: this.signName,
+      TemplateCode: this.templateCode,
+      TemplateParam: JSON.stringify({ code }),
+      AccessKeyId: this.accessKeyId,
+      SignatureMethod: 'HMAC-SHA1',
+      SignatureVersion: '1.0',
+      SignatureNonce: randomUUID(),
+      Timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    };
+
+    const pct = (s: string) =>
+      encodeURIComponent(s).replace(/[+*']/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+    const canon = Object.keys(params)
+      .sort()
+      .map((k) => `${pct(k)}=${pct(params[k])}`)
+      .join('&');
+    const toSign = `GET&${pct('/')}&${pct(canon)}`;
+    const signature = createHmac('sha1', `${this.accessKeySecret}&`)
+      .update(toSign)
+      .digest('base64');
+
+    const url = `https://${this.endpoint}/?${canon}&Signature=${pct(signature)}`;
+    const res = await fetch(url, { method: 'GET' });
+    const body = (await res.json()) as { Code?: string; Message?: string };
+    if (body.Code !== 'OK') {
+      throw new Error(`aliyun sms send failed: ${body.Code ?? 'UNKNOWN'} ${body.Message ?? ''}`);
+    }
   }
 }
 
@@ -51,8 +82,15 @@ export class AuthService {
       : new ConsoleSmsProvider();
   }
 
-  /** 显式点击后才发送(docs/research 03 A8 对策:不做自动发送)。 */
+  /** 显式点击后才发送(docs/research 03 A8 对策:不做自动发送);同号 60s 重发冷却,防刷短信成本。 */
   async sendLoginCode(phone: string): Promise<{ devCode?: string }> {
+    const existing = (
+      await this.db.select().from(smsCodes).where(eq(smsCodes.phone, phone)).limit(1)
+    )[0];
+    if (existing?.createdAt && Date.now() - existing.createdAt.getTime() < 60_000) {
+      const wait = Math.ceil((60_000 - (Date.now() - existing.createdAt.getTime())) / 1000);
+      throw new HttpException(`发送过于频繁,请 ${wait}s 后重试`, 429);
+    }
     const code = String(randomInt(100000, 1000000));
     const env = loadEnv();
     await this.provider.send(phone, code);

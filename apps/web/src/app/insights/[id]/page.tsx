@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Badge, EmptyState, Skeleton } from '@/components/ui';
 import { InsightBlocks } from '@/components/insight-charts';
@@ -28,6 +29,13 @@ export default function InsightDetailPage() {
   }
   const d = query.data;
   const cover = d.cover ?? {};
+
+  useEffect(() => {
+    document.title = `${d.title} · 青柠GEO`;
+    return () => {
+      document.title = '青柠GEO · AI 搜索品牌可见性监测';
+    };
+  }, [d.title]);
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -64,6 +72,11 @@ export default function InsightDetailPage() {
         {/* 口径页脚 */}
         <footer className="mt-8 border-t border-slate-200 pt-4 text-[11px] leading-5 text-slate-400">
           <p>口径说明:仅限可见度 —— 命中高 ≠ 评价好,量的是被 AI 主动提及;题目不含品牌名,避免提示偏差。</p>
+          <p className="mt-1">
+            <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer" className="hover:text-slate-600">
+              京ICP备2024074563号-9
+            </a>
+          </p>
           <p className="mt-1 flex items-center justify-between">
             <span>数据来源:青柠GEO 实测(6 平台抢答)</span>
             <span>{d.publishedAt ? new Date(d.publishedAt).toLocaleDateString('zh-CN') : ''}</span>

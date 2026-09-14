@@ -89,9 +89,32 @@ export function Shell({ children }: { children: React.ReactNode }) {
   return <ConsoleShell pathname={pathname}>{children}</ConsoleShell>;
 }
 
+/** 路由标题:浏览器标签页可区分页面(历史/收藏/多标签场景)。 */
+const ROUTE_TITLES: Array<[RegExp, string]> = [
+  [/^\/monitor\/rankings/, '排名透视'],
+  [/^\/monitor\/citations/, '引用源分析'],
+  [/^\/monitor\/competitors/, '竞品透视'],
+  [/^\/reputation/, '口碑分析'],
+  [/^\/reports/, '报告中心'],
+  [/^\/billing/, '套餐与账单'],
+  [/^\/config\/questions/, '监控问题'],
+  [/^\/config\/recognition/, '识别口径'],
+  [/^\/config\/collection/, '采集状态'],
+  [/^\/brands\/new/, '新建品牌'],
+  [/^\/admin\/insights/, '行业洞察管理'],
+  [/^\/admin/, '平台后台'],
+  [/^\/dashboard/, '总览'],
+];
+
 function ConsoleShell({ pathname, children }: { pathname: string; children: React.ReactNode }) {
   const router = useRouter();
   const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const hit = ROUTE_TITLES.find(([re]) => re.test(pathname));
+    document.title = hit ? `${hit[1]} · 青柠GEO` : '青柠GEO · AI 搜索品牌可见性监测';
+    // SPA 路由切换后复位滚动条(否则新页面继承上一页的滚动位置)
+    window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+  }, [pathname]);
   useEffect(() => {
     if (!tokenStore.access) {
       // 场景化理由:洞察报告/套餐页/普通控制台各自说明「为什么登录」,登录后回跳原页

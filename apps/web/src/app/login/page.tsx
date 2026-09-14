@@ -30,6 +30,7 @@ export default function LoginPage() {
     const params = new URLSearchParams(window.location.search);
     setReasonKey(loginReasonKey(params.get('reason')));
     setNext(params.get('next'));
+    document.title = '登录 · 青柠GEO';
   }, []);
 
   useEffect(() => {
@@ -213,6 +214,15 @@ export default function LoginPage() {
               <Link href="/" className="text-slate-400 underline-offset-2 hover:text-brand-600 hover:underline">
                 返回官网
               </Link>
+              <br />
+              <a
+                href="https://beian.miit.gov.cn/"
+                target="_blank"
+                rel="noreferrer"
+                className="underline-offset-2 hover:text-slate-600 hover:underline"
+              >
+                京ICP备2024074563号-9
+              </a>
             </p>
           </div>
         </div>

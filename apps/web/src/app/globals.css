@@ -12,6 +12,16 @@
   ::selection {
     @apply bg-brand-200/60;
   }
+  /* 锚点/返回顶部平滑滚动(官网导航、长列表) */
+  html {
+    scroll-behavior: smooth;
+  }
+  /* 键盘导航可见性:仅键盘聚焦时显示,不干扰鼠标点击 */
+  :focus-visible {
+    outline: 2px solid #4c6bc6;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
   /* 细滚动条(数据工作台气质) */
   *::-webkit-scrollbar {
     width: 8px;
