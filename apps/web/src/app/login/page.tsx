@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, tokenStore } from '../../lib/api';
+import { api, accountStore, tokenStore, type SessionAccount } from '../../lib/api';
 import { IconArrowRight, IconCheck, IconLogo } from '../../components/icons';
 
 const VALUE_POINTS = [
@@ -46,11 +46,12 @@ export default function LoginPage() {
     setError('');
     setBusy(true);
     try {
-      const r = await api<{ accessToken: string; refreshToken: string }>('/auth/sms/verify', {
+      const r = await api<{ accessToken: string; refreshToken: string; account: SessionAccount }>('/auth/sms/verify', {
         method: 'POST',
         json: { phone, code },
       });
       tokenStore.save(r.accessToken, r.refreshToken);
+      if (r.account) accountStore.save(r.account);
       router.replace('/dashboard');
     } catch (e) {
       setError((e as Error).message);
@@ -64,7 +65,7 @@ export default function LoginPage() {
       {/* 左:品牌叙事 */}
       <div className="relative hidden overflow-hidden bg-ink-950 lg:block">
         <div className="pointer-events-none absolute -left-32 -top-32 h-96 w-96 animate-float-slow rounded-full bg-brand-500/20 blur-3xl" />
-        <div className="pointer-events-none absolute bottom-0 right-0 h-[28rem] w-[28rem] rounded-full bg-sky-500/10 blur-3xl" />
+        <div className="pointer-events-none absolute bottom-0 right-0 h-[28rem] w-[28rem] rounded-full bg-sand/10 blur-3xl" />
         <div
           className="pointer-events-none absolute inset-0 opacity-[.35]"
           style={{
@@ -90,7 +91,7 @@ export default function LoginPage() {
               当用户问 AI 时,
               <br />
               你的品牌
-              <span className="bg-gradient-to-r from-brand-300 to-sky-300 bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-brand-300 to-sand-300 bg-clip-text text-transparent">
                 被推荐了吗
               </span>
               ?
@@ -171,7 +172,7 @@ export default function LoginPage() {
               </div>
             )}
             {error && (
-              <p className="rounded-lg bg-red-50 px-3 py-2 text-xs leading-5 text-bad">{error}</p>
+              <p className="rounded-lg bg-bad-50 px-3 py-2 text-xs leading-5 text-bad">{error}</p>
             )}
 
             <button

@@ -24,14 +24,6 @@ export default function RankingsPage() {
     <div className="space-y-6">
       <PageHeader
         title="排名透视"
-        desc={
-          <>
-            数据截至 <span className="metric-num">{new Date(data.asOf).toLocaleString('zh-CN')}</span>
-            <span className="ml-2 rounded-md bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-700">
-              {data.source === 'realtime' ? '实时' : '日结'}
-            </span>
-          </>
-        }
         actions={
           <div className="flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
             {[[1, '今日'], [7, '近 7 天'], [30, '近 30 天']].map(([v, label]) => (
@@ -87,9 +79,9 @@ export default function RankingsPage() {
                         <span
                           className={`metric-num rounded px-1.5 py-0.5 text-xs ${
                             cell.rank === 1
-                              ? 'bg-emerald-50 text-good'
+                              ? 'bg-good-50 text-good'
                               : cell.rank <= 3
-                                ? 'bg-cyan-50 text-brand'
+                                ? 'bg-brand-50 text-brand'
                                 : 'bg-slate-100 text-slate-600'
                           }`}
                         >
@@ -98,7 +90,7 @@ export default function RankingsPage() {
                       ) : cell.mentioned ? (
                         <span className="text-xs text-slate-400">提及未上榜</span>
                       ) : (
-                        <span className="rounded bg-red-50 px-1.5 py-0.5 text-xs text-bad">未上榜</span>
+                        <span className="rounded bg-bad-50 px-1.5 py-0.5 text-xs text-bad">未上榜</span>
                       )}
                     </td>
                   );

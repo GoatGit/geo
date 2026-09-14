@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api, brandStore, tokenStore } from '../lib/api';
+import { api, brandStore, isAdmin, tokenStore } from '../lib/api';
 import {
   IconChevron,
   IconConfig,
@@ -17,6 +17,7 @@ import {
   IconPulse,
   IconRank,
   IconReport,
+  IconServer,
   IconShield,
   IconSwap,
   IconVoice,
@@ -27,7 +28,7 @@ interface BrandRow {
   name: string;
 }
 
-type NavItem = { href: string; label: string; icon: React.ReactNode };
+type NavItem = { href: string; label: string; icon: React.ReactNode; exact?: boolean };
 type NavGroup =
   | { kind: 'item'; item: NavItem }
   | { kind: 'group'; label: string; icon: React.ReactNode; items: NavItem[] };
@@ -57,6 +58,18 @@ const NAV: NavGroup[] = [
     ],
   },
 ];
+
+/** 平台后台分组(仅 admin 角色可见,接口层另有 AdminGuard 兜底)。 */
+const ADMIN_NAV: NavGroup = {
+  kind: 'group',
+  label: '平台后台',
+  icon: <IconServer />,
+  items: [
+    { href: '/admin', label: '系统总览', icon: <IconPulse />, exact: true },
+    { href: '/admin/settings', label: '全局配置', icon: <IconConfig /> },
+    { href: '/admin/rounds', label: '采集轮次', icon: <IconList /> },
+  ],
+};
 
 /** 公开路由:官网首页与登录页不套控制台壳(未登录访问首页不再跳登录)。 */
 const PUBLIC_ROUTES = ['/', '/login'];
@@ -94,6 +107,7 @@ function ConsoleShell({ pathname, children }: { pathname: string; children: Reac
 /* ============ 侧栏 ============ */
 
 function Sidebar({ pathname }: { pathname: string }) {
+  const nav = isAdmin() ? [...NAV, ADMIN_NAV] : NAV;
   return (
     <aside className="sticky top-0 flex h-screen w-[232px] shrink-0 flex-col bg-ink-950 text-slate-300">
       <Link href="/dashboard" className="rise flex items-center gap-2.5 px-5 pb-2 pt-6">
@@ -107,7 +121,7 @@ function Sidebar({ pathname }: { pathname: string }) {
       </Link>
 
       <nav className="mt-4 flex-1 space-y-0.5 overflow-y-auto px-3 pb-4">
-        {NAV.map((g) =>
+        {nav.map((g) =>
           g.kind === 'item' ? (
             <NavLink key={g.item.href} item={g.item} pathname={pathname} />
           ) : (
@@ -117,13 +131,6 @@ function Sidebar({ pathname }: { pathname: string }) {
       </nav>
 
       <div className="border-t border-white/5 p-3">
-        <Link
-          href="/brands/new"
-          className="flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] text-slate-400 transition-colors hover:bg-white/5 hover:text-brand-300"
-        >
-          <IconPlus width={15} height={15} />
-          新建品牌
-        </Link>
         <Link
           href="/"
           className="flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] text-slate-400 transition-colors hover:bg-white/5 hover:text-brand-300"
@@ -137,7 +144,7 @@ function Sidebar({ pathname }: { pathname: string }) {
 }
 
 function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
-  const active = pathname.startsWith(item.href);
+  const active = item.exact ? pathname === item.href : pathname.startsWith(item.href);
   return (
     <Link
       href={item.href}
@@ -162,9 +169,10 @@ function NavCollapsible({
   group: Extract<NavGroup, { kind: 'group' }>;
   pathname: string;
 }) {
-  const expandedByDefault = group.items.some((i) => pathname.startsWith(i.href));
+  const match = (i: NavItem) => (i.exact ? pathname === i.href : pathname.startsWith(i.href));
+  const expandedByDefault = group.items.some(match);
   const [open, setOpen] = useState(expandedByDefault);
-  const active = group.items.some((i) => pathname.startsWith(i.href));
+  const active = group.items.some(match);
 
   return (
     <div>
@@ -191,7 +199,7 @@ function NavCollapsible({
         <div className="min-h-0">
           <div className="ml-5 space-y-0.5 border-l border-white/10 py-1 pl-2">
             {group.items.map((item) => {
-              const itemActive = pathname.startsWith(item.href);
+              const itemActive = item.exact ? pathname === item.href : pathname.startsWith(item.href);
               return (
                 <Link
                   key={item.href}
@@ -341,7 +349,7 @@ function AccountMenu() {
               tokenStore.clear();
               router.replace('/login');
             }}
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-600 hover:bg-red-50 hover:text-bad"
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-600 hover:bg-bad-50 hover:text-bad"
           >
             <IconLogout width={14} height={14} />
             退出登录

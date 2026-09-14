@@ -6,9 +6,9 @@ export function Badge({ label, tone = 'slate' }: { label: string; tone?: 'slate'
   const tones = {
     slate: 'bg-slate-100 text-slate-600',
     brand: 'bg-brand-50 text-brand-700',
-    good: 'bg-emerald-50 text-good',
-    warn: 'bg-amber-50 text-warn',
-    bad: 'bg-red-50 text-bad',
+    good: 'bg-good-50 text-good',
+    warn: 'bg-warn-50 text-warn',
+    bad: 'bg-bad-50 text-bad',
   } as const;
   return <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium ${tones[tone]}`}>{label}</span>;
 }
@@ -60,12 +60,13 @@ export function PageHeader({
   desc,
   actions,
 }: {
-  title: string;
+  title: React.ReactNode;
+  /** 副标题按需慎用(整体设计上少用) */
   desc?: React.ReactNode;
   actions?: React.ReactNode;
 }) {
   return (
-    <header className="rise flex flex-wrap items-end justify-between gap-3">
+    <header className="rise flex flex-wrap items-center justify-between gap-3">
       <div>
         <h1 className="text-[22px] font-semibold tracking-tight text-slate-900">{title}</h1>
         {desc && <p className="mt-1 text-sm leading-5 text-slate-500">{desc}</p>}

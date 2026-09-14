@@ -4,7 +4,7 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Request } from 'express';
 import { Redis } from 'ioredis';
 import { collectionPlans, collectionRounds, queryRuns } from '@geo/db';
-import { WEB_ENGINES } from '@geo/shared';
+import { WEB_ENGINES, breakerManualKey, breakerTrippedKey } from '@geo/shared';
 import { currentAccount } from '../common/auth';
 import { DB, REDIS } from '../common/infra.module';
 import { BrandsService } from '../brands/brands.service';
@@ -55,7 +55,9 @@ export class CollectionController {
       const failed = rs.filter((r) => r.status === 'failed').length;
       byEngine.push({
         engine,
-        paused: (await this.redis.get(`geo:breaker:tripped:${engine}`)) === '1',
+        paused:
+          (await this.redis.get(breakerTrippedKey(engine))) === '1' ||
+          (await this.redis.get(breakerManualKey(engine))) === '1',
         recent: rs.length,
         ok,
         failed,

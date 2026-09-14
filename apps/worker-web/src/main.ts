@@ -19,10 +19,10 @@ async function bootstrap() {
   await ensurePartitions(pool, 2);
 
   const scheduler = new RoundScheduler(db);
-  scheduler.start(); // 间隔经 SCHEDULER_INTERVAL_MS 配置(默认 60s)
+  const concurrency = Number(process.env.WORKER_CONCURRENCY ?? 4);
+  scheduler.start(undefined, concurrency); // 间隔经 SCHEDULER_INTERVAL_MS 配置(默认 60s);并发数随心跳上报
 
   const collect = new CollectProcessor(db, new Redis(bullConnection().url, { maxRetriesPerRequest: 3 }));
-  const concurrency = Number(process.env.WORKER_CONCURRENCY ?? 4);
   const collectWorker = collect.start(concurrency);
 
   const reputationWorker = startReputationWorker(db);

@@ -34,7 +34,6 @@ export default function ReportsPage() {
     <div className="space-y-6">
       <PageHeader
         title="报告中心"
-        desc="周报每周一 08:00 自动生成;报告内证据随报告归档,不受快照 7 天保留限制。"
         actions={
           <>
             <button className="btn-ghost" onClick={() => generate.mutate('weekly')}>
@@ -65,7 +64,7 @@ export default function ReportsPage() {
                 <td className="px-4 py-2.5">
                   <span
                     className={`rounded px-1.5 py-0.5 text-xs ${
-                      r.status === 'done' ? 'bg-emerald-50 text-good' : r.status === 'failed' ? 'bg-red-50 text-bad' : 'bg-slate-100'
+                      r.status === 'done' ? 'bg-good-50 text-good' : r.status === 'failed' ? 'bg-bad-50 text-bad' : 'bg-slate-100'
                     }`}
                   >
                     {r.status === 'done' ? '已完成' : r.status === 'failed' ? '失败' : r.status === 'generating' ? '生成中' : '排队中'}

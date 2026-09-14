@@ -60,11 +60,16 @@ export class AuthController {
     return currentAccount(req);
   }
 
-  private tokens(account: { id: number; phone: string } | { accountId: number; phone: string }) {
+  private tokens(account: {
+    id: number;
+    phone: string;
+    role?: string;
+  } | { accountId: number; phone: string; role?: string }) {
     const env = loadEnv();
     const principal = {
       accountId: 'accountId' in account ? account.accountId : account.id,
       phone: account.phone,
+      role: account.role ?? 'user',
     };
     return {
       accessToken: signAccessToken(env, principal),

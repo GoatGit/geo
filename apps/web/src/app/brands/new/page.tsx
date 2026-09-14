@@ -38,9 +38,6 @@ export default function NewBrandPage() {
     <div className="mx-auto max-w-2xl space-y-6">
       <header>
         <h1 className="text-xl font-semibold">创建品牌</h1>
-        <p className="text-sm text-slate-500">
-          用自然语言描述你的品牌:AI 解析出档案、识别口径与竞品建议(含自有产品线别名,默认勾选)。
-        </p>
       </header>
 
       <textarea

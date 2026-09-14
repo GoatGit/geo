@@ -1,8 +1,10 @@
-export const COLLECT_QUEUE = 'collect';
-export const REPUTATION_QUEUE = 'extract-reputation';
-export const REPORTS_QUEUE = 'reports';
-
-export const REDIS_PROGRESS_CHANNEL = 'geo:progress';
+// 队列名与 Redis key 是 API/Worker 共同契约,定义在 @geo/shared(单一事实源)
+export {
+  COLLECT_QUEUE,
+  REPUTATION_QUEUE,
+  REPORTS_QUEUE,
+  REDIS_PROGRESS_CHANNEL,
+} from '@geo/shared';
 
 export interface CollectJobData {
   runId: number;

@@ -74,8 +74,7 @@ export default function QuestionsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="监控问题管理"
-        desc="排名词驱动排名透视,口碑词驱动口碑分析;AI 自动分类并拓写为用户真实问法。"
+        title="监控问题"
         actions={
           q && (
             <div className="flex items-center gap-4 text-xs text-slate-500">
@@ -123,7 +122,7 @@ export default function QuestionsPage() {
                 <td className="px-4 py-2.5">
                   <span
                     className={`rounded px-1.5 py-0.5 text-xs ${
-                      row.type === 'ranking' ? 'bg-cyan-50 text-brand' : 'bg-violet-50 text-violet-600'
+                      row.type === 'ranking' ? 'bg-brand-50 text-brand' : 'bg-blush-50 text-blush-700'
                     }`}
                   >
                     {row.type === 'ranking' ? '排名词' : '口碑词'}

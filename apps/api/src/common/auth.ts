@@ -22,6 +22,8 @@ declare global {
 export interface AccountPrincipal {
   accountId: number;
   phone: string;
+  /** 平台角色:'user' 租户 / 'admin' 平台运营;缺省按 user 处理(兼容旧 token) */
+  role?: string;
 }
 
 export const IS_PUBLIC_KEY = 'isPublic';
@@ -38,13 +40,13 @@ export function signRefreshToken(env: AppEnv, p: AccountPrincipal): string {
 export function verifyAccessToken(env: AppEnv, token: string): AccountPrincipal {
   const payload = jwt.verify(token, env.jwtAccessSecret) as AccountPrincipal & { exp: number };
   if (!payload.accountId || !payload.phone) throw new UnauthorizedException('invalid token payload');
-  return { accountId: Number(payload.accountId), phone: payload.phone };
+  return { accountId: Number(payload.accountId), phone: payload.phone, role: payload.role };
 }
 
 export function verifyRefreshToken(env: AppEnv, token: string): AccountPrincipal {
   const payload = jwt.verify(token, env.jwtRefreshSecret) as AccountPrincipal & { exp: number };
   if (!payload.accountId || !payload.phone) throw new UnauthorizedException('invalid token payload');
-  return { accountId: Number(payload.accountId), phone: payload.phone };
+  return { accountId: Number(payload.accountId), phone: payload.phone, role: payload.role };
 }
 
 /** 全局 Bearer JWT 守卫;@Public() 放行(auth/health)。 */

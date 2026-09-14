@@ -1,38 +1,77 @@
 import type { Config } from 'tailwindcss';
 
+/**
+ * 莫兰迪色板:低饱和灰调。
+ * brand=灰绿(sage)· blush=灰粉 · sand=燕麦灰 · ink=暖调深灰(侧栏)
+ * 语义色同步灰化:good=灰绿 warn=灰金 bad=灰红。
+ */
 const config: Config = {
   content: ['./src/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {
-        // docs/01 §6:青蓝色系(区别于竞品紫罗兰),语义色自成体系
         brand: {
-          50: '#ecfeff',
-          100: '#cffafe',
-          200: '#a5f3fc',
-          300: '#67e8f9',
-          400: '#22d3ee',
-          500: '#06b6d4',
-          600: '#0891b2',
-          700: '#0e7490',
-          800: '#155e75',
-          900: '#164e63',
-          DEFAULT: '#0891b2',
+          50: '#f4f6f3',
+          100: '#e7ebe4',
+          200: '#cfd8cc',
+          300: '#adbcaa',
+          400: '#93a492',
+          500: '#82907f',
+          600: '#6f7c6d',
+          700: '#5c675b',
+          800: '#4c544b',
+          900: '#3f453e',
+          DEFAULT: '#6f7c6d',
+        },
+        blush: {
+          50: '#f8f3f1',
+          100: '#f0e6e3',
+          200: '#e4cfc9',
+          300: '#d5b5ac',
+          400: '#c6a094',
+          500: '#b58c7f',
+          600: '#9c7266',
+          700: '#825b52',
+          DEFAULT: '#b58c7f',
+        },
+        sand: {
+          50: '#f8f6f1',
+          100: '#efe9dd',
+          200: '#e2d8c6',
+          300: '#d2c3a9',
+          400: '#c0ad8c',
+          500: '#a8956f',
+          DEFAULT: '#c0ad8c',
         },
         ink: {
-          950: '#0a0f1e',
-          900: '#101728',
-          800: '#1a2338',
-          700: '#2a3550',
+          950: '#26251f',
+          900: '#2f2d26',
+          800: '#3a3730',
+          700: '#4a463b',
         },
-        good: '#059669',
-        warn: '#d97706',
-        bad: '#dc2626',
+        good: {
+          50: '#f1f4ee',
+          100: '#e0e8da',
+          DEFAULT: '#7f8d72',
+          600: '#6a775d',
+        },
+        warn: {
+          50: '#f8f3e8',
+          100: '#efe3cb',
+          DEFAULT: '#c2a26b',
+          600: '#a5854f',
+        },
+        bad: {
+          50: '#f8efee',
+          100: '#f0dcd9',
+          DEFAULT: '#b98b84',
+          600: '#9f6f67',
+        },
       },
       boxShadow: {
-        card: '0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06)',
-        'card-hover': '0 4px 12px rgba(16,24,40,.08), 0 2px 4px rgba(16,24,40,.04)',
-        glow: '0 0 0 1px rgba(103,232,249,.15), 0 0 40px rgba(34,211,238,.15)',
+        card: '0 1px 2px rgba(60,55,45,.05), 0 1px 3px rgba(60,55,45,.07)',
+        'card-hover': '0 4px 12px rgba(60,55,45,.1), 0 2px 4px rgba(60,55,45,.05)',
+        glow: '0 0 0 1px rgba(173,188,170,.18), 0 0 40px rgba(147,164,146,.16)',
       },
       keyframes: {
         'fade-up': {

@@ -111,7 +111,7 @@ export default function LandingPage() {
       {/* ===== Hero ===== */}
       <section className="relative overflow-hidden bg-ink-950">
         <div className="pointer-events-none absolute -left-40 -top-40 h-[30rem] w-[30rem] animate-float-slow rounded-full bg-brand-500/20 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-52 right-0 h-[34rem] w-[34rem] rounded-full bg-sky-500/10 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-52 right-0 h-[34rem] w-[34rem] rounded-full bg-sand/10 blur-3xl" />
         <div
           className="pointer-events-none absolute inset-0 opacity-40"
           style={{
@@ -131,7 +131,7 @@ export default function LandingPage() {
             当用户问 AI 时,
             <br className="hidden md:block" />
             你的品牌
-            <span className="bg-gradient-to-r from-brand-300 via-sky-300 to-brand-200 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-brand-300 via-sand-300 to-brand-200 bg-clip-text text-transparent">
               被推荐了吗?
             </span>
           </h1>

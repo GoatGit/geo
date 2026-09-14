@@ -28,17 +28,7 @@ export default function ReputationPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="口碑分析"
-        desc={
-          <>
-            情绪得分 <b className="metric-num text-lg text-slate-800">{data.totals.sentimentScore}</b>
-            <span className="ml-3 text-slate-500">
-              正 {data.totals.pos} / 中 {data.totals.neu} / 负 {data.totals.neg}
-            </span>
-          </>
-        }
-      />
+      <PageHeader title="口碑分析" />
 
       <section className="grid gap-4 lg:grid-cols-2 rise-1">
         <div className="card p-6">

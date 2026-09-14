@@ -4,6 +4,31 @@
 const TOKEN_KEY = 'geo.accessToken';
 const REFRESH_KEY = 'geo.refreshToken';
 const BRAND_KEY = 'geo.brandId';
+const ACCOUNT_KEY = 'geo.account';
+
+export interface SessionAccount {
+  accountId: number;
+  phone: string;
+  role?: string;
+}
+
+export const accountStore = {
+  get(): SessionAccount | null {
+    if (typeof window === 'undefined') return null;
+    const v = localStorage.getItem(ACCOUNT_KEY);
+    if (!v) return null;
+    try {
+      return JSON.parse(v) as SessionAccount;
+    } catch {
+      return null;
+    }
+  },
+  save(account: SessionAccount) {
+    localStorage.setItem(ACCOUNT_KEY, JSON.stringify(account));
+  },
+};
+
+export const isAdmin = () => accountStore.get()?.role === 'admin';
 
 export const tokenStore = {
   get access() {
@@ -18,6 +43,7 @@ export const tokenStore = {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(REFRESH_KEY);
     localStorage.removeItem(BRAND_KEY);
+    localStorage.removeItem(ACCOUNT_KEY);
   },
 };
 

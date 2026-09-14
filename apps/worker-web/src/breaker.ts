@@ -1,8 +1,10 @@
 import { Redis } from 'ioredis';
+import { breakerManualKey, breakerTrippedKey } from '@geo/shared';
 
 /**
  * 引擎熔断器(docs/04 §5):5 分钟失败率 > 阈值(默认 30%)→ 暂停该引擎派发 + 告警位。
  * 计数按分钟桶滑窗存 Redis,多 Worker 实例共享。
+ * manual 位来自管理后台的手动暂停(不过期);tripped 位为自动熔断(5 分钟半开重试)。
  */
 export class EngineBreaker {
   constructor(
@@ -24,7 +26,9 @@ export class EngineBreaker {
   }
 
   async isTripped(engine: string): Promise<boolean> {
-    return (await this.redis.get(`geo:breaker:tripped:${engine}`)) === '1';
+    // 手动暂停优先:自动熔断的半开重试不能越过运营的显式停用
+    if ((await this.redis.get(breakerManualKey(engine))) === '1') return true;
+    return (await this.redis.get(breakerTrippedKey(engine))) === '1';
   }
 
   async refreshTrip(engine: string): Promise<boolean> {
@@ -38,7 +42,7 @@ export class EngineBreaker {
     }
     const total = ok + fail;
     const rate = total > 0 ? fail / total : 0;
-    const trippedKey = `geo:breaker:tripped:${engine}`;
+    const trippedKey = breakerTrippedKey(engine);
     if (total >= 10 && rate > this.failRateThreshold) {
       await this.redis.set(trippedKey, '1', 'EX', 300); // 5 分钟半开重试
       return true;

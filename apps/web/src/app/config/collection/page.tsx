@@ -26,16 +26,7 @@ export default function CollectionPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="采集状态"
-        desc={
-          data.plan
-            ? `计划:每日 ${data.plan.freq} 轮 · 引擎 ${data.plan.engines.join(' / ')}${
-                data.plan.nextRunAt ? ` · 下轮 ${new Date(data.plan.nextRunAt).toLocaleString('zh-CN')}` : ' · 待问题配置后触发首轮'
-              }`
-            : '无采集计划'
-        }
-      />
+      <PageHeader title="采集状态" />
 
       <section className="grid gap-4 lg:grid-cols-2">
         <div className="card rise-1 p-6">
@@ -59,9 +50,9 @@ export default function CollectionPage() {
                   <td className="metric-num py-1.5">{e.successRate == null ? '—' : `${Math.round(e.successRate * 100)}%`}</td>
                   <td className="py-1.5">
                     {e.paused ? (
-                      <span className="rounded bg-red-50 px-1.5 py-0.5 text-bad">熔断维护中,数据将延迟</span>
+                      <span className="rounded bg-bad-50 px-1.5 py-0.5 text-bad">熔断维护中,数据将延迟</span>
                     ) : (
-                      <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-good">正常</span>
+                      <span className="rounded bg-good-50 px-1.5 py-0.5 text-good">正常</span>
                     )}
                   </td>
                 </tr>
@@ -103,12 +94,12 @@ export default function CollectionPage() {
               title={`${r.engine} · ${r.status} · ${new Date(r.ranAt).toLocaleTimeString('zh-CN')}`}
               className={`h-2.5 w-2.5 rounded-sm ${
                 r.status === 'ok_with_answer'
-                  ? 'bg-emerald-400'
+                  ? 'bg-good'
                   : r.status === 'ok_empty'
                     ? 'bg-slate-300'
                     : r.status === 'failed'
-                      ? 'bg-red-400'
-                      : 'bg-amber-300'
+                      ? 'bg-bad'
+                      : 'bg-warn'
               }`}
             />
           ))}

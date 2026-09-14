@@ -51,10 +51,7 @@ export default function RecognitionPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="识别口径管理"
-        desc="告诉系统哪些说法算「你」、哪些算「对手」——榜单与统计口径由此决定。自有产品线别名务必登记,避免自家产品被当成竞品。"
-      />
+      <PageHeader title="识别口径" />
 
       <section className="card rise-1 p-6">
         <h2 className="mb-2 text-sm font-medium">本品识别口径</h2>
@@ -75,7 +72,7 @@ export default function RecognitionPage() {
             <li key={c.id} className="flex items-center gap-2">
               <b>{c.name}</b>
               <span className="text-slate-500">{c.aliases.length > 0 ? `别名:${c.aliases.join('、')}` : ''}</span>
-              {!c.confirmed && <span className="rounded bg-amber-50 px-1.5 text-xs text-warn">待确认</span>}
+              {!c.confirmed && <span className="rounded bg-warn-50 px-1.5 text-xs text-warn">待确认</span>}
             </li>
           ))}
           {competitors.length === 0 && <li className="text-slate-400">暂无竞品条目</li>}

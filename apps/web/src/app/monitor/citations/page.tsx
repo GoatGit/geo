@@ -23,20 +23,7 @@ export default function CitationsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="引用源分析"
-        desc={
-          <>
-            近 7 天总被引 <b className="metric-num text-slate-700">{data.totals.citations}</b> · 自有域名被引{' '}
-            <b className="metric-num text-slate-700">{data.totals.owned}</b>
-            {data.totals.ownedShare != null && (
-              <>
-                {' '}· 自有占比 <b className="metric-num text-slate-700">{Math.round(data.totals.ownedShare * 100)}%</b>
-              </>
-            )}
-          </>
-        }
-      />
+      <PageHeader title="引用源分析" />
 
       <section className="card rise-1 p-6">
         <h2 className="mb-4 font-semibold text-slate-900">信源平台偏好(TOP 20)</h2>

@@ -9,7 +9,8 @@
     "test": "vitest run",
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
-    "seed:profiles": "tsx src/seed.ts"
+    "seed:profiles": "tsx src/seed.ts",
+    "seed:mock": "tsx src/seed-mock.ts"
   },
   "dependencies": {
     "@geo/browser-session": "workspace:*",
