@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { Pool } from 'pg';
 import type { Db } from '@geo/db';
 import { accountProfiles } from '@geo/db';
+import { WEB_ENGINES } from '@geo/shared';
 
 export interface AcquiredProfile {
   id: number;
@@ -104,6 +105,37 @@ export class AccountPoolService {
         .update(accountProfiles)
         .set({ status: 'cooldown', cooldownUntil: new Date(Date.now() + 24 * 3600 * 1000) })
         .where(eq(accountProfiles.id, profileId));
+    }
+  }
+
+  /**
+   * 确保每个引擎至少有 perEngine 个可用档案,不足则补种(mock 虚拟档案)。
+   * 仅 mock 采集模式下调用:真实浏览器模式的档案含真实登录态,必须人工录入(docs/04 §3.1),
+   * 否则账号池为空会导致全部任务无限延迟重排、采集静默空转。
+   */
+  async ensureMockProfiles(perEngine = 2): Promise<void> {
+    for (const engine of WEB_ENGINES) {
+      const res = await (this.db.$client as Pool).query<{ count: string }>(
+        `select count(*) as count from account_profiles
+         where engine = $1 and surface = 'web' and status = 'available'`,
+        [engine],
+      );
+      const have = Number(res.rows[0]?.count ?? 0);
+      for (let i = have; i < perEngine; i++) {
+        await this.db.insert(accountProfiles).values({
+          engine,
+          surface: 'web',
+          fingerprint: {
+            ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36',
+            viewport: '1366x768',
+            locale: 'zh-CN',
+          },
+          proxyHint: `residential:mock:${engine}:${i}`,
+          contextRef: `mock-context-${engine}-${i}`,
+          healthScore: 100,
+          status: 'available',
+        });
+      }
     }
   }
 }

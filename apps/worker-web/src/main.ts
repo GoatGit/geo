@@ -7,6 +7,7 @@ import { envInt } from './config';
 import { CollectProcessor } from './processor';
 import { LoginManager } from './login-manager';
 import { RoundScheduler } from './scheduler';
+import { AccountPoolService } from './profiles';
 import { startReportsWorker, startReputationWorker, scheduleWeeklyReports } from './report-worker';
 import { createBrokerFromEnv } from '@geo/browser-session';
 
@@ -24,6 +25,11 @@ async function bootstrap() {
   const scheduler = new RoundScheduler(db);
   const concurrency = envInt('WORKER_CONCURRENCY', 4, 1, 64);
   scheduler.start(undefined, concurrency); // 间隔经 SCHEDULER_INTERVAL_MS 配置(默认 60s);并发数随心跳上报
+
+  // mock 采集模式下确保账号池非空:池空会导致任务无限延迟重排、采集静默空转
+  if ((process.env.BROWSER_MODE ?? 'mock') === 'mock') {
+    await new AccountPoolService(db).ensureMockProfiles(2);
+  }
 
   // 全进程共享一个 broker:采集与人工登录(refcount 复用本地浏览器进程/登录态)
   const broker = createBrokerFromEnv();
