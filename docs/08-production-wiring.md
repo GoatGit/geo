@@ -9,9 +9,9 @@
 | 接入 | 经典 CLB `lb-bp1fzv3byjp3gdnc9q4ym`(公网 120.26.225.215),80→3001、443→3001(HTTPS) | ✅ |
 | 证书 | Let's Encrypt RSA 2048,`CN=geo.gemux.cn`,至 2026-12-13;续期脚本 `scripts/renew-https-cert.sh` | ✅ |
 | DNS | `geo.gemux.cn` → 120.26.225.215 | ✅ |
-| Web | SAE `geo-web`(cn-hangzhou:geoprod),Next.js,镜像 `web:v3` | ✅ |
-| API | SAE `geo-api`,内网 CLB `10.115.0.73:3000` | ✅ |
-| Worker | SAE `geo-worker`(调度器 + BullMQ 消费,并发 2,BROWSER_MODE=mock) | ✅ |
+| Web | SAE `geo-web`(cn-hangzhou:geoprod),Next.js,镜像 `geo:v3` | ✅ |
+| API | SAE `geo-api`,内网 CLB `10.115.0.73:3000`,镜像 `geo:v4`(含短信预埋与 ADMIN_PHONES) | ✅ |
+| Worker | SAE `geo-worker`(调度器 + BullMQ 消费,并发 2,BROWSER_MODE=mock),镜像 `geo:v4`(校准版 broker) | ✅ |
 | 数据库 | RDS PG18 `pgm-bp1162bs35p43g4y`(公网 `geopub...:15432`),41 表 + 月分区 | ✅ |
 | 缓存 | Redis 1G 主备 `r-bp13fae164f9f734`,`maxmemory-policy=noeviction` | ✅ |
 | 存证 | OSS `gemux-geo-evidence`(evidence pack:answer/snapshot/manifest) | ✅ |
