@@ -107,4 +107,4 @@ AGENTBAY_TOKEN=akm-xxxx scripts/wire-agentbay.sh
 - **账号池**:mock 模式启动自动补种;真实浏览器模式人工录入,健康分 ≤30 退役、<60 冷却 24h。
 - **首轮采集触发**:问题配置完成时 API 会把 `collection_plans.next_run_at` 置 now;调度器 60s tick 派发。手工补触发:`update collection_plans set next_run_at=now() where brand_id=<id>`。
 - **geo-db SAE 应用**:已 STOPPED 保留(DB 已迁 RDS),确认稳定后可删除。
-- **RDS 公网端点** `geopub...:15432` 仅运维用,建议验证完关闭公网访问。
+- **RDS 公网端点**:2026-09-15 起公网 `geopub...:15432` 已不可达(符合安全建议)。所有运维走 VPC 内网(如 SAE 临时任务或同 VPC 跳板);本地开发用内网穿透或临时白名单。
