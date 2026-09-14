@@ -10,6 +10,7 @@ import { ReportsModule } from './reports/reports.module';
 import { EventsModule } from './events/events.module';
 import { AdminModule } from './admin/admin.module';
 import { BillingModule } from './billing/billing.module';
+import { InsightsModule } from './insights/insights.module';
 import { RunsController } from './runs/runs.controller';
 import { CollectionController } from './collection/collection.controller';
 import { AccountController } from './account/account.controller';
@@ -28,6 +29,7 @@ const miscControllers = [RunsController, CollectionController, AccountController
     EventsModule,
     AdminModule,
     BillingModule,
+    InsightsModule,
   ],
   controllers: [...miscControllers],
   providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }],

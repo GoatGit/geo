@@ -6,6 +6,7 @@ import { MetricCardView } from '@/components/metric-card';
 import { Badge, EmptyState, PageHeader, Skeleton, pct } from '@/components/ui';
 import { IconArrowRight, IconCheck, IconList, IconLogo, IconPulse, IconShield } from '@/components/icons';
 import { api, useBrandId, useRankings } from '@/lib/queries';
+import type { InsightSummaryDto } from '@geo/shared';
 
 const HEALTH_LABELS: Record<string, string> = {
   mentionRate: '提及率',
@@ -115,6 +116,9 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* 行业洞察(已发布报告;docs/01 §3.10 扩展板块) */}
+      <InsightSection />
 
       {/* 指标卡 */}
       <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -312,5 +316,44 @@ function Step({
     </Link>
   ) : (
     inner
+  );
+}
+
+
+/** 行业洞察板块(docs/01 §3.10 扩展):已发布的行业报告卡片,点击进入印刷风详情页。 */
+function InsightSection() {
+  const insights = useQuery({
+    queryKey: ['insights-published'],
+    queryFn: () => api<InsightSummaryDto[]>('/insights'),
+  });
+  if (!insights.data || insights.data.length === 0) return null;
+  return (
+    <section className="card rise p-6">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="font-semibold text-slate-900">行业洞察</h2>
+        <span className="text-[10px] text-slate-400">各行业在主流 AI 引擎中的可见度实测</span>
+      </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        {insights.data.slice(0, 6).map((it) => (
+          <Link
+            key={it.id}
+            href={`/insights/${it.id}`}
+            className="group rounded-xl border border-slate-100 p-4 transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-card-hover"
+          >
+            <p className="flex items-center gap-1.5 text-[10px] font-medium text-slate-400">
+              <Badge label={it.industry} tone="brand" />
+              {it.issue && <span>{it.issue}</span>}
+            </p>
+            <h3 className="mt-2 text-[13px] font-semibold leading-5 text-slate-800 group-hover:text-brand-700">{it.title}</h3>
+            <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-slate-500">{it.summary}</p>
+            {(it.cover.brands || it.cover.questions) && (
+              <p className="metric-num mt-2 text-[10px] text-slate-400">
+                {[it.cover.brands && `${it.cover.brands} 品牌`, it.cover.questions && `${it.cover.questions} 题`, it.cover.answers && `${it.cover.answers} 条回答`].filter(Boolean).join(' · ')}
+              </p>
+            )}
+          </Link>
+        ))}
+      </div>
+    </section>
   );
 }

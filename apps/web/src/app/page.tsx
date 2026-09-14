@@ -2,7 +2,9 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { tokenStore } from '../lib/api';
+import { useQuery } from '@tanstack/react-query';
+import type { InsightSummaryDto } from '@geo/shared';
+import { api, tokenStore } from '../lib/api';
 import {
   IconArrowRight,
   IconCheck,
@@ -68,6 +70,11 @@ export default function LandingPage() {
   useEffect(() => setLogged(!!tokenStore.access), []);
 
   const startHref = logged ? '/dashboard' : '/login';
+  // 官网精选行业洞察(公开接口;docs/01 §3.10 扩展)
+  const featured = useQuery({
+    queryKey: ['insights-featured'],
+    queryFn: () => api<InsightSummaryDto[]>('/insights/featured'),
+  });
   // 付费档位直达套餐页(登录后);未登录先进登录页
   const planHref = (plan: string | null) => (plan === null ? startHref : logged ? `/billing?plan=${plan}` : '/login');
 
@@ -265,6 +272,43 @@ export default function LandingPage() {
           ))}
         </div>
       </section>
+
+      {/* ===== 行业洞察精选 ===== */}
+      {featured.data && featured.data.length > 0 && (
+        <section id="insights" className="bg-white py-24">
+          <div className="mx-auto max-w-6xl px-6">
+            <SectionHead
+              eyebrow="行业洞察"
+              title="各行业在 AI 里的真实存在感"
+              sub="抢答题实测 × 6 大引擎 —— 命中高 ≠ 评价好,量的是被 AI 主动提及。"
+            />
+            <div className="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+              {featured.data.map((it, i) => (
+                <Link
+                  key={it.id}
+                  href={`/insights/${it.id}`}
+                  className={`card group flex flex-col p-6 rise-${(i % 3) + 1} transition-all duration-200 hover:-translate-y-1`}
+                >
+                  <p className="flex items-center gap-2 text-[11px] font-medium text-slate-400">
+                    <span className="rounded bg-brand-50 px-1.5 py-0.5 font-semibold text-brand-700">{it.industry}</span>
+                    {it.issue}
+                  </p>
+                  <h3 className="mt-3 text-[15px] font-bold leading-6 text-slate-900 group-hover:text-brand-700">{it.title}</h3>
+                  <p className="mt-2 line-clamp-3 flex-1 text-[13px] leading-6 text-slate-500">{it.summary}</p>
+                  {(it.cover.brands || it.cover.questions) && (
+                    <p className="metric-num mt-3 text-[11px] text-slate-400">
+                      {[it.cover.brands && `${it.cover.brands} 品牌`, it.cover.questions && `${it.cover.questions} 题`, it.cover.answers && `${it.cover.answers} 条回答`].filter(Boolean).join(' · ')}
+                    </p>
+                  )}
+                  <span className="mt-3 flex items-center gap-1 text-xs font-medium text-brand-600">
+                    阅读报告 <IconArrowRight width={13} height={13} />
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* ===== 定价 ===== */}
       <section id="pricing" className="bg-slate-50 py-24">

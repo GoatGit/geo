@@ -45,9 +45,6 @@ def call(action, params, method="GET"):
     p = signed({"Action": action, **params}, method)
     url = f"https://{ENDPOINT}/?{urllib.parse.urlencode(p)}"
     req = urllib.request.Request(url, method=method)
-    if method == "POST":
-        req.add_header("Content-Type", "application/x-www-form-urlencoded")
-        req.data = urllib.parse.urlencode(p).encode()
     try:
         with urllib.request.urlopen(req) as resp:
             return json.loads(resp.read())

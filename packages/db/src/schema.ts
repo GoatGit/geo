@@ -327,3 +327,28 @@ export const orders = pgTable('orders', {
   meta: jsonb('meta').$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** 洞察行业(管理员后台配置):哪些行业有洞察内容。 */
+export const insightIndustries = pgTable('insight_industries', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  name: text('name').notNull().unique(),
+  sort: integer('sort').notNull().default(0),
+  active: boolean('active').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** 行业洞察报告:blocks 为结构化图表块(口径见 @geo/shared InsightBlock),精选上官网首页。 */
+export const industryInsights = pgTable('industry_insights', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  industryId: bigint('industry_id', { mode: 'number' }).notNull(),
+  issue: text('issue').notNull().default(''),
+  title: text('title').notNull(),
+  summary: text('summary').notNull().default(''),
+  cover: jsonb('cover').$type<Record<string, unknown>>().notNull().default({}),
+  blocks: jsonb('blocks').$type<unknown[]>().notNull().default([]),
+  status: text('status').notNull().default('draft'),
+  featured: boolean('featured').notNull().default(false),
+  publishedAt: timestamp('published_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});

@@ -20,7 +20,7 @@ export class AppExceptionFilter implements ExceptionFilter {
       res.status(status).json({ error: { code: status, message } });
       return;
     }
-    this.logger.error('unhandled exception', exception as Error);
+    this.logger.error('unhandled exception', exception instanceof Error ? exception.stack : String(exception));
     res
       .status(HttpStatus.INTERNAL_SERVER_ERROR)
       .json({ error: { code: 500, message: 'internal error' } });
