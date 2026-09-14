@@ -10,11 +10,15 @@ import {
 } from '@geo/db';
 import { PLAN_LIMITS, WEB_ENGINES, type PlanTier } from '@geo/shared';
 import { parseBrandDescription } from './brand-intelligence';
+import { BillingService } from '../billing/billing.service';
 import { DB } from '../common/infra.module';
 
 @Injectable()
 export class BrandsService {
-  constructor(@Inject(DB) private readonly db: NodePgDatabase) {}
+  constructor(
+    @Inject(DB) private readonly db: NodePgDatabase,
+    private readonly billing: BillingService,
+  ) {}
 
   /**
    * 品牌初始化(docs/01 §3.1):解析 → 档案草稿 → 识别口径预填(A1 对策:
@@ -22,7 +26,9 @@ export class BrandsService {
    */
   async create(input: { accountId: number; description: string; plan?: PlanTier }) {
     const draft = parseBrandDescription(input.description);
-    const plan: PlanTier = input.plan ?? 'free';
+    // 默认档位跟随账号会员(docs/01 §3.10 会员为账号级);显式传参仅平台侧使用
+    const membership = await this.billing.accountMembership(input.accountId);
+    const plan: PlanTier = input.plan ?? membership.plan;
 
     const brand = (
       await this.db

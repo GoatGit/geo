@@ -1,6 +1,6 @@
 import { and, eq, gte, sql } from 'drizzle-orm';
-import { brands, mentionFacts, monitoringQuestions, reputationFacts, type Db } from '@geo/db';
-import { classifyLayer } from '@geo/metrics';
+import { brands, citationFacts, mentionFacts, monitoringQuestions, reputationFacts, type Db } from '@geo/db';
+import { classifyLayer, generateActionList } from '@geo/metrics';
 
 /** 窗口内单条 self 事实的最小投影(纯函数输入,便于单测)。 */
 export interface LayerFact {
@@ -109,6 +109,78 @@ export async function buildReportPayload(
     .limit(200);
   const pos = rep.filter((r) => r.sentiment === 'pos').length;
 
+  // 竞品榜(前 5,同批查询同口径)
+  const comp = await db.execute(sql`
+    select mf.subject_name,
+           count(*) filter (where mf.mentioned)                   as mentions,
+           count(*) filter (where mf.mentioned and mf.rank <= 3)  as top3,
+           count(distinct mf.run_id)                              as runs
+    from mention_facts mf
+    where mf.brand_id = ${brandId} and mf.ran_at >= ${since}
+      and mf.subject_kind in ('competitor', 'discovered')
+    group by mf.subject_name
+    order by mentions desc limit 5
+  `);
+  const competitors = comp.rows.map((r) => {
+    const row = r as Record<string, string>;
+    const runs = Number(row.runs);
+    const mentions = Number(row.mentions);
+    const rate = (n: number) => (runs > 0 ? Math.round((n / runs) * 1000) / 1000 : null);
+    return { name: row.subject_name, mentions, mentionRate: rate(mentions), top3Rate: rate(Number(row.top3)) };
+  });
+
+  // 引用源概况(自有域名占比 + 高频信源)
+  const cites = await db
+    .select({ domain: citationFacts.domain, isOwned: citationFacts.isOwned })
+    .from(citationFacts)
+    .where(and(eq(citationFacts.brandId, brandId), gte(citationFacts.extractedAt, since)));
+  const domainHits = new Map<string, number>();
+  let owned = 0;
+  for (const c of cites) {
+    domainHits.set(c.domain, (domainHits.get(c.domain) ?? 0) + 1);
+    if (c.isOwned) owned += 1;
+  }
+  const topDomains = [...domainHits.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)
+    .map(([domain, hits]) => ({ domain, hits }));
+
+  // 行动清单(规则引擎,docs/02 §6)
+  const engineRates = await db.execute(sql`
+    select mf.engine,
+           count(*) as valid,
+           count(*) filter (where mf.mentioned) as mentioned,
+           count(*) filter (where mf.mentioned and mf.rank <= 3) as top3,
+           count(*) filter (where mf.mentioned and mf.rank = 1) as top1
+    from mention_facts mf
+    where mf.brand_id = ${brandId} and mf.ran_at >= ${since} and mf.subject_kind = 'self'
+    group by mf.engine
+  `);
+  const eStats = engineRates.rows.map((r) => {
+    const row = r as Record<string, string>;
+    const v = Number(row.valid) || 1;
+    return { engine: row.engine, mentionRate: Number(row.mentioned) / v, top3Rate: Number(row.top3) / v, top1Rate: Number(row.top1) / v };
+  });
+  const negTerms = new Map<string, number>();
+  for (const r of rep) {
+    for (const term of r.impressionTerms) {
+      if (term.polarity === 'neg') negTerms.set(term.term, (negTerms.get(term.term) ?? 0) + 1);
+    }
+  }
+  const { rulesetVersion, items } = generateActionList({
+    layers: layers.map((l) => ({ questionId: l.id, text: l.text, layer: l.layer })),
+    metrics:
+      valid > 0
+        ? {
+            mentionRate: Number(t.mentioned ?? 0) / valid,
+            top3Rate: Number(t.top3 ?? 0) / (ranked || 1),
+            top1Rate: Number(t.top1 ?? 0) / (ranked || 1),
+          }
+        : null,
+    engineStats: eStats,
+    competitorCitations: [],
+    sentimentScore: rep.length > 0 ? Math.round((pos / rep.length) * 100) : null,
+    negativeImpressions: [...negTerms.entries()].map(([term, count]) => ({ term, count })),
+  });
+
   return {
     reportType: type,
     period,
@@ -123,14 +195,23 @@ export async function buildReportPayload(
       excluded: { failed: Number(exRow.failed ?? 0), quotaBlocked: Number(exRow.quota_blocked ?? 0) },
     },
     questionLayers: layers,
+    competitors,
+    citations: {
+      total: cites.length,
+      owned,
+      ownedShare: cites.length > 0 ? Math.round((owned / cites.length) * 1000) / 1000 : null,
+      top: topDomains,
+    },
     reputation: {
       runs: rep.length,
       sentimentScore: rep.length > 0 ? Math.round((pos / rep.length) * 100) : null,
+      weaknesses: [...negTerms.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([term, runs]) => ({ term, runs })),
     },
+    actions: items,
     appendix: {
       methodology:
         '口径定义见 docs/02:提及率分母=有效 QueryRun(ok_with_answer+ok_empty);Top3/首推率分母=有效且有名次;综合名次=未上榜记 N+1 取中位数。健康阈值方法论=行业 P75 分位,8 周重校。',
-      rulesetVersion: '2026.09.1',
+      rulesetVersion,
       snapshotNote: '原始快照按 7 天保留;报告内引用的证据随报告 payload 归档(docs/01 §3.7)。',
     },
   };

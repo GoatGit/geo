@@ -274,3 +274,16 @@ export interface MentionFactDraft {
   parserVersion: string;
   confidence: number;
 }
+
+/** 套餐定价(docs/02 §7.1),单位:分;年付 = 月付 × 10(享约 17% 折扣)。 */
+export const PLAN_PRICING: Record<Exclude<PlanTier, 'free' | 'custom'>, { monthly: number; yearly: number }> = {
+  starter: { monthly: 7900, yearly: 79000 },
+  standard: { monthly: 19900, yearly: 199000 },
+  pro: { monthly: 49900, yearly: 499000 },
+};
+
+/** 可购买的付费档位(免费版无需支付,定制走商务)。 */
+export const PURCHASABLE_PLANS = ['starter', 'standard', 'pro'] as const;
+
+/** 积分单价(docs/02 §7.2):¥0.1/积分,充值 100 积分起。 */
+export const CREDIT_UNIT_PRICE_FEN = 10; // 分/积分

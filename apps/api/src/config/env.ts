@@ -23,6 +23,8 @@ export interface AppEnv {
   evidenceStorage: 'local' | 's3';
   /** 平台管理员手机号(逗号分隔):登录注册时自动授予 admin 角色 */
   adminPhones: string[];
+  /** 公网可达基址(支付回调 notify_url 拼接;为空时真实渠道无法接收异步通知) */
+  publicBaseUrl: string;
 }
 
 export function loadEnv(env: NodeJS.ProcessEnv = process.env): AppEnv {
@@ -47,5 +49,6 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): AppEnv {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
+    publicBaseUrl: env.PUBLIC_BASE_URL ?? '',
   };
 }

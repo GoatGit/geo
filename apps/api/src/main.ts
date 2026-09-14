@@ -10,7 +10,8 @@ async function bootstrap() {
   const env = loadEnv();
   (globalThis as { __geoEnv?: unknown }).__geoEnv = env;
 
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // rawBody:微信支付回调需对原始报文验签(docs/07 §9 STS/验签语义)
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
   app.useGlobalFilters(new AppExceptionFilter());
   app.enableCors({ origin: env.nodeEnv === 'production' ? true : true, credentials: true });

@@ -114,7 +114,7 @@ export class CollectProcessor {
     // 而是把该 run 标记 failed 并保留现场日志。
     const ranAt = new Date();
     const adapter = this.registry.get(engine as never, 'web');
-    let runId: number;
+    let runId: number | undefined;
     try {
       const runRow = (
         await this.db

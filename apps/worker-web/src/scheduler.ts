@@ -127,6 +127,8 @@ export class RoundScheduler {
             sql`${collectionPlans.nextRunAt} is not null and ${collectionPlans.nextRunAt} <= now()`,
           ),
         )
+        // 到期早的先派发:同优先级下近似品牌轮转 fair-share(docs/04 §5)
+        .orderBy(collectionPlans.nextRunAt)
         .limit(50);
 
       for (const plan of due) {

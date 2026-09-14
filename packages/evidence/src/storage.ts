@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, normalize, resolve } from 'node:path';
 import {
   GetObjectCommand,
@@ -9,9 +9,9 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 export interface EvidenceStorage {
   put(key: string, body: Buffer): Promise<void>;
+  get(key: string): Promise<Buffer>;
   /** 短时效签名 URL(STS 语义;local 实现返回 file:// 仅供 dev) */
   signedUrl(key: string, ttlSec: number): Promise<string>;
-  /** 归档语义检查:key 必须在 evidence/ 命名空间下 */
 }
 
 function assertEvidenceKey(key: string): string {
@@ -65,6 +65,14 @@ export class S3EvidenceStorage implements EvidenceStorage {
       { expiresIn: ttlSec },
     );
   }
+
+  async get(key: string): Promise<Buffer> {
+    const res = await this.client.send(
+      new GetObjectCommand({ Bucket: this.cfg.bucket, Key: assertEvidenceKey(key) }),
+    );
+    if (!res.Body) throw new Error(`evidence object empty: ${key}`);
+    return Buffer.from(await res.Body.transformToByteArray());
+  }
 }
 
 /** dev/测试实现:本地文件系统。 */
@@ -84,6 +92,11 @@ export class LocalEvidenceStorage implements EvidenceStorage {
   async signedUrl(key: string): Promise<string> {
     const clean = assertEvidenceKey(key);
     return `file://${join(this.rootDir, clean)}`;
+  }
+
+  async get(key: string): Promise<Buffer> {
+    const clean = assertEvidenceKey(key);
+    return readFile(join(this.rootDir, clean));
   }
 }
 

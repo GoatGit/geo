@@ -38,3 +38,15 @@ export interface RawCitation {
 export function isWebEngine(v: string): v is EngineId {
   return (WEB_ENGINES as readonly string[]).includes(v);
 }
+
+/** 支付渠道:mock 为 dev 降级通道(密钥未配置时),生产禁用。 */
+export const PAY_CHANNELS = ['wechat', 'alipay', 'mock'] as const;
+export type PayChannel = (typeof PAY_CHANNELS)[number];
+
+/** 订阅计费周期:年付 = 10 个月价(年付享折扣,落地页口径)。 */
+export const BILLING_PERIODS = ['monthly', 'yearly'] as const;
+export type BillingPeriod = (typeof BILLING_PERIODS)[number];
+
+/** 订单状态机:created → paid;failed/refunded/expired 为终止态,已支付行不可变更。 */
+export const ORDER_STATUSES = ['created', 'paid', 'failed', 'refunded', 'expired'] as const;
+export type OrderStatus = (typeof ORDER_STATUSES)[number];

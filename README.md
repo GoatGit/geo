@@ -16,7 +16,7 @@ packages/
   evidence/        证据包(answer/raw/meta/integrity.sha256)+ S3 兼容存储(MinIO/OSS)
 apps/
   api/             NestJS:auth/brands/questions/recognition/monitor(指标唯一出口)/runs/_collection/account/reports/WS + admin(平台管理后台)
-  worker-web/      采集编排:BullMQ 调度/熔断/账号池(健康分)/即时抽取/竞品发现/口碑基线/报告生成
+  worker-web/      采集编排:BullMQ 调度(品牌时区白天随机)/熔断/账号池(健康分)/ask 超时护栏/失败换号重试/即时抽取/竞品发现/口碑基线/报告生成
   web/             Next.js 控制台:总览/排名透视(矩阵+漏斗)/引用源/口碑/问题/口径/采集状态/报告 + 平台后台(/admin:系统总览/全局配置/采集轮次)
 ```
 

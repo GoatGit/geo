@@ -308,3 +308,22 @@ export const platformSettings = pgTable('platform_settings', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   updatedBy: bigint('updated_by', { mode: 'number' }),
 });
+
+/** 支付订单(docs/02 §7):会员订阅支付事实与对账依据;已支付行由触发器保护不可变更。 */
+export const orders = pgTable('orders', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  outTradeNo: text('out_trade_no').notNull().unique(),
+  accountId: bigint('account_id', { mode: 'number' }).notNull(),
+  product: text('product').notNull().default('plan'),
+  plan: text('plan').notNull(),
+  period: text('period').notNull(),
+  channel: text('channel').notNull(),
+  amountCents: integer('amount_cents').notNull(),
+  status: text('status').notNull().default('created'),
+  channelTradeId: text('channel_trade_id'),
+  payUrl: text('pay_url'),
+  paidAt: timestamp('paid_at', { withTimezone: true }),
+  expireAt: timestamp('expire_at', { withTimezone: true }),
+  meta: jsonb('meta').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});

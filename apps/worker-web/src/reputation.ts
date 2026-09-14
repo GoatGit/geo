@@ -12,8 +12,10 @@ const NEG_LEXICON = ['投诉', '慢', '差', '弱', '贵', '溢价', '顾虑', '
  * LLM 供应商经 LLM_PROVIDER 接入(DashScope),接口不变。
  */
 export async function extractReputation(db: Db, job: ReputationJobData): Promise<void> {
+  if (!job.answerText || !job.answerText.trim()) return; // 空回答无可抽取
+  const ranAt = Number.isNaN(new Date(job.ranAt).getTime()) ? new Date() : new Date(job.ranAt);
   const sentences = job.answerText
-    .split(/[。\n;;;!?!?]/)
+    .split(/[。;;\n!?]/)
     .map((s) => s.trim())
     .filter((s) => s.length > 4);
 
@@ -39,7 +41,7 @@ export async function extractReputation(db: Db, job: ReputationJobData): Promise
     impressionTerms: terms,
     excerpt: sentences[0] ?? null,
     auditState: 'pending',
-    ranAt: new Date(job.ranAt),
+    ranAt,
     parserVersion: PARSER_VERSION,
   });
 }
