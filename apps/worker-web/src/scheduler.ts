@@ -12,21 +12,66 @@ import {
   collectionPlans,
   collectionRounds,
   monitoringQuestions,
-  recognitionEntries,
   subscriptions,
 } from '@geo/db';
 import { COLLECT_QUEUE, bullConnection, priorityOf, type CollectJobData } from './queue';
 
 /** 单 tick 的派发预算:全局与每引擎剩余额度(Infinity = 不限),随入队扣减。 */
-interface Budget {
+export interface Budget {
   globalRemaining: number;
   engineRemaining: Map<string, number>;
 }
 
+const DAY_MS = 24 * 3600 * 1000;
+
+/** 时区在给定时刻的 UTC 偏移(ms);非法时区回落 +08:00(产品主要市场)。 */
+export function tzOffsetMs(instant: Date, timeZone: string): number {
+  try {
+    const dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    const parts = dtf.formatToParts(instant);
+    const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+    const asUTC = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour') % 24, get('minute'), get('second'));
+    return asUTC - instant.getTime();
+  } catch {
+    return 8 * 3600 * 1000;
+  }
+}
+
+/**
+ * 次日采集时刻(docs/04 §3.4 拟人化节奏):在品牌时区的 10:00–15:59 白天时段随机,
+ * 保证距 now ≥ 24h。纯函数(rand 可注入)便于单测。
+ */
+export function nextRunAtFrom(now: Date, timezone: string, rand: () => number = Math.random): Date {
+  const targetWall = now.getTime() + DAY_MS + tzOffsetMs(now, timezone);
+  const local = new Date(targetWall);
+  const hour = 10 + Math.floor(rand() * 6);
+  const minute = Math.floor(rand() * 60);
+  const wall = Date.UTC(
+    local.getUTCFullYear(),
+    local.getUTCMonth(),
+    local.getUTCDate(),
+    hour,
+    minute,
+    0,
+  );
+  // 墙钟 → instant:偏移随目标时刻的 DST 变化,迭代一次收敛
+  const firstGuess = new Date(wall - tzOffsetMs(now, timezone));
+  return new Date(wall - tzOffsetMs(firstGuess, timezone));
+}
+
 /**
  * 轮次调度器(docs/04 §5 轮次触发):
- * 每分钟扫描到期计划 → 建轮次 → 展开 问题×引擎 为 QueryRun 任务入队
- * → next_run_at = 次日(品牌时区白天随机化,docs/04 §3.4 拟人化节奏)。
+ * 每 tick 扫描到期计划 → 建轮次 → 展开 问题×引擎 为 QueryRun 任务入队
+ * → next_run_at = 次日品牌时区白天随机化(docs/04 §3.4)。
  * 首轮由"问题配置完成"触发(API 侧把 next_run_at 置 now)。
  *
  * 平台级约束(管理后台配置,@see PlatformSettings):
@@ -37,6 +82,7 @@ interface Budget {
 export class RoundScheduler {
   private timer?: NodeJS.Timeout;
   private concurrency = 4;
+  private ticking = false; // 重入护栏:上一 tick 未完成(如 DB 抖动)时不叠加派发
   private readonly queue = new Queue<CollectJobData>(COLLECT_QUEUE, {
     connection: bullConnection(),
   });
@@ -49,6 +95,7 @@ export class RoundScheduler {
     this.timer = setInterval(() => {
       void this.tick().catch((err) => console.error('[scheduler] tick failed', err));
     }, intervalMs);
+    void this.tick().catch((err) => console.error('[scheduler] first tick failed', err)); // 启动即跑一轮,不等间隔
   }
 
   async stop(): Promise<void> {
@@ -58,41 +105,45 @@ export class RoundScheduler {
   }
 
   async tick(): Promise<void> {
-    await this.heartbeat();
-    const settings = await loadPlatformSettings(this.db);
-    if (!settings.schedulerEnabled) return; // 总开关:停派发,心跳照写,在途任务不回收
+    if (this.ticking) return;
+    this.ticking = true;
+    try {
+      await this.heartbeat();
+      const settings = await loadPlatformSettings(this.db);
+      if (!settings.schedulerEnabled) return; // 总开关:停派发,心跳照写,在途任务不回收
 
-    const budget = await this.buildBudget(settings);
-    if (budget.globalRemaining <= 0) {
-      console.warn('[scheduler] 全局每日任务上限已达,今日暂停派发(管理后台可调整)');
-      return;
-    }
-
-    const due = await this.db
-      .select()
-      .from(collectionPlans)
-      .where(
-        and(
-          eq(collectionPlans.active, true),
-          sql`${collectionPlans.nextRunAt} is not null and ${collectionPlans.nextRunAt} <= now()`,
-        ),
-      )
-      .limit(50);
-
-    for (const plan of due) {
-      const canContinue = await this.dispatchRound(plan.brandId, plan.engines as string[], plan.timezone, budget);
-      // 次日白天随机(docs/04 §3.4:每日总量按地域时区白天重、夜间轻)
-      const tomorrow = new Date(Date.now() + 24 * 3600 * 1000);
-      const hour = 10 + Math.floor(Math.random() * 6); // 10:00-15:59
-      tomorrow.setUTCHours(hour - 8, Math.floor(Math.random() * 60), 0, 0); // Asia/Shanghai 基准
-      await this.db
-        .update(collectionPlans)
-        .set({ nextRunAt: tomorrow })
-        .where(eq(collectionPlans.id, plan.id));
-      if (!canContinue) {
-        console.warn('[scheduler] 全局每日预算耗尽,剩余计划明日续派');
-        break;
+      const budget = await this.buildBudget(settings);
+      if (budget.globalRemaining <= 0) {
+        console.warn('[scheduler] 全局每日任务上限已达,今日暂停派发(管理后台可调整)');
+        return;
       }
+
+      const due = await this.db
+        .select()
+        .from(collectionPlans)
+        .where(
+          and(
+            eq(collectionPlans.active, true),
+            sql`${collectionPlans.nextRunAt} is not null and ${collectionPlans.nextRunAt} <= now()`,
+          ),
+        )
+        .limit(50);
+
+      for (const plan of due) {
+        const canContinue = await this.dispatchRound(plan.brandId, plan.engines as string[], plan.timezone, budget);
+        // 次日白天随机(品牌时区,docs/04 §3.4:每日总量按地域时区白天重、夜间轻)
+        const nextRunAt = nextRunAtFrom(new Date(), plan.timezone);
+        await this.db
+          .update(collectionPlans)
+          .set({ nextRunAt })
+          .where(eq(collectionPlans.id, plan.id));
+        if (!canContinue) {
+          console.warn('[scheduler] 全局每日预算耗尽,剩余计划明日续派');
+          break;
+        }
+      }
+    } finally {
+      this.ticking = false;
     }
   }
 
@@ -168,13 +219,6 @@ export class RoundScheduler {
     const round = (
       await this.db.insert(collectionRounds).values({ brandId }).returning()
     )[0]!;
-
-    // 口径快照:轮次开始时固化的本品+已确认竞品(docs/05 §2 品牌匹配)
-    const subjects = await this.db
-      .select()
-      .from(recognitionEntries)
-      .where(and(eq(recognitionEntries.brandId, brandId), eq(recognitionEntries.confirmed, true)));
-    void subjects;
 
     let enqueued = 0;
     for (const q of questions) {

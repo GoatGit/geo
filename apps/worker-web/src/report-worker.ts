@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Queue, Worker } from 'bullmq';
 import { reports, type Db } from '@geo/db';
 import { eq } from 'drizzle-orm';
@@ -42,7 +43,7 @@ export function startReportsWorker(db: Db, concurrency = 1): Worker {
           .set({
             status: 'done',
             payloadRef: key,
-            sharedToken: Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2),
+            sharedToken: randomUUID(),
           })
           .where(eq(reports.id, reportId));
       } catch (err) {

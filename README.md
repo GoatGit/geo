@@ -15,9 +15,9 @@ packages/
   browser-session/ SessionBroker:AgentBay Browser Use(生产)/ Mock(dev)
   evidence/        证据包(answer/raw/meta/integrity.sha256)+ S3 兼容存储(MinIO/OSS)
 apps/
-  api/             NestJS:auth/brands/questions/recognition/monitor(指标唯一出口)/runs/_collection/account/reports/WS
+  api/             NestJS:auth/brands/questions/recognition/monitor(指标唯一出口)/runs/_collection/account/reports/WS + admin(平台管理后台)
   worker-web/      采集编排:BullMQ 调度/熔断/账号池(健康分)/即时抽取/竞品发现/口碑基线/报告生成
-  web/             Next.js 控制台:总览/排名透视(矩阵+漏斗)/引用源/口碑/问题/口径/采集状态/报告
+  web/             Next.js 控制台:总览/排名透视(矩阵+漏斗)/引用源/口碑/问题/口径/采集状态/报告 + 平台后台(/admin:系统总览/全局配置/采集轮次)
 ```
 
 ## 本地开发
@@ -37,6 +37,12 @@ pnpm dev:web                  # 控制台   http://localhost:3001
 
 全链路(浏览器):登录(dev 验证码直接显示)→ 新建品牌 → 添加监控问题 →
 worker 调度采集(mock 回放 5 引擎)→ 排名透视/漏斗/口碑/引用出数 → 报告生成。
+
+平台管理后台:在 `.env` 配置 `ADMIN_PHONES=手机号1,手机号2`(逗号分隔),该手机号登录后
+侧栏出现「平台后台」:系统总览(基础设施/队列深度/今日任务/引擎通道)、全局配置
+(调度总开关、全局/每引擎每日任务上限,下一调度周期生效)、采集轮次(跨品牌进度)、
+引擎手动暂停/恢复。注意:`pnpm dev:api`(tsx)不支持 Nest 装饰器元数据注入,本地请用
+`pnpm --filter @geo/api build && node apps/api/dist/main.js` 方式启动。
 
 ## 测试与质量
 

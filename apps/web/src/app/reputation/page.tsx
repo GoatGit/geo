@@ -6,8 +6,8 @@ import { EmptyState, PageHeader, Skeleton } from '@/components/ui';
 
 interface ReputationDto {
   totals: { runs: number; pos: number; neu: number; neg: number; sentimentScore: number | null; hasData: boolean };
-  strengths: Array<{ term: string; runs: number; excerpts: string[] }>;
-  weaknesses: Array<{ term: string; runs: number; excerpts: string[] }>;
+  strengths: Array<{ term: string; runs: number; excerpt: string }>;
+  weaknesses: Array<{ term: string; runs: number; excerpt: string }>;
   samples: Array<{ runId: number; sentiment: string; excerpt: string | null; ranAt: string }>;
 }
 
@@ -51,7 +51,7 @@ export default function ReputationPage() {
           <h2 className="mb-3 font-semibold text-good">优势印象 · 巩固</h2>
           <ul className="space-y-1.5 text-sm">
             {data.strengths.map((s) => (
-              <li key={s.term} className="flex justify-between" title={s.excerpts[0]}>
+              <li key={s.term} className="flex justify-between" title={s.excerpt}>
                 <span>{s.term}</span>
                 <span className="metric-num text-slate-400">{s.runs}</span>
               </li>
@@ -63,7 +63,7 @@ export default function ReputationPage() {
           <h2 className="mb-3 font-semibold text-warn">待攻印象 · 攻坚</h2>
           <ul className="space-y-1.5 text-sm">
             {data.weaknesses.map((s) => (
-              <li key={s.term} className="flex justify-between" title={s.excerpts[0]}>
+              <li key={s.term} className="flex justify-between" title={s.excerpt}>
                 <span>{s.term}</span>
                 <span className="metric-num text-slate-400">{s.runs}</span>
               </li>

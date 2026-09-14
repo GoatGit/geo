@@ -1,11 +1,12 @@
 import { Body, Controller, Get, OnModuleDestroy, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
-import { sql } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Request } from 'express';
 import { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
+import { brands, collectionRounds, queryRuns } from '@geo/db';
 import {
   REPORTS_QUEUE,
   REPUTATION_QUEUE,
@@ -136,13 +137,17 @@ export class AdminController implements OnModuleDestroy {
       });
     }
 
-    const recentRuns = await this.db.execute(sql`
-      select r.status, r.engine, r.ran_at as "ranAt", b.name as "brandName"
-      from query_runs r
-      join brands b on b.id = r.brand_id
-      order by r.ran_at desc
-      limit 60
-    `);
+    const recentRunRows = await this.db
+      .select({
+        status: queryRuns.status,
+        engine: queryRuns.engine,
+        ranAt: queryRuns.ranAt,
+        brandName: brands.name,
+      })
+      .from(queryRuns)
+      .innerJoin(brands, eq(brands.id, queryRuns.brandId))
+      .orderBy(desc(queryRuns.ranAt))
+      .limit(60);
 
     const settings = await loadPlatformSettings(this.db);
 
@@ -153,7 +158,7 @@ export class AdminController implements OnModuleDestroy {
       todayRuns,
       accountPool: rowsOf<{ status: string; count: number }>(pool),
       engineHealth,
-      recentRuns: rowsOf<{ status: string; engine: string; ranAt: string; brandName: string }>(recentRuns),
+      recentRuns: recentRunRows,
       settings,
       asOf: new Date().toISOString(),
     };
@@ -177,15 +182,20 @@ export class AdminController implements OnModuleDestroy {
   @Get('rounds')
   async rounds(@Query('limit') limit?: string) {
     const n = Math.min(Math.max(Number(limit) || 50, 1), 200);
-    const rows = await this.db.execute(sql`
-      select cr.id, cr.brand_id as "brandId", b.name as "brandName", cr.started_at as "startedAt",
-             cr.finished_at as "finishedAt", cr.totals
-      from collection_rounds cr
-      join brands b on b.id = cr.brand_id
-      order by cr.started_at desc
-      limit ${n}
-    `);
-    return { rounds: rowsOf<Record<string, unknown>>(rows) };
+    const rows = await this.db
+      .select({
+        id: collectionRounds.id,
+        brandId: collectionRounds.brandId,
+        brandName: brands.name,
+        startedAt: collectionRounds.startedAt,
+        finishedAt: collectionRounds.finishedAt,
+        totals: collectionRounds.totals,
+      })
+      .from(collectionRounds)
+      .innerJoin(brands, eq(brands.id, collectionRounds.brandId))
+      .orderBy(desc(collectionRounds.startedAt))
+      .limit(n);
+    return { rounds: rows };
   }
 
   /** 手动暂停引擎(与自动熔断独立:manual 位不过期,自动位保持 5 分钟半开节奏)。 */

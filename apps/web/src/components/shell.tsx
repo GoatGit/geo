@@ -21,6 +21,7 @@ import {
   IconShield,
   IconSwap,
   IconVoice,
+  IconSwords,
 } from './icons';
 
 interface BrandRow {
@@ -42,6 +43,7 @@ const NAV: NavGroup[] = [
     icon: <IconRank />,
     items: [
       { href: '/monitor/rankings', label: '排名透视', icon: <IconRank /> },
+      { href: '/monitor/competitors', label: '竞品透视', icon: <IconSwords /> },
       { href: '/monitor/citations', label: '引用源分析', icon: <IconCite /> },
     ],
   },

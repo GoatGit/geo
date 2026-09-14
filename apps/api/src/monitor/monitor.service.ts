@@ -98,6 +98,8 @@ export class MonitorService {
       stage('top1', '首推(位次=1)', top1, top3, '②的分子:进 Top3 的 QueryRun'),
     ];
 
+    const trend = await this.trend(input.brandId, 7); // 迷你趋势固定近 7 天,不受所选周期影响
+
     const calibrating = await this.inCalibrationWindow(input.brandId);
     const health = evaluateHealth(
       {
@@ -115,6 +117,7 @@ export class MonitorService {
       funnel,
       matrix,
       engineStats: await this.engineRates(input.brandId, since),
+      trend,
       health,
       excluded: nEx,
       period: { days: input.days, since: since.toISOString() },
@@ -193,6 +196,84 @@ export class MonitorService {
       };
     });
     return rows.sort((a, b) => (a.compositeRank ?? 999) - (b.compositeRank ?? 999));
+  }
+
+  /** 按日趋势(迷你图数据源,docs/01 §3.3 指标卡近 7/30 天迷你趋势)。 */
+  async trend(brandId: number, days: number) {
+    const since = new Date(Date.now() - Math.min(days, 30) * 24 * 3600 * 1000);
+    const res = await this.db.execute(sql`
+      select
+        date_trunc('day', mf.ran_at)::date as d,
+        count(*)                                              as valid,
+        count(*) filter (where mf.mentioned)                  as mentioned,
+        count(*) filter (where mf.mentioned and mf.rank <= 3) as top3,
+        count(*) filter (where mf.mentioned and mf.rank = 1)  as top1,
+        count(*) filter (where mf.mentioned and mf.rank is not null) as ranked
+      from mention_facts mf
+      where mf.brand_id = ${brandId} and mf.ran_at >= ${since} and mf.subject_kind = 'self'
+      group by 1 order by 1
+    `);
+    const rate = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 1000) / 1000 : null);
+    return res.rows.map((r) => {
+      const row = r as Record<string, string>;
+      const valid = Number(row.valid);
+      const ranked = Number(row.ranked ?? 0);
+      return {
+        date: String(row.d),
+        mentionRate: rate(Number(row.mentioned), valid),
+        top3Rate: rate(Number(row.top3), ranked),
+        top1Rate: rate(Number(row.top1), ranked),
+      };
+    });
+  }
+
+  /** 竞品×引擎 分引擎对比矩阵(docs/01 §3.4)。 */
+  async competitorsMatrix(brandId: number, days: number, topN = 8) {
+    const since = new Date(Date.now() - days * 24 * 3600 * 1000);
+    const res = await this.db.execute(sql`
+      select
+        mf.subject_key, mf.subject_name, mf.engine,
+        count(*)                                              as runs,
+        count(*) filter (where mf.mentioned)                  as mentions,
+        count(*) filter (where mf.mentioned and mf.rank <= 3) as top3
+      from mention_facts mf
+      where mf.brand_id = ${brandId} and mf.ran_at >= ${since}
+        and mf.subject_kind in ('competitor', 'discovered')
+      group by mf.subject_key, mf.subject_name, mf.engine
+    `);
+    const bySubject = new Map<string, { key: string; name: string; engines: Map<string, { runs: number; mentions: number; top3: number }> }>();
+    for (const r of res.rows) {
+      const row = r as Record<string, string>;
+      let subj = bySubject.get(row.subject_key);
+      if (!subj) {
+        subj = { key: row.subject_key, name: row.subject_name, engines: new Map() };
+        bySubject.set(row.subject_key, subj);
+      }
+      const prev = subj.engines.get(row.engine) ?? { runs: 0, mentions: 0, top3: 0 };
+      prev.runs += Number(row.runs);
+      prev.mentions += Number(row.mentions);
+      prev.top3 += Number(row.top3);
+      subj.engines.set(row.engine, prev);
+    }
+    const rows = [...bySubject.values()]
+      .map((s) => ({
+        key: s.key,
+        name: s.name,
+        totalMentions: [...s.engines.values()].reduce((a, b) => a + b.mentions, 0),
+        engines: Object.fromEntries(
+          [...s.engines.entries()].map(([engine, v]) => [
+            engine,
+            {
+              mentionRate: v.runs > 0 ? Math.round((v.mentions / v.runs) * 1000) / 1000 : null,
+              top3Rate: v.runs > 0 ? Math.round((v.top3 / v.runs) * 1000) / 1000 : null,
+            },
+          ]),
+        ),
+      }))
+      .sort((a, b) => b.totalMentions - a.totalMentions)
+      .slice(0, topN);
+    const engines = [...new Set(rows.flatMap((r) => Object.keys(r.engines)))].sort();
+    return { rows, engines };
   }
 
   async engineRates(brandId: number, since: Date) {

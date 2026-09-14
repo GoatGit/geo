@@ -40,6 +40,46 @@ function useCountUp(target: number | null): number | null {
   return target == null ? null : v;
 }
 
+/** 迷你趋势线(docs/01 §3.3 指标卡近 7/30 天迷你趋势);null 断点自动跳过。 */
+export function Sparkline({
+  values,
+  width = 104,
+  height = 30,
+}: {
+  values: Array<number | null>;
+  width?: number;
+  height?: number;
+}) {
+  const pts = values.filter((v): v is number => v != null);
+  if (pts.length < 2) return null;
+  const min = Math.min(...pts);
+  const max = Math.max(...pts);
+  const span = max - min || 1;
+  const step = width / (values.length - 1);
+  let d = '';
+  values.forEach((v, i) => {
+    if (v == null) return;
+    const x = i * step;
+    const y = height - 3 - ((v - min) / span) * (height - 6);
+    d += (d ? ' L ' : 'M ') + x.toFixed(1) + ' ' + y.toFixed(1);
+  });
+  const last = values[values.length - 1];
+  const ly = last == null ? 0 : height - 3 - ((last - min) / span) * (height - 6);
+  return (
+    <svg width={width} height={height} className="overflow-visible">
+      <defs>
+        <linearGradient id="spark-fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="currentColor" stopOpacity="0.22" />
+          <stop offset="1" stopColor="currentColor" stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+      <path d={`${d} L ${width} ${height} L 0 ${height} Z`} fill="url(#spark-fill)" stroke="none" />
+      <path d={d} fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={width} cy={ly} r="2.4" fill="currentColor" />
+    </svg>
+  );
+}
+
 /**
  * 指标卡(docs/01 §3.3):数值进场动画 + 分子/分母口径徽章 + excluded 可见
  * (docs/00 教训 #5/#7:失败不静默、口径随手可查);空分母显示"待首轮采集"。
@@ -48,21 +88,37 @@ export function MetricCardView({
   title,
   card,
   lowerBetter = false,
+  spark,
+  sparkLabel,
 }: {
   title: string;
   card: MetricCard | undefined;
   lowerBetter?: boolean;
+  spark?: Array<number | null>;
+  sparkLabel?: string;
 }) {
   if (!card) return null;
   return (
     <div className="card card-hover group relative overflow-hidden p-5">
       <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-brand-400 to-sand-400 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-      <CardInner card={card} lowerBetter={lowerBetter} title={title} />
+      <CardInner card={card} lowerBetter={lowerBetter} title={title} spark={spark} sparkLabel={sparkLabel} />
     </div>
   );
 }
 
-function CardInner({ card, lowerBetter, title }: { card: MetricCard; lowerBetter: boolean; title: string }) {
+function CardInner({
+  card,
+  lowerBetter,
+  title,
+  spark,
+  sparkLabel,
+}: {
+  card: MetricCard;
+  lowerBetter: boolean;
+  title: string;
+  spark?: Array<number | null>;
+  sparkLabel?: string;
+}) {
   const animated = useCountUp(card.value);
   const isEmpty = (card.denominator ?? 0) === 0;
   const display =
@@ -89,18 +145,25 @@ function CardInner({ card, lowerBetter, title }: { card: MetricCard; lowerBetter
           <span className="ml-1 text-xs font-normal text-slate-400">越小越好</span>
         )}
       </div>
-      <div className="mt-1 text-[11px] text-slate-400">
-        {isEmpty ? (
-          <span className="text-slate-300">待首轮采集</span>
-        ) : (
-          <>
-            <span className="metric-num">
-              {card.numerator ?? '—'}/{card.denominator ?? '—'}
-            </span>
-            {card.excludedFailed + card.excludedQuotaBlocked > 0 && (
-              <span className="ml-2 text-warn">排除 {card.excludedFailed + card.excludedQuotaBlocked}</span>
-            )}
-          </>
+      <div className="mt-1 flex items-end justify-between gap-2">
+        <div className="text-[11px] text-slate-400">
+          {isEmpty ? (
+            <span className="text-slate-300">待首轮采集</span>
+          ) : (
+            <>
+              <span className="metric-num">
+                {card.numerator ?? '—'}/{card.denominator ?? '—'}
+              </span>
+              {card.excludedFailed + card.excludedQuotaBlocked > 0 && (
+                <span className="ml-2 text-warn">排除 {card.excludedFailed + card.excludedQuotaBlocked}</span>
+              )}
+            </>
+          )}
+        </div>
+        {spark && spark.length >= 2 && (
+          <div className="text-brand-600" title={sparkLabel ? `近 ${spark.length} 天${sparkLabel}趋势` : '趋势'}>
+            <Sparkline values={spark} />
+          </div>
         )}
       </div>
     </>

@@ -48,6 +48,14 @@ export class MonitorController {
     return this.monitorService.competitors(brandId, Number(days) || 7);
   }
 
+  /** 竞品×引擎 分引擎对比矩阵(docs/01 §3.4)。 */
+  @Get('competitors/matrix')
+  async competitorsMatrix(@Req() req: Request, @Query('brand') brand: string, @Query('days') days = '7') {
+    const brandId = Number(brand);
+    await this.owned(req, brandId);
+    return this.monitorService.competitorsMatrix(brandId, Number(days) || 7);
+  }
+
   @Get('citations')
   async citations(@Req() req: Request, @Query('brand') brand: string, @Query('days') days = '7') {
     const brandId = Number(brand);

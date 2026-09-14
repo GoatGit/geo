@@ -124,6 +124,12 @@ export default function DashboardPage() {
               title={{ mentionRate: '提及率', top3Rate: 'Top3 率', top1Rate: '首推率', avgRank: '平均名次' }[m]}
               card={data.cards.find((c) => c.metric === m)}
               lowerBetter={m === 'avgRank'}
+              spark={
+                m === 'avgRank'
+                  ? undefined
+                  : data.trend.map((t) => (m === 'mentionRate' ? t.mentionRate : m === 'top3Rate' ? t.top3Rate : t.top1Rate))
+              }
+              sparkLabel="趋势"
             />
           </div>
         ))}

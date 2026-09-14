@@ -87,7 +87,7 @@ export default function QuestionsPage() {
             <div className="flex items-center gap-4 text-xs text-slate-500">
               <QuotaBar label="排名词" used={q.ranking.used} limit={q.ranking.limit} />
               <QuotaBar label="口碑词" used={q.reputation.used} limit={q.reputation.limit} />
-              <span className="rounded-md bg-slate-100 px-2 py-1 font-medium capitalize text-slate-600">{q.plan}</span>
+              <span className="rounded-md bg-slate-100 px-2 py-1 font-medium text-slate-600">{{ free: '免费版', starter: '入门', standard: '标准', pro: '专业', custom: '定制' }[q.plan] ?? q.plan}</span>
             </div>
           )
         }

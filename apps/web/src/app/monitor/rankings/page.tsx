@@ -42,9 +42,9 @@ export default function RankingsPage() {
       />
 
       <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <MetricCardView title="提及率" card={data.cards.find((c) => c.metric === 'mentionRate')} />
-        <MetricCardView title="Top3 率" card={data.cards.find((c) => c.metric === 'top3Rate')} />
-        <MetricCardView title="首推率" card={data.cards.find((c) => c.metric === 'top1Rate')} />
+        <MetricCardView title="提及率" card={data.cards.find((c) => c.metric === 'mentionRate')} spark={data.trend.map((t) => t.mentionRate)} sparkLabel="提及率" />
+        <MetricCardView title="Top3 率" card={data.cards.find((c) => c.metric === 'top3Rate')} spark={data.trend.map((t) => t.top3Rate)} sparkLabel="Top3 率" />
+        <MetricCardView title="首推率" card={data.cards.find((c) => c.metric === 'top1Rate')} spark={data.trend.map((t) => t.top1Rate)} sparkLabel="首推率" />
         <MetricCardView title="平均名次" card={data.cards.find((c) => c.metric === 'avgRank')} lowerBetter />
       </section>
 

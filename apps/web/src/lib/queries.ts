@@ -31,6 +31,7 @@ export interface RankingsDto {
     cells: Array<{ engine: string; mentioned: boolean; rank: number | null }>;
   }>;
   engineStats: Array<{ engine: string; mentionRate: number; top3Rate: number; top1Rate: number }>;
+  trend: Array<{ date: string; mentionRate: number | null; top3Rate: number | null; top1Rate: number | null }>;
   health: {
     summary: string;
     items: Array<{ metric: string; value: number | null; pass: boolean | null; label: string }>;

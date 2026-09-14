@@ -2,6 +2,42 @@ import { and, eq, gte, sql } from 'drizzle-orm';
 import { brands, mentionFacts, monitoringQuestions, reputationFacts, type Db } from '@geo/db';
 import { classifyLayer } from '@geo/metrics';
 
+/** 窗口内单条 self 事实的最小投影(纯函数输入,便于单测)。 */
+export interface LayerFact {
+  questionId: number;
+  engine: string;
+  mentioned: boolean;
+  rank: number | null;
+}
+
+export interface QuestionRow {
+  id: number;
+  text: string;
+  type: string;
+}
+
+/**
+ * 问题分层聚合(docs/02 §5):与控制台排名透视同口径——每引擎取窗口内最好位次,
+ * Top3 引擎数 / 参采引擎数 → L1-L4(N<3 不分层)。纯函数便于单测。
+ */
+export function aggregateQuestionLayers(questions: QuestionRow[], facts: LayerFact[]) {
+  return questions.map((q) => {
+    const fs = facts.filter((f) => f.questionId === q.id);
+    const perEngine = new Map<string, { mentioned: boolean; rank: number | null }>();
+    for (const f of fs) {
+      const prev = perEngine.get(f.engine);
+      const better =
+        !prev ||
+        (f.mentioned && !prev.mentioned) ||
+        (f.mentioned && f.rank !== null && (prev.rank === null || f.rank < prev.rank));
+      if (better) perEngine.set(f.engine, { mentioned: f.mentioned, rank: f.rank });
+    }
+    const cells = [...perEngine.values()];
+    const top3 = cells.filter((c) => c.mentioned && c.rank !== null && c.rank <= 3).length;
+    return { id: q.id, text: q.text, type: q.type, layer: classifyLayer(top3, cells.length) };
+  });
+}
+
 /**
  * 报告 payload 组装(docs/01 §3.8 结构):体检总览 → 位次表现 → 竞品/口碑摘要 →
  * 行动清单 → 附录(口径与方法论,docs/02)。
@@ -40,7 +76,7 @@ export async function buildReportPayload(
   `);
   const exRow = (ex.rows[0] ?? {}) as Record<string, string>;
 
-  // 问题分层(窗口内 self 事实按问题聚合)
+  // 问题分层(窗口内 self 事实按问题聚合,引擎维度)
   const perQuestion = await db
     .select({
       id: monitoringQuestions.id,
@@ -52,6 +88,7 @@ export async function buildReportPayload(
   const facts = await db
     .select({
       questionId: mentionFacts.questionId,
+      engine: mentionFacts.engine,
       mentioned: mentionFacts.mentioned,
       rank: mentionFacts.rank,
     })
@@ -63,13 +100,7 @@ export async function buildReportPayload(
         eq(mentionFacts.subjectKind, 'self'),
       ),
     );
-  const layers = perQuestion.map((q) => {
-    const fs = facts.filter((f) => f.questionId === q.id);
-    const engines = new Map<string, { mentioned: boolean; rank: number | null }>();
-    for (const f of fs) engines.set(`${f.questionId}`, { mentioned: f.mentioned, rank: f.rank });
-    const top3 = [...engines.values()].filter((v) => v.mentioned && v.rank !== null && v.rank <= 3).length;
-    return { id: q.id, text: q.text, type: q.type, layer: classifyLayer(top3, fs.length) };
-  });
+  const layers = aggregateQuestionLayers(perQuestion, facts);
 
   const rep = await db
     .select()

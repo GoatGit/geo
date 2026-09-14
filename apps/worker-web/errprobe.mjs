@@ -1,0 +1,14 @@
+import { chromium } from 'playwright-core';
+const API = 'http://localhost:3000';
+const r1 = await fetch(`${API}/auth/sms/code`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone: '13800001234' }) }).then(r => r.json());
+const r2 = await fetch(`${API}/auth/sms/verify`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone: '13800001234', code: r1.devCode }) }).then(r => r.json());
+const browser = await chromium.launch({ channel: 'chrome', headless: true });
+const page = await (await browser.newContext()).newPage();
+await page.addInitScript(([t]) => { localStorage.setItem('geo.accessToken', t); localStorage.setItem('geo.brandId', '1'); }, [r2.accessToken]);
+const errs = [];
+page.on('pageerror', (e) => errs.push(String(e).slice(0, 400)));
+page.on('console', (m) => m.type() === 'error' && errs.push(m.text().slice(0, 400)));
+await page.goto('http://localhost:3001/reputation', { waitUntil: 'networkidle' });
+await page.waitForTimeout(1200);
+console.log(errs.slice(0, 4).join('\n---\n') || 'no errors');
+await browser.close();

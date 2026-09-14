@@ -144,3 +144,9 @@ export const IconServer = (p: SVGProps<SVGSVGElement>) => (
     <path d="M7 7.5h.01M7 16.5h.01" />
   </svg>
 );
+
+export const IconSwords = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M14.5 14.5 20 9l-1-4-4-1-5.5 5.5M14.5 14.5 9 20l-5 1 1-5 5.5-5.5M14.5 14.5 9.5 9.5" />
+  </svg>
+);
