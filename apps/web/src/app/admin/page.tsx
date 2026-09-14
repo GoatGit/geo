@@ -176,8 +176,8 @@ export default function AdminOverviewPage() {
                       disabled={!paused && !data.infra.redisOk}
                       className={`rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
                         paused
-                          ? 'bg-emerald-50 text-good hover:bg-emerald-100'
-                          : 'bg-red-50 text-bad hover:bg-red-100'
+                          ? 'bg-good-50 text-good hover:bg-good-100'
+                          : 'bg-bad-50 text-bad hover:bg-red-100'
                       } disabled:opacity-40`}
                     >
                       {paused ? '恢复派发' : '暂停派发'}
@@ -203,12 +203,12 @@ export default function AdminOverviewPage() {
               title={`${r.brandName} · ${r.engine} · ${r.status} · ${new Date(r.ranAt).toLocaleTimeString('zh-CN')}`}
               className={`h-2.5 w-2.5 rounded-sm ${
                 r.status === 'ok_with_answer'
-                  ? 'bg-emerald-400'
+                  ? 'bg-good'
                   : r.status === 'ok_empty'
                     ? 'bg-slate-300'
                     : r.status === 'failed'
                       ? 'bg-red-400'
-                      : 'bg-amber-300'
+                      : 'bg-warn'
               }`}
             />
           ))}
@@ -227,7 +227,7 @@ function HealthCard({ title, ok, desc }: { title: string; ok?: boolean; desc: st
     <div className="card rise p-5">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium text-slate-700">{title}</h3>
-        <span className={`h-2 w-2 rounded-full ${ok ? 'bg-emerald-400' : 'bg-red-400'}`} />
+        <span className={`h-2 w-2 rounded-full ${ok ? 'bg-good' : 'bg-red-400'}`} />
       </div>
       <p className={`mt-2 text-lg font-semibold ${ok ? 'text-good' : 'text-bad'}`}>{ok ? '正常' : '异常'}</p>
       <p className="mt-0.5 text-[11px] leading-4 text-slate-400">{desc}</p>

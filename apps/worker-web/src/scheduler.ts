@@ -134,7 +134,7 @@ export class RoundScheduler {
       where ran_at >= date_trunc('day', now())
       group by engine
     `);
-    const rows = (res as { rows: Array<{ engine: string; count: number }> }).rows;
+    const rows = (res as unknown as { rows: Array<{ engine: string; count: number }> }).rows;
     return new Map(rows.map((r) => [r.engine, r.count]));
   }
 

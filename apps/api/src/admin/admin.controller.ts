@@ -23,8 +23,9 @@ import { loadEnv } from '../config/env';
 import { AdminGuard } from './admin.guard';
 import { UpdateSettingsDto } from './admin.dto';
 
-interface RowSet<T> {
-  rows: T[];
+/** db.execute(QueryResult) 取行:drizzle 未知行类型的统一收口。 */
+function rowsOf<T>(res: unknown): T[] {
+  return (res as { rows: T[] }).rows;
 }
 
 /**
@@ -96,7 +97,7 @@ export class AdminController implements OnModuleDestroy {
         (select count(*) from collection_rounds where finished_at is null)::int as rounds_running,
         (select count(*) from query_runs where ran_at >= date_trunc('day', now()))::int as runs_today
     `);
-    const s = (stats as RowSet<Record<string, number>>).rows[0] ?? {};
+    const s = rowsOf<Record<string, number>>(stats)[0] ?? {};
 
     const byStatus = await this.db.execute(sql`
       select status, count(*)::int as count
@@ -105,7 +106,7 @@ export class AdminController implements OnModuleDestroy {
       group by status
     `);
     const todayRuns: Record<string, number> = {};
-    for (const r of (byStatus as RowSet<{ status: string; count: number }>).rows) todayRuns[r.status] = r.count;
+    for (const r of rowsOf<{ status: string; count: number }>(byStatus)) todayRuns[r.status] = r.count;
 
     const pool = await this.db.execute(sql`
       select status, count(*)::int as count from account_profiles group by status
@@ -117,7 +118,7 @@ export class AdminController implements OnModuleDestroy {
       where ran_at >= now() - interval '24 hours'
       group by engine, status
     `);
-    const engineRows = (engines as RowSet<{ engine: string; status: string; count: number }>).rows;
+    const engineRows = rowsOf<{ engine: string; status: string; count: number }>(engines);
     const engineHealth = [];
     for (const engine of WEB_ENGINES) {
       const rs = engineRows.filter((r) => r.engine === engine);
@@ -150,9 +151,9 @@ export class AdminController implements OnModuleDestroy {
       queueCounts,
       stats: s,
       todayRuns,
-      accountPool: (pool as RowSet<{ status: string; count: number }>).rows,
+      accountPool: rowsOf<{ status: string; count: number }>(pool),
       engineHealth,
-      recentRuns: (recentRuns as RowSet<{ status: string; engine: string; ranAt: string; brandName: string }>).rows,
+      recentRuns: rowsOf<{ status: string; engine: string; ranAt: string; brandName: string }>(recentRuns),
       settings,
       asOf: new Date().toISOString(),
     };
@@ -184,7 +185,7 @@ export class AdminController implements OnModuleDestroy {
       order by cr.started_at desc
       limit ${n}
     `);
-    return { rounds: (rows as RowSet<Record<string, unknown>>).rows };
+    return { rounds: rowsOf<Record<string, unknown>>(rows) };
   }
 
   /** 手动暂停引擎(与自动熔断独立:manual 位不过期,自动位保持 5 分钟半开节奏)。 */

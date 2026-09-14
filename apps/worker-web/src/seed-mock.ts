@@ -18,11 +18,9 @@ import {
   reports,
   reputationFacts,
   queryRuns,
-  smsCodes,
   subscriptions,
   accounts,
   accountProfiles,
-  type Db,
 } from '@geo/db';
 import { PLAN_LIMITS, WEB_ENGINES, type EngineId } from '@geo/shared';
 import { DEFAULT_DOMAIN_DICT } from '@geo/metrics';

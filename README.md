@@ -28,6 +28,7 @@ cp .env.example .env
 pnpm install
 pnpm db:migrate               # 迁移 + 分区预建
 pnpm --filter @geo/worker-web seed:profiles   # dev:每引擎 2 个模拟账号档案
+pnpm --filter @geo/worker-web seed:mock       # dev:21 天 mock 历史数据(事实/证据/日结/报告,幂等可重灌)
 
 pnpm dev:api &                # API      http://localhost:3000
 pnpm dev:worker &             # 采集 worker(mock 引擎回放)
