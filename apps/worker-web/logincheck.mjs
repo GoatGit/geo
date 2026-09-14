@@ -1,0 +1,12 @@
+import { chromium } from 'playwright-core';
+const browser = await chromium.launch({ channel: 'chrome', headless: true });
+const page = await (await browser.newContext({ viewport: { width: 1600, height: 900 } })).newPage();
+const errs = [];
+page.on('pageerror', (e) => errs.push('PAGEERROR: ' + String(e).slice(0, 300)));
+page.on('console', (m) => m.type() === 'error' && errs.push('CONSOLE: ' + m.text().slice(0, 300)));
+const resp = await page.goto('http://localhost:3001/login', { waitUntil: 'networkidle' });
+await page.waitForTimeout(1200);
+console.log('http', resp.status());
+console.log(errs.slice(0, 5).join('\n') || 'no client errors');
+await page.screenshot({ path: '/tmp/geo-shots/login-now.png' });
+await browser.close();

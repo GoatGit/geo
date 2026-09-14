@@ -229,7 +229,7 @@ export default function DashboardPage() {
             </Link>
           </div>
           <div className="space-y-2.5">
-            {(status.data?.rounds ?? []).slice(0, 3).map((r) => {
+            {(status.data?.rounds ?? []).filter((r) => (r.totals?.total ?? 0) > 0).slice(0, 3).map((r) => {
               const t = r.totals ?? {};
               const done = t.done ?? 0;
               const total = t.total ?? 0;

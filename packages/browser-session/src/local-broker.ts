@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 import { chromium, type BrowserContext, type Page } from 'playwright-core';
 import {
@@ -25,7 +26,10 @@ export interface LocalBrokerConfig {
  * - 直接注入 Page(handle.page),worker 无需 connectOverCDP;远程 AgentBay 形状不变。
  */
 export class LocalSessionBroker implements SessionBroker {
-  private readonly contexts = new Map<string, { context: BrowserContext; refCount: number; idleTimer?: NodeJS.Timeout }>();
+  private readonly contexts = new Map<
+    string,
+    { context: BrowserContext; refCount: number; idleTimer?: NodeJS.Timeout; purpose: 'collect' | 'login' }
+  >();
   private launching = new Map<string, Promise<BrowserContext>>();
 
   constructor(private readonly config: LocalBrokerConfig) {}
@@ -40,6 +44,7 @@ export class LocalSessionBroker implements SessionBroker {
     const key = profile.profileKey;
     const entry = this.contexts.get(key)!;
     entry.refCount += 1;
+    entry.purpose = profile.purpose ?? 'collect';
     if (entry.idleTimer) {
       clearTimeout(entry.idleTimer);
       entry.idleTimer = undefined;
@@ -55,14 +60,16 @@ export class LocalSessionBroker implements SessionBroker {
         if (!e) return;
         e.refCount = Math.max(0, e.refCount - 1);
         if (e.refCount > 0) return;
-        if (this.config.idleCloseMs > 0) {
-          e.idleTimer = setTimeout(() => {
-            void this.closeProfile(key);
-          }, this.config.idleCloseMs);
-          e.idleTimer.unref?.();
-        } else {
+        // 登录会话结束必须立即干净退出:Cookie 刷盘后采集进程才能读到登录态;
+        // 若走空闲复用窗口,跨进程交接时清锁会杀死未刷盘的浏览器(登录态丢失)
+        if (e.purpose === 'login' || this.config.idleCloseMs <= 0) {
           await this.closeProfile(key);
+          return;
         }
+        e.idleTimer = setTimeout(() => {
+          void this.closeProfile(key);
+        }, this.config.idleCloseMs);
+        e.idleTimer.unref?.();
       },
     };
   }
@@ -96,12 +103,21 @@ export class LocalSessionBroker implements SessionBroker {
         locale: 'zh-CN',
         args: ['--disable-blink-features=automation-controlled'],
       });
-      context.on('close', () => this.contexts.delete(profile.profileKey));
-      this.contexts.set(profile.profileKey, { context, refCount: 0 });
+      context.on('close', () => {
+        this.contexts.delete(profile.profileKey);
+        void this.killProfileProcesses(profile.profileKey); // 操作者关窗:立即回收进程,释放 profile 目录锁
+      });
+      this.contexts.set(profile.profileKey, { context, refCount: 0, purpose: profile.purpose ?? 'collect' });
       return context;
     } catch (err) {
+      // 残留进程占用 profile 目录(上个会话异常退出):清场后重试一次
+      if (/ProcessSingleton|Failed to create|ReuseProfile|SingletonLock/i.test(String(err))) {
+        await this.killProfileProcesses(profile.profileKey);
+        await new Promise((r) => setTimeout(r, 1_500));
+        return this.launch(profile);
+      }
       throw new BrokerError(
-        `local browser launch failed for ${profile.profileKey}(需本机安装 Chrome 或设 LOCAL_BROWSER_EXECUTABLE)`,
+        `local browser launch failed for ${profile.profileKey}(查 Chrome 是否安装;若报 ProcessSingleton 则有残留进程占用 profile 目录)`,
         undefined,
         (err as Error).message,
       );
@@ -114,6 +130,15 @@ export class LocalSessionBroker implements SessionBroker {
     this.contexts.delete(key);
     if (entry.idleTimer) clearTimeout(entry.idleTimer);
     await entry.context.close().catch(() => undefined);
+    await this.killProfileProcesses(key); // 兜底强杀,防止残留进程占用 profile 目录锁
+  }
+
+  /** 按用户数据目录杀残留浏览器进程(操作者关窗触发 context close 后,进程可能滞留)。 */
+  private async killProfileProcesses(key: string): Promise<void> {
+    const dir = join(this.config.profileRoot, sanitize(key));
+    await new Promise<void>((resolve) => {
+      execFile('pkill', ['-f', dir], () => resolve());
+    });
   }
 }
 

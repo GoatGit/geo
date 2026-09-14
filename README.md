@@ -39,10 +39,20 @@ pnpm dev:web                  # 控制台   http://localhost:3001
 worker 调度采集(mock 回放 5 引擎)→ 排名透视/漏斗/口碑/引用出数 → 报告生成。
 
 平台管理后台:在 `.env` 配置 `ADMIN_PHONES=手机号1,手机号2`(逗号分隔),该手机号登录后
-侧栏出现「平台后台」:系统总览(基础设施/队列深度/今日任务/引擎通道)、全局配置
-(调度总开关、全局/每引擎每日任务上限,下一调度周期生效)、采集轮次(跨品牌进度)、
-引擎手动暂停/恢复。注意:`pnpm dev:api`(tsx)不支持 Nest 装饰器元数据注入,本地请用
-`pnpm --filter @geo/api build && node apps/api/dist/main.js` 方式启动。
+侧栏出现「平台后台」:系统总览(基础设施/队列深度/今日任务/引擎通道)、账号池
+(登记五引擎账号档案 + 人工登录注入账号态)、全局配置(调度总开关、全局/每引擎每日任务上限,
+下一调度周期生效)、采集轮次(跨品牌进度)、引擎手动暂停/恢复。注意:`pnpm dev:api`(tsx)
+不支持 Nest 装饰器元数据注入,本地请用 `pnpm --filter @geo/api build && node apps/api/dist/main.js` 方式启动。
+
+## 真实采集模式(docs/04 §2.1,实验性)
+
+`BROWSER_MODE=local` 用本机 Chrome 按账号档案持久化浏览器 profile(自建降级路径);
+`BROWSER_MODE=agentbay` 走无影云端浏览器(需 Pro 权益包,先过 docs/07 §13 PoC 闸门)。
+两者都以 DOM 适配器(`@geo/engine-adapters` 的 `DomWebAdapter` + 五引擎站点配置)真实采集。
+流程:平台后台「账号池」登记档案 → 点「人工登录」→ worker 弹出浏览器窗口 →
+操作者扫码/验证码登录 → 登录态持久化、档案转可用 → 调度采集即走真实引擎。
+采集期间登录态失效会被标记 `login_required`(不扣健康分),在账号池页一键重登。
+选择器为多级回退链,页面改版只需校准 `sites.ts` 并升 schemaVersion(docs/04 §7)。
 
 ## 测试与质量
 

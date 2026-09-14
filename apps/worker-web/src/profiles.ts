@@ -71,6 +71,14 @@ export class AccountPoolService {
     };
   }
 
+  /** 登录态失效(docs/04 §3.1 生命周期):不扣健康分,摘出可用池等人工重登。 */
+  async markLoginRequired(profileId: number): Promise<void> {
+    await this.db
+      .update(accountProfiles)
+      .set({ status: 'login_required' })
+      .where(eq(accountProfiles.id, profileId));
+  }
+
   async report(engine: string, profileId: number, ok: boolean): Promise<void> {
     void engine;
     const delta = ok ? 1 : -2;

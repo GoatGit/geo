@@ -5,8 +5,10 @@ import { createDb, ensurePartitions, reports } from '@geo/db';
 import { REPORTS_QUEUE, REPUTATION_QUEUE, bullConnection } from './queue';
 import { envInt } from './config';
 import { CollectProcessor } from './processor';
+import { LoginManager } from './login-manager';
 import { RoundScheduler } from './scheduler';
 import { startReportsWorker, startReputationWorker, scheduleWeeklyReports } from './report-worker';
+import { createBrokerFromEnv } from '@geo/browser-session';
 
 /**
  * Worker 启动(docs/07 §3):
@@ -23,8 +25,14 @@ async function bootstrap() {
   const concurrency = envInt('WORKER_CONCURRENCY', 4, 1, 64);
   scheduler.start(undefined, concurrency); // 间隔经 SCHEDULER_INTERVAL_MS 配置(默认 60s);并发数随心跳上报
 
-  const collect = new CollectProcessor(db, new Redis(bullConnection().url, { maxRetriesPerRequest: 3 }));
+  // 全进程共享一个 broker:采集与人工登录(refcount 复用本地浏览器进程/登录态)
+  const broker = createBrokerFromEnv();
+  const collect = new CollectProcessor(db, new Redis(bullConnection().url, { maxRetriesPerRequest: 3 }), broker);
   const collectWorker = collect.start(concurrency);
+
+  const loginRedis = new Redis(bullConnection().url, { maxRetriesPerRequest: null });
+  const loginManager = new LoginManager(db, loginRedis, broker);
+  loginManager.start();
 
   const reputationWorker = startReputationWorker(db);
   const reportsWorker = startReportsWorker(db);
@@ -68,12 +76,13 @@ async function bootstrap() {
   cronConsumer.on('error', (err) => console.error('[reports-cron] consumer error', err));
 
   logger.log(
-    `[worker-web] started: concurrency=${concurrency}, queues=[collect,${REPUTATION_QUEUE},${REPORTS_QUEUE}]`,
+    `[worker-web] started: concurrency=${concurrency}, queues=[collect,${REPUTATION_QUEUE},${REPORTS_QUEUE}], browser=${process.env.BROWSER_MODE ?? 'mock'}`,
   );
 
   const shutdown = async (signal: string) => {
     logger.log(`[worker-web] received ${signal}, draining...`);
     scheduler.stop();
+    await loginManager.stop();
     await Promise.allSettled([
       collectWorker.close(),
       reputationWorker.close(),
@@ -81,6 +90,7 @@ async function bootstrap() {
       cronConsumer.close(),
       cronQueue.close(),
       collect.shutdown(),
+      loginRedis.quit(),
     ]);
     await pool.end();
     process.exit(0);

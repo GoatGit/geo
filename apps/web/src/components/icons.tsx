@@ -14,8 +14,12 @@ const base = (p: SVGProps<SVGSVGElement>) => ({
 });
 
 export const IconLogo = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...base(p)} strokeWidth={0} fill="currentColor">
-    <path d="M12 2 3 6.5v6.2c0 4.6 3.6 8 9 9.3 5.4-1.3 9-4.7 9-9.3V6.5L12 2Zm0 3.2 5.6 2.8-5.6 2.8L6.4 8l5.6-2.8ZM5 10.2l5.9 3v6.2c-3.4-1.1-5.4-3.3-5.9-6.1v-3.1Zm14 0v3.1c-.5 2.8-2.5 5-5.9 6.1v-6.2l5.9-3Z" />
+  <svg {...base(p)} strokeWidth={2}>
+    <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+    <path d="M16 3h3a2 2 0 0 1 2 2v3" />
+    <path d="M3 16v3a2 2 0 0 0 2 2h3" />
+    <path d="M21 16v3a2 2 0 0 1-2 2h-3" />
+    <circle cx="12" cy="12" r="3.5" />
   </svg>
 );
 

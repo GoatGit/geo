@@ -1,21 +1,26 @@
-import { Body, Controller, Get, OnModuleDestroy, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
-import { NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { Body, Controller, Get, OnModuleDestroy, Param, ParseIntPipe, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { desc, eq, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Request } from 'express';
 import { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
-import { brands, collectionRounds, queryRuns } from '@geo/db';
+import { accountProfiles, brands, collectionRounds, queryRuns } from '@geo/db';
 import {
   REPORTS_QUEUE,
   REPUTATION_QUEUE,
   COLLECT_QUEUE,
+  LOGIN_REQ_QUEUE,
+  LOGIN_STATUS_TTL_SEC,
   WEB_ENGINES,
   WORKER_HEARTBEAT_KEY,
   WORKER_HEARTBEAT_STALE_MS,
   breakerManualKey,
   breakerTrippedKey,
+  loginStatusKey,
+  type LoginRequest,
 } from '@geo/shared';
 import { loadPlatformSettings, savePlatformSettings } from '@geo/db';
 import { currentAccount } from '../common/auth';
@@ -214,6 +219,116 @@ export class AdminController implements OnModuleDestroy {
     // 恢复时同时清自动熔断位,避免立即被半开窗口重新拦下
     await this.redis.del(breakerManualKey(engine), breakerTrippedKey(engine));
     return { engine, manuallyPaused: false };
+  }
+
+  // ===== 账号池:人工登录(docs/04 §3.1 账号供给由运营完成)=====
+
+  /** 账号池清单:按引擎分组展示状态/健康分/当日用量,后台"账号池"页消费。 */
+  @Get('accounts')
+  async accounts() {
+    const rows = await this.db
+      .select({
+        id: accountProfiles.id,
+        engine: accountProfiles.engine,
+        surface: accountProfiles.surface,
+        status: accountProfiles.status,
+        healthScore: accountProfiles.healthScore,
+        dailyUsed: accountProfiles.dailyUsed,
+        cooldownUntil: accountProfiles.cooldownUntil,
+        retiredAt: accountProfiles.retiredAt,
+        hasLoginState: sql<boolean>`(${accountProfiles.contextRef} is not null)`,
+        createdAt: accountProfiles.createdAt,
+      })
+      .from(accountProfiles)
+      .orderBy(accountProfiles.engine, accountProfiles.id);
+    return { accounts: rows };
+  }
+
+  /** 新建账号档案:仅登记引擎与指纹,状态 pending_login,等人工登录注入账号态。 */
+  @Post('accounts')
+  async createAccount(@Req() req: Request, @Body() body: { engine?: string }) {
+    void currentAccount(req);
+    const engine = body.engine ?? '';
+    this.assertEngine(engine);
+    const profile = (
+      await this.db
+        .insert(accountProfiles)
+        .values({
+          engine,
+          fingerprint: {
+            ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+            viewport: '1366x850',
+            locale: 'zh-CN',
+          },
+          status: 'pending_login',
+        })
+        .returning()
+    )[0];
+    return { account: profile };
+  }
+
+  /**
+   * 发起人工登录:请求入 Redis 队列,worker(拥有浏览器)开出有头会话并轮询登录态。
+   * 返回 sessionId 供后台轮询 GET /admin/login/:sessionId 展示进度。
+   */
+  @Post('accounts/:id/login')
+  async requestLogin(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
+    void currentAccount(req);
+    const profile = (await this.db.select().from(accountProfiles).where(eq(accountProfiles.id, id)).limit(1))[0];
+    if (!profile) throw new NotFoundException(`账号档案不存在: ${id}`);
+    if (profile.status === 'retired') throw new BadRequestException('已退役账号不可发起登录');
+    this.assertEngine(profile.engine);
+
+    const sessionId = randomUUID();
+    const payload: LoginRequest = {
+      sessionId,
+      profileId: profile.id,
+      engine: profile.engine,
+      profileKey: `profile:${profile.id}`,
+      fingerprint: profile.fingerprint,
+      proxyHint: profile.proxyHint,
+      contextRef: profile.contextRef,
+      requestedAt: new Date().toISOString(),
+    };
+    await this.redis
+      .multi()
+      .lpush(LOGIN_REQ_QUEUE, JSON.stringify(payload))
+      .ltrim(LOGIN_REQ_QUEUE, 0, 99) // 防御性截断:积压的陈旧登录请求不无限堆积
+      .set(loginStatusKey(sessionId), JSON.stringify({ state: 'queued', updatedAt: new Date().toISOString() }), 'EX', LOGIN_STATUS_TTL_SEC)
+      .exec();
+    await this.db
+      .update(accountProfiles)
+      .set({ status: 'pending_login' })
+      .where(eq(accountProfiles.id, id));
+    return { sessionId, engine: profile.engine, profileId: profile.id };
+  }
+
+  /** 登录会话状态轮询(queued/running/done/timeout/error)。 */
+  @Get('login/:sessionId')
+  async loginStatus(@Param('sessionId') sessionId: string) {
+    const raw = await this.redis.get(loginStatusKey(sessionId));
+    if (!raw) throw new NotFoundException('登录会话不存在或已过期');
+    return JSON.parse(raw) as { state: string; detail?: string; updatedAt: string };
+  }
+
+  @Post('accounts/:id/disable')
+  async disableAccount(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
+    void currentAccount(req);
+    await this.db
+      .update(accountProfiles)
+      .set({ status: 'retired', retiredAt: new Date() })
+      .where(eq(accountProfiles.id, id));
+    return { id, status: 'retired' };
+  }
+
+  @Post('accounts/:id/enable')
+  async enableAccount(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
+    void currentAccount(req);
+    await this.db
+      .update(accountProfiles)
+      .set({ status: 'pending_login', cooldownUntil: null, retiredAt: null })
+      .where(eq(accountProfiles.id, id));
+    return { id, status: 'pending_login' };
   }
 
   private assertEngine(engine: string) {

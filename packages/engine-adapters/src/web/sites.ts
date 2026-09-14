@@ -10,8 +10,10 @@ export interface EngineSiteConfig {
   displayName: string;
   /** 提问页(登录后落地页) */
   chatUrl: string;
-  /** 未登录指示(任一可见 = 未登录;支持 :has-text()) */
+  /** 未登录指示(任一可见 = 未登录;支持 :has-text());注意:支持游客提问的站点不可放"登录"按钮 */
   loginHints: string[];
+  /** URL 含任一 pattern 即视为未登录(如强制跳转登录页;比按钮探测更稳) */
+  loginUrlPatterns: string[];
   /** 提问输入框候选(依次尝试首个可见者;textarea 与 contenteditable 均可) */
   inputSelectors: string[];
   /** 发送按钮候选;全部失败回车兜底 */
@@ -20,6 +22,8 @@ export interface EngineSiteConfig {
   answerSelectors: string[];
   /** "停止生成"控件(可见 = 仍在流式输出) */
   stopSelectors: string[];
+  /** 回答文本的站点噪声行(整行匹配移除,如工具调用状态行);正则字符串 */
+  answerNoisePatterns: string[];
   /** 回答文本稳定窗口(docs/04 §2.1 完成判定三条件之二) */
   completionStableMs: number;
   navigationTimeoutMs: number;
@@ -34,15 +38,17 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     displayName: '豆包',
     chatUrl: 'https://www.doubao.com/chat/',
     loginHints: ['button:has-text("登录")', 'a:has-text("登录")', '[data-testid="login_button"]'],
+    loginUrlPatterns: [],
     inputSelectors: [
+      '[contenteditable="true"]',
       'textarea[data-testid="chat_text_input"]',
       '[data-testid="chat_text_input"]',
       'textarea[placeholder]',
-      '[contenteditable="true"]',
     ],
     submitSelectors: ['[data-testid="send_button"]', 'button[type="submit"]', 'button:has-text("发送")'],
     answerSelectors: ['[data-testid="receive_message"]', 'div[class*="answer"]', 'div[class*="markdown-body"]'],
     stopSelectors: ['[data-testid="stop_button"]', 'button:has-text("停止")'],
+    answerNoisePatterns: [],
     completionStableMs: BASE_COMPLETION_STABLE_MS,
     navigationTimeoutMs: BASE_NAV_TIMEOUT_MS,
   },
@@ -50,35 +56,46 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     engine: 'deepseek',
     displayName: 'DeepSeek',
     chatUrl: 'https://chat.deepseek.com/',
-    loginHints: ['button:has-text("登录")', 'a:has-text("登录")', 'div:has-text("登录以")'],
+    // 实测(2026-09):未登录访问跳 /sign_in,页内登录控件非标准 button,以 URL 判定最稳
+    loginHints: [],
+    loginUrlPatterns: ['sign_in', 'login'],
     inputSelectors: ['#chat-input', 'textarea[id*="chat"]', 'textarea'],
     submitSelectors: ['div[class*="send"][role="button"]', 'button[type="submit"]'],
     answerSelectors: ['.ds-markdown', 'div[class*="markdown"]'],
     stopSelectors: ['div[class*="stop"]', 'button:has-text("停止")'],
+    answerNoisePatterns: [],
     completionStableMs: BASE_COMPLETION_STABLE_MS,
     navigationTimeoutMs: BASE_NAV_TIMEOUT_MS,
   },
   wenxin: {
     engine: 'wenxin',
-    displayName: '文心一言',
-    chatUrl: 'https://yiyan.baidu.com/',
-    loginHints: ['button:has-text("登录")', 'a:has-text("登录")'],
-    inputSelectors: ['#textarea', 'textarea[data-testid]', 'textarea'],
+    displayName: '百度文心助手',
+    // 实测(2026-09):yiyan.baidu.com → wenxin.baidu.com;未登录可直接提问并获真实回答
+    // (登录按钮常驻侧栏,不是登录门槛,故 loginHints 置空——放"登录"会误杀游客采集)
+    chatUrl: 'https://wenxin.baidu.com/',
+    loginHints: [],
+    loginUrlPatterns: ['passport.baidu.com'],
+    inputSelectors: ['textarea', '#textarea', 'textarea[data-testid]'],
     submitSelectors: ['#sendBtn', 'button[data-testid="send"]', 'button:has-text("发送")'],
     answerSelectors: ['div[class*="answer"]', 'div[class*="markdown"]'],
     stopSelectors: ['button:has-text("停止")'],
+    // 实测:回答头部混入工具调用状态行(wenxin 深度搜索 UI 文本)
+    answerNoisePatterns: ['^调用工具$', '^品牌官方$', '^搜索全网\\d+篇资料$', '^已搜索\\d+篇资料$'],
     completionStableMs: BASE_COMPLETION_STABLE_MS,
     navigationTimeoutMs: BASE_NAV_TIMEOUT_MS,
   },
   qwen: {
     engine: 'qwen',
     displayName: '通义千问',
-    chatUrl: 'https://www.tongyi.com/',
+    // 实测(2026-09):tongyi.com → qianwen.com(品牌升级"千问");输入框为 contenteditable
+    chatUrl: 'https://www.qianwen.com/',
     loginHints: ['button:has-text("登录")', 'a:has-text("登录")'],
-    inputSelectors: ['textarea', 'div[id*="chat-input"]', '[contenteditable="true"]'],
+    loginUrlPatterns: [],
+    inputSelectors: ['[contenteditable="true"]', 'div[id*="chat-input"]', 'textarea'],
     submitSelectors: ['button:has-text("发送")', 'button[type="submit"]'],
     answerSelectors: ['div[class*="answer"]', 'div[class*="markdown"]'],
     stopSelectors: ['button:has-text("停止")'],
+    answerNoisePatterns: [],
     completionStableMs: BASE_COMPLETION_STABLE_MS,
     navigationTimeoutMs: BASE_NAV_TIMEOUT_MS,
   },
@@ -87,10 +104,12 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     displayName: '腾讯元宝',
     chatUrl: 'https://yuanbao.tencent.com/chat',
     loginHints: ['button:has-text("登录")', 'a:has-text("登录")'],
+    loginUrlPatterns: [],
     inputSelectors: ['[contenteditable="true"]', 'textarea'],
     submitSelectors: ['button:has-text("发送")', 'button[class*="send"]'],
     answerSelectors: ['div[class*="agent-chat"] div[class*="markdown"]', 'div[class*="markdown"]'],
     stopSelectors: ['button:has-text("停止")'],
+    answerNoisePatterns: [],
     completionStableMs: BASE_COMPLETION_STABLE_MS,
     navigationTimeoutMs: BASE_NAV_TIMEOUT_MS,
   },

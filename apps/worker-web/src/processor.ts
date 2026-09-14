@@ -1,12 +1,20 @@
 import { eq, sql } from 'drizzle-orm';
 import { and } from 'drizzle-orm';
 import { brands, collectionRounds, monitoringQuestions, queryRuns, recognitionEntries, type Db } from '@geo/db';
-import { MockEngineAdapter, AdapterRegistry, type AskResult } from '@geo/engine-adapters';
+import {
+  MockEngineAdapter,
+  AdapterRegistry,
+  DomWebAdapter,
+  needsLoginOf,
+  type AskResult,
+} from '@geo/engine-adapters';
 import { WEB_ENGINES, type AskStatus } from '@geo/shared';
-import { createBrokerFromEnv, fingerprintHash } from '@geo/browser-session';
+import { browserModeFromEnv, createBrokerFromEnv, fingerprintHash, type SessionBroker } from '@geo/browser-session';
 import { buildEvidencePack, createStorageFromEnv } from '@geo/evidence';
 import Redis from 'ioredis';
 import { Queue, Worker, type Job } from 'bullmq';
+import type { Browser, Page } from 'playwright-core';
+import { chromium } from 'playwright-core';
 import { EngineBreaker } from './breaker';
 import { envInt } from './config';
 import { AccountPoolService, type AcquiredProfile } from './profiles';
@@ -42,20 +50,25 @@ export class CollectProcessor {
   private readonly breaker: EngineBreaker;
   private readonly pool: AccountPoolService;
   private readonly storage = createStorageFromEnv();
-  private readonly broker = createBrokerFromEnv();
   private readonly registry = new AdapterRegistry();
 
   constructor(
     private readonly db: Db,
     redis: Redis,
+    private readonly broker: SessionBroker = createBrokerFromEnv(),
   ) {
     this.breaker = new EngineBreaker(redis);
     this.pool = new AccountPoolService(db);
-    // dev/CI:mock 适配器;真实引擎适配器在 AgentBay PoC 后按 strategy 落地(docs/07 §13)
+    // 适配器按 BROWSER_MODE 装配:mock=回放(dev/CI);agentbay/local=真实 DOM 采集(docs/04 §2.1)
+    this.realBrowser = browserModeFromEnv() !== 'mock';
     for (const engine of WEB_ENGINES) {
-      this.registry.register(MockEngineAdapter.withDefaultFixtures(engine));
+      this.registry.register(
+        this.realBrowser ? new DomWebAdapter(engine) : MockEngineAdapter.withDefaultFixtures(engine),
+      );
     }
   }
+
+  private readonly realBrowser: boolean;
 
   start(concurrency: number): Worker<CollectJobData> {
     const worker = new Worker<CollectJobData>(COLLECT_QUEUE, (job) => this.process(job), {
@@ -68,6 +81,7 @@ export class CollectProcessor {
 
   async shutdown(): Promise<void> {
     this.progressRedis.disconnect();
+    await this.broker.destroyAll?.(); // 本地代理:关闭残留浏览器进程(登录态已持久化到 profile 目录)
     await Promise.allSettled([this.requeue.close(), this.reputation.close()]);
   }
 
@@ -96,7 +110,15 @@ export class CollectProcessor {
       triedProfileIds.add(profile.id);
       ask = await this.askWithTimeout(engine, profile, data.questionText);
       await this.breaker.record(engine, ask.status !== 'failed');
-      await this.pool.report(engine, profile.id, ask.status !== 'failed');
+      if (needsLoginOf(ask)) {
+        // 登录态失效是账号供给问题而非滥用:不扣健康分,置 login_required 等人工重登(docs/04 §3.1)
+        await this.pool.markLoginRequired(profile.id);
+        console.error(
+          `[collect] engine=${engine} profile=${profile.id} 登录态失效,已置 login_required(后台"账号池"可重新人工登录)`,
+        );
+      } else {
+        await this.pool.report(engine, profile.id, ask.status !== 'failed');
+      }
       if (ask.status !== 'failed') break;
       console.error(
         `[collect] run attempt ${attempt}/${MAX_ATTEMPTS} failed engine=${engine} brand=${data.brandId} ` +
@@ -195,19 +217,28 @@ export class CollectProcessor {
   /** 单次 ask,带超时护栏:超时按 failed 处理并释放会话,不占用并发槽。 */
   private async askWithTimeout(engine: string, profile: AcquiredProfile, questionText: string): Promise<AskResult> {
     const queuedAt = new Date();
+    let cdpBrowser: Browser | null = null;
     try {
       const session = await this.broker.acquire({
         profileKey: profile.profileKey,
         contextRef: profile.contextRef ?? undefined,
         fingerprint: profile.fingerprint,
         proxyHint: profile.proxyHint ?? undefined,
+        purpose: 'collect',
       });
       try {
+        // 本地代理直接注入 Page;远程代理(AgentBay)经 CDP 连接拿页面
+        let page = session.page as Page | undefined;
+        if (!page && /^wss?:\/\//.test(session.cdpUrl)) {
+          cdpBrowser = await chromium.connectOverCDP(session.cdpUrl);
+          const context = cdpBrowser.contexts()[0] ?? (await cdpBrowser.newContext());
+          page = context.pages()[0] ?? (await context.newPage());
+        }
         const adapter = this.registry.get(engine as never, 'web');
         return await adapter.ask(
           {
-            mode: process.env.BROWSER_MODE === 'agentbay' ? 'browser' : 'mock',
-            page: undefined, // browser 模式:worker 在此 connectOverCDP(session.cdpUrl) 后注入 Page
+            mode: this.realBrowser ? 'browser' : 'mock',
+            page,
             fingerprint: profile.fingerprint,
             proxyHint: profile.proxyHint ?? undefined,
             profileKey: profile.profileKey,
@@ -217,6 +248,7 @@ export class CollectProcessor {
         );
       } finally {
         await session.release();
+        if (cdpBrowser) await cdpBrowser.close().catch(() => undefined); // CDP 连接的 close 只断连,不关远端浏览器
       }
     } catch (err) {
       // 超时/会话异常/无适配器统一按 failed 定格(docs/04 §7 失败模式手册)
@@ -325,13 +357,16 @@ export class CollectProcessor {
   }
 
   private async bumpRound(roundId: number, status: AskStatus | 'deferred'): Promise<void> {
+    // 单次赋值嵌套 jsonb_set:UPDATE 中所有引用都看旧行,链式嵌套安全;分开两次赋值会报
+    // "multiple assignments to same column totals"(仅失败轮次触发,曾掩盖真实失败原因)
+    const okInc = status === 'failed' || status === 'deferred' ? 0 : 1;
+    const failInc = status === 'failed' ? 1 : 0;
     await this.db.execute(sql`
       update collection_rounds
-      set totals = jsonb_set(jsonb_set(totals, '{done}',
-            (coalesce((totals->>'done')::int, 0) + 1)::text::jsonb),
-          '{ok}',
-            (coalesce((totals->>'ok')::int, 0) + ${status === 'failed' || status === 'deferred' ? 0 : 1})::text::jsonb)
-      ${status === 'failed' ? sql`, totals = jsonb_set(totals, '{failed}', (coalesce((totals->>'failed')::int, 0) + 1)::text::jsonb)` : sql``}
+      set totals = jsonb_set(jsonb_set(jsonb_set(coalesce(totals, '{}'::jsonb),
+            '{done}', (coalesce((totals->>'done')::int, 0) + 1)::text::jsonb),
+            '{ok}', (coalesce((totals->>'ok')::int, 0) + ${okInc})::text::jsonb),
+            '{failed}', (coalesce((totals->>'failed')::int, 0) + ${failInc})::text::jsonb)
       where id = ${roundId}
     `);
     const round = (await this.db.select().from(collectionRounds).where(eq(collectionRounds.id, roundId)).limit(1))[0];

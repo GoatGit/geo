@@ -71,6 +71,7 @@ const ADMIN_NAV: NavGroup = {
   icon: <IconServer />,
   items: [
     { href: '/admin', label: '系统总览', icon: <IconPulse />, exact: true },
+    { href: '/admin/accounts', label: '账号池', icon: <IconShield /> },
     { href: '/admin/settings', label: '全局配置', icon: <IconConfig /> },
     { href: '/admin/rounds', label: '采集轮次', icon: <IconList /> },
   ],
