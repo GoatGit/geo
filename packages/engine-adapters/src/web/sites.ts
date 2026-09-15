@@ -22,6 +22,10 @@ export interface EngineSiteConfig {
   answerSelectors: string[];
   /** "停止生成"控件(可见 = 仍在流式输出) */
   stopSelectors: string[];
+  /** 登录 Cookie 名(任一存在 = 已登录的正向信号;优先于未登录指示) */
+  loggedInCookieHints?: string[];
+  /** 游客可输入的站点置 true:登录成功必须以 Cookie 为准,否则游客态会被误判为已登录 */
+  requireLoginCookie?: boolean;
   /** 回答文本的站点噪声行(整行匹配移除,如工具调用状态行);正则字符串 */
   answerNoisePatterns: string[];
   /** 回答文本稳定窗口(docs/04 §2.1 完成判定三条件之二) */
@@ -55,6 +59,8 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     // ~40s 本地会话空窗(local_xxx)再同步服务端,ASK_TIMEOUT 需 ≥150s
     answerSelectors: ['div[class*="message"]', '[data-testid="receive_message"]', 'div[class*="answer"]', 'div[class*="markdown-body"]'],
     stopSelectors: ['[data-testid="stop_button"]', 'button:has-text("停止")'],
+    // 登录 Cookie 实测:字节跳动 passport 登录后新增 sessionid/sid_tt
+    loggedInCookieHints: ['sessionid', 'sid_tt'],
     answerNoisePatterns: [],
     completionStableMs: BASE_COMPLETION_STABLE_MS,
     navigationTimeoutMs: BASE_NAV_TIMEOUT_MS,
@@ -70,6 +76,7 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     submitSelectors: ['div[class*="send"][role="button"]', 'button[type="submit"]'],
     answerSelectors: ['.ds-markdown', 'div[class*="markdown"]'],
     stopSelectors: ['div[class*="stop"]', 'button:has-text("停止")'],
+    loggedInCookieHints: ['sessionid'],
     answerNoisePatterns: [],
     completionStableMs: BASE_COMPLETION_STABLE_MS,
     navigationTimeoutMs: BASE_NAV_TIMEOUT_MS,
@@ -83,6 +90,9 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     loginHints: [],
     loginUrlPatterns: ['passport.baidu.com'],
     inputSelectors: ['textarea', '#textarea', 'textarea[data-testid]'],
+    // 游客可输入(关闭弹窗≠登录):人工登录成功必须检测到百度登录态 Cookie BDUSS
+    loggedInCookieHints: ['bduss'],
+    requireLoginCookie: true,
     submitSelectors: ['#sendBtn', 'button[data-testid="send"]', 'button:has-text("发送")'],
     answerSelectors: ['div[class*="answer"]', 'div[class*="markdown"]'],
     stopSelectors: ['button:has-text("停止")'],
@@ -114,6 +124,9 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     loginHints: ['button:has-text("登录")', 'a:has-text("登录")'],
     loginUrlPatterns: [],
     inputSelectors: ['[contenteditable="true"]', 'textarea'],
+    // 游客模式无可见"登录"元素且输入框可用:人工登录成功必须以腾讯登录态 Cookie 为准
+    loggedInCookieHints: ['uid', 'uin', 'skey', 'hy_uid'],
+    requireLoginCookie: true,
     submitSelectors: ['button:has-text("发送")', 'button[class*="send"]'],
     // 实测(2026-09,登录态):回答被拆成数十个 markdown 小块,须取整轮对话容器
     answerSelectors: ['div[class*="agent-dialogue"]', 'div[class*="agent-chat"]', 'div[class*="markdown"]'],

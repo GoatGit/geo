@@ -159,12 +159,21 @@ export class LoginManager {
             updatedAt: new Date().toISOString(),
           });
           const { loggedIn } = await checkLogin(page, site);
-          let usable = loggedIn !== false && (await hasVisibleInput(page, site));
+          // 游客可输入的站点(元宝/文心)必须以登录 Cookie 为成功依据,
+          // 否则游客输入框可见 + 关弹窗等动作会被误判为登录成功
+          let usable =
+            site.requireLoginCookie && loggedIn !== true
+              ? false
+              : loggedIn !== false && (await hasVisibleInput(page, site));
           if (!usable && Date.now() - lastNavAt > 15_000) {
             // 登录成功但落在非会话页(如站点首页):带回提问页
             await page.goto(site.chatUrl, { waitUntil: 'domcontentloaded', timeout: site.navigationTimeoutMs }).catch(() => undefined);
             lastNavAt = Date.now();
-            usable = loggedIn !== false && (await hasVisibleInput(page, site));
+            const recheck = await checkLogin(page, site);
+            usable =
+              site.requireLoginCookie && recheck.loggedIn !== true
+                ? false
+                : recheck.loggedIn !== false && (await hasVisibleInput(page, site));
           }
           confirmStreak = usable ? confirmStreak + 1 : 0;
           if (confirmStreak >= 2) break;
@@ -182,11 +191,20 @@ export class LoginManager {
             .where(eq(accountProfiles.id, req.profileId));
           console.log(`[login] session=${req.sessionId} engine=${req.engine} 登录成功,档案 ${req.profileId} 置 available`);
         } else if (!cancelled) {
-          console.warn(`[login] session=${req.sessionId} engine=${req.engine} 登录等待超时`);
+          // 超时诊断:页面 URL + 当前 Cookie 名(校准各站登录 Cookie 标记)
+          const cookieNames = await page
+            .context()
+            .cookies()
+            .then((cs) => [...new Set(cs.map((c) => c.name))].slice(0, 30).join(','))
+            .catch(() => '(读取失败)');
+          console.warn(`[login] session=${req.sessionId} engine=${req.engine} 登录等待超时 url=${page.url().slice(0, 80)} cookies=[${cookieNames}]`);
         }
+        const timeoutDetail = !cancelled && !success
+          ? `等待超时:url=${page.url().slice(0, 60)},可重试`
+          : undefined;
         await this.setStatus(req.sessionId, {
           state: cancelled ? 'cancelled' : success ? 'done' : 'timeout',
-          detail: cancelled ? '已手动取消,远程会话已释放' : success ? '登录成功,账号已入可用池' : '等待超时:未检测到登录完成,可重试',
+          detail: cancelled ? '已手动取消,远程会话已释放' : success ? '登录成功,账号已入可用池' : timeoutDetail,
           viewer,
           updatedAt: new Date().toISOString(),
         });

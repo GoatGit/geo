@@ -14,12 +14,27 @@ export function needsLoginOf(result: AskResult): boolean {
   return result.engineMeta?.needsLogin === true;
 }
 
-/** 登录态检测(适配器与人工登录编排共用):URL 命中登录页模式或任一未登录指示可见即视为未登录。 */
+/** 登录态检测(适配器与人工登录编排共用)。判定顺序:
+ * ① 正向信号:站点配置的登录 Cookie(如 doubao sessionid / wenxin BDUSS)存在 → 已登录
+ *    (部分站点登录后页面仍有残留"登录"文案,Cookie 是最可靠的正向信号);
+ * ② URL 命中登录页模式(如 deepseek 强制跳 /sign_in)→ 未登录;
+ * ③ 任一未登录指示可见 → 未登录;
+ * ④ 都不命中 → 未知(null,由调用方结合 requireLoginCookie 决定)。 */
 export async function checkLogin(
   page: Page,
   site: EngineSiteConfig,
 ): Promise<{ loggedIn: boolean | null; hint: string | null }> {
-  // URL 判定最稳(如 deepseek 强制跳 /sign_in):不受页面结构变化影响
+  if (site.loggedInCookieHints?.length) {
+    try {
+      const cookies = await page.context().cookies(page.url());
+      const hit = cookies.find((c) =>
+        site.loggedInCookieHints!.some((h) => c.name.toLowerCase() === h.toLowerCase()),
+      );
+      if (hit) return { loggedIn: true, hint: `cookie:${hit.name}` };
+    } catch {
+      // Cookie 读取失败:继续负向判定
+    }
+  }
   const currentUrl = page.url();
   for (const pattern of site.loginUrlPatterns) {
     if (currentUrl.includes(pattern)) {
