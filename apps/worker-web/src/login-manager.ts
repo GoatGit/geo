@@ -165,6 +165,39 @@ export class LoginManager {
             site.requireLoginCookie && loggedIn !== true
               ? false
               : loggedIn !== false && (await hasVisibleInput(page, site));
+          // 豆包类:登录弹窗被关闭(二维码过期/协议未勾被拒)且仍未登录 → 自动重开登录框拿新码
+          if (!usable && site.loginHints.length > 0 && loggedIn !== true) {
+            const dialogOpen = await page
+              .getByText(/手机号登录|扫码登录|账号登录/)
+              .first()
+              .isVisible({ timeout: 300 })
+              .catch(() => false);
+            if (!dialogOpen) {
+              for (const h of site.loginHints) {
+                try {
+                  const loc = page.locator(h).first();
+                  if (await loc.isVisible({ timeout: 400 })) { await loc.click(); break; }
+                } catch { /* 下一个 */ }
+              }
+            }
+          }
+          // 协议勾选:豆包登录框必须勾选才能扫码成功;semi-ui 为隐藏 input + 自定义样式
+          try {
+            const cb = page.locator('input[type="checkbox"]').first();
+            if ((await cb.count()) > 0 && !(await cb.isChecked().catch(() => true))) {
+              await cb.click({ force: true }).catch(async () => {
+                await page.locator('.semi-checkbox').first().click({ force: true }).catch(() => undefined);
+              });
+              console.log(`[login] 已自动勾选用户协议`);
+            }
+          } catch { /* 无勾选框的站点 */ }
+          // 二维码过期自动刷新(弹窗内「二维码失效」文本可点击刷新)
+          try {
+            const expired = page.getByText(/二维码(失效|过期)/).first();
+            if (await expired.isVisible({ timeout: 300 }).catch(() => false)) {
+              await expired.click().catch(() => undefined);
+            }
+          } catch { /* 无过期态 */ }
           if (!usable && Date.now() - lastNavAt > 15_000) {
             // 登录成功但落在非会话页(如站点首页):带回提问页
             await page.goto(site.chatUrl, { waitUntil: 'domcontentloaded', timeout: site.navigationTimeoutMs }).catch(() => undefined);
