@@ -126,7 +126,7 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     loginUrlPatterns: [],
     inputSelectors: ['[contenteditable="true"]', 'textarea'],
     // 游客模式无可见"登录"元素且输入框可用:人工登录成功必须以腾讯登录态 Cookie 为准
-    loggedInCookieHints: ['uid', 'uin', 'skey', 'hy_uid'],
+    loggedInCookieHints: ['hy_user', 'hy_token'],
     requireLoginCookie: true,
     submitSelectors: ['button:has-text("发送")', 'button[class*="send"]'],
     // 实测(2026-09,登录态):回答被拆成数十个 markdown 小块,须取整轮对话容器
