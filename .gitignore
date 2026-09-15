@@ -7,3 +7,5 @@ coverage/
 .env.local
 infra/local-data/
 .DS_Store
+.env.debug
+.env.debug
