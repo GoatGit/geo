@@ -26,6 +26,8 @@ export interface EngineSiteConfig {
   loggedInCookieHints?: string[];
   /** 游客可输入的站点置 true:登录成功必须以 Cookie 为准,否则游客态会被误判为已登录 */
   requireLoginCookie?: boolean;
+  /** 游客可提问的站点置 true:未登录不阻断采集,降级为游客态采集(如豆包风控拒绝云端登录) */
+  guestAllowed?: boolean;
   /** 回答文本的站点噪声行(整行匹配移除,如工具调用状态行);正则字符串 */
   answerNoisePatterns: string[];
   /** 回答文本稳定窗口(docs/04 §2.1 完成判定三条件之二) */
@@ -61,6 +63,8 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     stopSelectors: ['[data-testid="stop_button"]', 'button:has-text("停止")'],
     // 登录 Cookie 实测:字节跳动 passport 登录后新增 sessionid/sid_tt
     loggedInCookieHints: ['sessionid', 'sid_tt'],
+    // 实测:游客态可正常提问;且豆包风控拒绝云端环境的扫码登录,游客采集为兜底
+    guestAllowed: true,
     answerNoisePatterns: [],
     completionStableMs: BASE_COMPLETION_STABLE_MS,
     navigationTimeoutMs: BASE_NAV_TIMEOUT_MS,

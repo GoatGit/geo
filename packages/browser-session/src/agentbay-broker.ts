@@ -43,7 +43,8 @@ export class AgentBaySessionBroker implements SessionBroker {
         Name: contextNameFor(profile.profileKey),
         AllowCreate: 'true',
       });
-      contextId = strField(ctxRes, ['ContextId', 'contextId']) ?? undefined;
+      // GetContext 的 XML 响应中 Context ID 位于 <Id> 字段(形如 SdkCtx-xxx)
+      contextId = strField(ctxRes, ['Id', 'ContextId', 'contextId']) ?? undefined;
     } catch (err) {
       console.error('[agentbay] GetContext failed (降级为无 Context 会话):', (err as Error).message);
     }
@@ -119,17 +120,38 @@ export class AgentBaySessionBroker implements SessionBroker {
       throw new BrokerError(`agentbay ${action} network error`, undefined, (err as Error).message);
     }
     const text = await res.text();
-    let json: Record<string, unknown>;
-    try {
-      json = JSON.parse(text) as Record<string, unknown>;
-    } catch {
-      throw new BrokerError(`agentbay ${action} -> ${res.status}`, res.status, text.slice(0, 200));
+    // 同一网关对部分动作返回 JSON、部分返回 XML(实测 CreateMcpSession/GetCdpLink/GetContext 为 XML),统一解析
+    const parsed = text.trimStart().startsWith('{') ? parseJsonLoose(text) : parseXmlLoose(text);
+    const code = String(parsed.Code ?? 'ok');
+    if (code !== 'ok' && code !== 'OK' && code !== 'Success') {
+      throw new BrokerError(`agentbay ${action} -> ${code}`, res.status, String(parsed.Message ?? '').slice(0, 200));
     }
-    if (json.Code && json.Code !== 'ok' && json.Code !== 'OK') {
-      throw new BrokerError(`agentbay ${action} -> ${String(json.Code)}`, res.status, String(json.Message ?? '').slice(0, 200));
-    }
-    return (json.Data ?? json) as Record<string, unknown>;
+    const data = (parsed.Data ?? parsed) as Record<string, unknown>;
+    return typeof data === 'object' && data !== null ? (data as Record<string, unknown>) : parsed;
   }
+}
+
+/** 宽松 JSON 解析:失败抛错由调用方统一处理。 */
+function parseJsonLoose(text: string): Record<string, unknown> {
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    throw new BrokerError('agentbay response is not JSON', undefined, text.slice(0, 200));
+  }
+}
+
+/** XML 响应 → 扁平键值:顶层 Code/Message/Success + Data 内的一级字段。 */
+function parseXmlLoose(text: string): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const tag of ['Code', 'Message', 'Success', 'RequestId', 'HttpStatusCode']) {
+    const m = text.match(new RegExp(`<${tag}>([^<]*)</${tag}>`));
+    if (m) out[tag] = m[1];
+  }
+  const dataBlock = text.match(/<Data>([\s\S]*?)<\/Data>/);
+  if (dataBlock) {
+    for (const m of dataBlock[1].matchAll(/<(\w+)>([^<]*)<\/\1>/g)) out[m[1]] = m[2];
+  }
+  return out;
 }
 
 function strField(obj: Record<string, unknown>, keys: string[]): string | undefined {

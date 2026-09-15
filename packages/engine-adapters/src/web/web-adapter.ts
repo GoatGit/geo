@@ -109,7 +109,9 @@ export class DomWebAdapter implements EngineAdapter {
       }
 
       const login = await checkLogin(page, this.site);
-      if (login.loggedIn === false) {
+      // 未登录:有正式登录态要求的站点直接失败(账号置 login_required);
+      // 游客可提问的站点(如豆包)降级为游客态继续采集,不阻断
+      if (login.loggedIn === false && !this.site.guestAllowed) {
         return {
           status: 'failed',
           answerText: '',
@@ -119,6 +121,7 @@ export class DomWebAdapter implements EngineAdapter {
           engineMeta: { error: 'needs_login', needsLogin: true, hint: login.hint, profileKey: ctx.profileKey },
         };
       }
+      const asGuest = login.loggedIn === false;
 
       const asked = await this.submitQuestion(page, question);
       if (!asked) {
