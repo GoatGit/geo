@@ -15,9 +15,9 @@ packages/
   browser-session/ SessionBroker:AgentBay Browser Use(生产)/ Mock(dev)
   evidence/        证据包(answer/raw/meta/integrity.sha256)+ S3 兼容存储(MinIO/OSS)
 apps/
-  api/             NestJS:auth/brands/questions/recognition/monitor(指标唯一出口)/runs/_collection/account/reports/billing(会员+微信/支付宝支付)/WS + admin(平台管理后台)
-  worker-web/      采集编排:BullMQ 调度(品牌时区白天随机)/熔断/账号池(健康分)/ask 超时护栏/失败换号重试/即时抽取/竞品发现/口碑基线/报告生成
-  web/             Next.js 控制台:总览/排名透视(矩阵+漏斗)/引用源/口碑/问题/口径/采集状态/报告 + 平台后台(/admin:系统总览/全局配置/采集轮次)
+  api/             NestJS:auth/brands/questions/recognition/monitor(指标唯一出口)/runs/_collection/account/reports/billing(会员+微信/支付宝支付)/WS + admin(平台管理后台)+ insights(行业洞察 + PDF 下载)
+  worker-web/      采集编排:BullMQ 调度(品牌时区白天随机)/熔断/账号池(健康分)/ask 超时护栏/失败换号重试/即时抽取/竞品发现/口碑基线/报告生成 + 行业洞察数据聚合
+  web/             Next.js 控制台:总览/排名透视(矩阵+漏斗)/引用源/口碑/问题/口径/采集状态/报告 + 平台后台(/admin:系统总览/全局配置/采集轮次/行业洞察)
 ```
 
 ## 本地开发
@@ -43,6 +43,10 @@ worker 调度采集(mock 回放 5 引擎)→ 排名透视/漏斗/口碑/引用�
 (登记五引擎账号档案 + 人工登录注入账号态)、全局配置(调度总开关、全局/每引擎每日任务上限,
 下一调度周期生效)、采集轮次(跨品牌进度)、引擎手动暂停/恢复。注意:`pnpm dev:api`(tsx)
 不支持 Nest 装饰器元数据注入,本地请用 `pnpm --filter @geo/api build && node apps/api/dist/main.js` 方式启动。
+
+行业洞察(admin/insights):配置行业 → 选数据窗口「运行」→ worker 按行业聚合全部品牌的
+采集事实(提及率排行/引擎热力/漏斗/雷达/趋势/象限/信源/口碑)自动成稿 → 可再手工微调后发布;
+已发布报告支持服务端矢量 PDF 下载(pdfkit + 内置 Noto Sans SC,OFL),精选报告在官网首页公开。
 
 ## 真实采集模式(docs/04 §2.1,实验性)
 

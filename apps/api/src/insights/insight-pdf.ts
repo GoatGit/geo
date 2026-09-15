@@ -419,12 +419,12 @@ export async function renderInsightPdf(detail: PdfInsight): Promise<Buffer> {
 
   // ===== 内容块 =====
   for (const block of detail.blocks ?? []) {
+    const note = 'note' in block ? block.note : undefined;
     // 先保证标题+整块内容同页,再落标题(避免标题孤儿)
-    ensure(estimateBlockHeight(block) + (block.note ? 20 : 8));
+    ensure(estimateBlockHeight(block) + (note ? 20 : 8));
     doc.roundedRect(PAGE.left, y + 1, 3, 11, 1.5).fill(NAVY);
     doc.fillColor(INK).fontSize(12).text(block.title, PAGE.left + 9, y, { lineBreak: false });
     y += 18;
-    const note = 'note' in block ? block.note : undefined;
     if (note) {
       text(note, 8, SUB, { lineGap: 1 });
       y += 4;

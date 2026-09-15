@@ -66,6 +66,14 @@ export default function DashboardPage() {
   const questionsConfigured =
     (quota.data?.ranking.used ?? 0) + (quota.data?.reputation.used ?? 0) > 0;
   const hasRound = (status.data?.rounds.length ?? 0) > 0;
+  // 识别口径核对完成 = 所有条目(含 AI 建议竞品)均已确认
+  const recognition = useQuery({
+    queryKey: ['recognition-dash', brandId],
+    queryFn: () => api<{ id: number; confirmed: boolean }[]>(`/brands/${brandId}/recognition`),
+    enabled: !!brandId,
+  });
+  const recognitionConfirmed =
+    (recognition.data?.length ?? 0) > 0 && (recognition.data ?? []).every((r) => r.confirmed);
 
   return (
     <div className="space-y-6">
@@ -107,7 +115,7 @@ export default function DashboardPage() {
               icon={<IconPulse width={15} height={15} />}
             />
             <Step
-              done={false}
+              done={recognitionConfirmed}
               label="核对本品识别口径"
               desc="登记产品线别名,避免自家产品被误判为竞品"
               href="/config/recognition"
