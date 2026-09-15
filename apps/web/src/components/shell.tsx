@@ -110,6 +110,16 @@ function ConsoleShell({ pathname, children }: { pathname: string; children: Reac
   const router = useRouter();
   const [ready, setReady] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  // 品牌列表全局拉取(与 BrandSwitcher 共享缓存):零品牌时引导先建品牌
+  const brandsQuery = useQuery({
+    queryKey: ['brands'],
+    queryFn: () => api<BrandRow[]>('/brands'),
+    enabled: ready,
+  });
+  const brandless = brandsQuery.isSuccess && brandsQuery.data!.length === 0;
+  // 账户级页面不依赖品牌:套餐账单 / 新建品牌 / 平台后台
+  const brandlessFriendly =
+    pathname.startsWith('/billing') || pathname.startsWith('/brands/new') || pathname.startsWith('/admin');
   // 路由变化时收起移动端抽屉(点击链接后自动关闭)
   useEffect(() => setNavOpen(false), [pathname]);
   useEffect(() => {
@@ -143,9 +153,33 @@ function ConsoleShell({ pathname, children }: { pathname: string; children: Reac
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar onMenu={() => setNavOpen(true)} />
         <main key={pathname} className="animate-fade-in mx-auto w-full max-w-6xl flex-1 px-4 py-5 md:px-8 md:py-7">
-          {children}
+          {brandless && !brandlessFriendly ? <NoBrandGuide /> : children}
         </main>
       </div>
+    </div>
+  );
+}
+
+/** 零品牌引导(docs/01 §3.1):无品牌时所有品牌型页面统一导向「创建第一个品牌」。 */
+function NoBrandGuide() {
+  return (
+    <div className="card rise mx-auto mt-10 max-w-xl p-10 text-center">
+      <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-glow">
+        <IconLogo width={26} height={26} />
+      </div>
+      <h2 className="text-lg font-semibold text-slate-900">创建你的第一个品牌</h2>
+      <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-slate-500">
+        用一句话描述品牌,AI 自动生成档案、识别口径与竞品清单;配置监控问题后即可看到 5 大引擎的可见度数据。
+      </p>
+      <ol className="mx-auto mt-5 max-w-xs space-y-2 text-left text-[13px] text-slate-600">
+        <li className="flex gap-2"><b className="text-brand-600">1</b>描述品牌与官网,完成创建</li>
+        <li className="flex gap-2"><b className="text-brand-600">2</b>添加排名词与口碑词监控问题</li>
+        <li className="flex gap-2"><b className="text-brand-600">3</b>等待首轮采集,总览即可出数</li>
+      </ol>
+      <Link href="/brands/new" className="btn-primary mt-7 inline-flex h-11 px-8">
+        <IconPlus width={15} height={15} />
+        新建品牌
+      </Link>
     </div>
   );
 }
