@@ -140,7 +140,7 @@ export class DomWebAdapter implements EngineAdapter {
         rawHtml: null, // DOM 路线归一正文为主;页面快照由证据层按需补拍
         citations: await this.extractCitations(page, main),
         timing: this.timing(queuedAt),
-        engineMeta: { mode: 'dom', profileKey: ctx.profileKey, timedOut },
+        engineMeta: { mode: 'dom', profileKey: ctx.profileKey, timedOut, guest: asGuest },
       };
     } catch (err) {
       return this.fail((err as Error).message, queuedAt);

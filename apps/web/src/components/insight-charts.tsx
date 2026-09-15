@@ -58,6 +58,8 @@ export function InsightBlockView({ block: b }: { block: InsightBlock }) {
       return <ChartCard title={b.title} note={b.note}><HeatmapChart {...b} /></ChartCard>;
     case 'radar':
       return <ChartCard title={b.title} note={b.note}><RadarChart {...b} /></ChartCard>;
+    case 'trend':
+      return <ChartCard title={b.title} note={b.note}><TrendChart {...b} /></ChartCard>;
     case 'scatter':
       return <ChartCard title={b.title} note={b.note}><ScatterChart {...b} /></ChartCard>;
     default:
@@ -149,15 +151,19 @@ function HeatmapChart({ columns, rows }: Extract<InsightBlock, { type: 'heatmap'
               <td className="p-1.5 text-left text-[13px] font-medium text-slate-800">{r.name}</td>
               {r.cells.map((v, ci) => (
                 <td key={ci} className="p-1">
-                  <div
-                    className="rounded py-2 font-semibold"
-                    style={{
-                      backgroundColor: v === 0 ? '#f8fafc' : `rgba(29, 63, 174, ${0.12 + v * 0.88})`,
-                      color: v > 0.55 ? '#ffffff' : '#334155',
-                    }}
-                  >
-                    {Math.round(v * 100)}%
-                  </div>
+                  {v == null ? (
+                    <div className="rounded bg-slate-50 py-2 text-slate-300">—</div>
+                  ) : (
+                    <div
+                      className="rounded py-2 font-semibold"
+                      style={{
+                        backgroundColor: v === 0 ? '#f8fafc' : `rgba(29, 63, 174, ${0.12 + v * 0.88})`,
+                        color: v > 0.55 ? '#ffffff' : '#334155',
+                      }}
+                    >
+                      {Math.round(v * 100)}%
+                    </div>
+                  )}
                 </td>
               ))}
             </tr>
@@ -217,6 +223,67 @@ function RadarChart({ axes, series }: Extract<InsightBlock, { type: 'radar' }>) 
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/* ===== 每日趋势(折线,null 断线) ===== */
+
+function TrendChart({ unit, points }: Extract<InsightBlock, { type: 'trend' }>) {
+  const W = 520;
+  const H = 220;
+  const m = { l: 40, r: 14, t: 12, b: 30 };
+  const iw = W - m.l - m.r;
+  const ih = H - m.t - m.b;
+  const isPct = unit === '%';
+  const maxV = isPct ? 100 : Math.max(...points.map((p) => p.value ?? 0), 1);
+  const X = (i: number) => m.l + (points.length <= 1 ? iw / 2 : (i / (points.length - 1)) * iw);
+  const Y = (v: number) => m.t + (1 - v / maxV) * ih;
+  const segments: Array<Array<[number, number]>> = [];
+  let cur: Array<[number, number]> = [];
+  points.forEach((p, i) => {
+    if (p.value == null) {
+      if (cur.length > 0) segments.push(cur);
+      cur = [];
+      return;
+    }
+    cur.push([X(i), Y(p.value)]);
+  });
+  if (cur.length > 0) segments.push(cur);
+  const step = Math.max(1, Math.ceil(points.length / 8));
+  return (
+    <div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} role="img">
+        {[0, 0.25, 0.5, 0.75, 1].map((t) => (
+          <g key={t}>
+            <line x1={m.l} y1={Y(maxV * t)} x2={W - m.r} y2={Y(maxV * t)} stroke="#eef2f7" />
+            <text x={m.l - 6} y={Y(maxV * t) + 3} textAnchor="end" fontSize={10} fill="#94a3b8">
+              {isPct ? `${Math.round(maxV * t)}%` : Math.round(maxV * t)}
+            </text>
+          </g>
+        ))}
+        <line x1={m.l} y1={m.t + ih} x2={W - m.r} y2={m.t + ih} stroke="#cbd5e1" />
+        {segments.map((seg, gi) => (
+          <g key={gi}>
+            {seg.length > 2 && (
+              <polygon
+                points={`${seg.map(([x, y]) => `${x},${y}`).join(' ')} ${seg[seg.length - 1][0]},${m.t + ih} ${seg[0][0]},${m.t + ih}`}
+                fill={NAVY}
+                fillOpacity={0.06}
+              />
+            )}
+            <polyline points={seg.map(([x, y]) => `${x},${y}`).join(' ')} fill="none" stroke={NAVY} strokeWidth={1.8} />
+            {seg.map(([x, y], pi) => (
+              <circle key={pi} cx={x} cy={y} r={2.4} fill={NAVY} />
+            ))}
+          </g>
+        ))}
+        {points.map((p, i) =>
+          i % step === 0 || i === points.length - 1 ? (
+            <text key={i} x={X(i)} y={H - 8} textAnchor="middle" fontSize={10} fill="#94a3b8">{p.label}</text>
+          ) : null,
+        )}
+      </svg>
     </div>
   );
 }

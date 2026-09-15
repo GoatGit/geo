@@ -47,6 +47,24 @@ export default function RecognitionPage() {
     },
   });
 
+  const setConfirmed = useMutation({
+    mutationFn: ({ entryId, confirmed }: { entryId: number; confirmed: boolean }) =>
+      api(`/brands/${brandId}/recognition/${entryId}`, { method: 'PATCH', json: { confirmed } }),
+    onSuccess: () => {
+      toast('已更新,版本快照已记录');
+      void qc.invalidateQueries({ queryKey: ['recognition'] });
+    },
+  });
+
+  const removeEntry = useMutation({
+    mutationFn: (entryId: number) =>
+      api(`/brands/${brandId}/recognition/${entryId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      toast('已删除');
+      void qc.invalidateQueries({ queryKey: ['recognition'] });
+    },
+  });
+
   if (!brandId) return <Skeleton />;
 
   const self = rows.data?.find((r) => r.kind === 'self');
@@ -70,12 +88,32 @@ export default function RecognitionPage() {
 
       <section className="card p-6">
         <h2 className="mb-2 text-sm font-medium">竞品清单({competitors.length})</h2>
-        <ul className="space-y-1.5 text-sm">
+        <p className="mb-3 text-xs text-slate-400">
+          AI 建议的竞品需确认后才会参与识别;误识别的条目可直接删除。
+        </p>
+        <ul className="space-y-2 text-sm">
           {competitors.map((c) => (
             <li key={c.id} className="flex items-center gap-2">
               <b>{c.name}</b>
               <span className="text-slate-500">{c.aliases.length > 0 ? `别名:${c.aliases.join('、')}` : ''}</span>
               {!c.confirmed && <span className="rounded bg-warn-50 px-1.5 text-xs text-warn">待确认</span>}
+              <span className="ml-auto flex items-center gap-2">
+                {!c.confirmed && (
+                  <button
+                    className="h-7 rounded bg-brand px-2.5 text-xs text-white disabled:opacity-50"
+                    disabled={setConfirmed.isPending}
+                    onClick={() => setConfirmed.mutate({ entryId: c.id, confirmed: true })}
+                  >
+                    确认
+                  </button>
+                )}
+                <button
+                  className="h-7 px-2 text-xs text-slate-500 hover:text-slate-800"
+                  onClick={() => removeEntry.mutate(c.id)}
+                >
+                  删除
+                </button>
+              </span>
             </li>
           ))}
           {competitors.length === 0 && <li className="text-slate-400">暂无竞品条目</li>}

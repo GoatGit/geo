@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Req } from '@nestjs/common';
-import { IsArray, IsIn, IsOptional, IsString } from 'class-validator';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Req } from '@nestjs/common';
+import { IsArray, IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
 import { and, eq } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Request } from 'express';
@@ -29,6 +29,11 @@ class UpdateRecognitionDto {
   @IsOptional()
   @IsIn(['pending', 'accepted', 'rejected'])
   state?: string;
+}
+
+class ConfirmRecognitionDto {
+  @IsBoolean()
+  confirmed!: boolean;
 }
 
 @Controller('brands/:id/recognition')
@@ -86,5 +91,37 @@ export class RecognitionController {
     }
     await this.brandsService.snapshotRecognition(brandId);
     return { saved: true };
+  }
+
+  /** 确认/驳回 AI 建议的口径条目(确认后参与识别;落版本快照)。 */
+  @Patch(':entryId')
+  async setConfirmed(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) brandId: number,
+    @Param('entryId', ParseIntPipe) entryId: number,
+    @Body() dto: ConfirmRecognitionDto,
+  ) {
+    await this.brandsService.getOwned(currentAccount(req).accountId, brandId);
+    await this.db
+      .update(recognitionEntries)
+      .set({ confirmed: dto.confirmed })
+      .where(and(eq(recognitionEntries.brandId, brandId), eq(recognitionEntries.id, entryId)));
+    await this.brandsService.snapshotRecognition(brandId);
+    return { saved: true };
+  }
+
+  /** 删除 AI 误建议的口径条目(如把噪声词识别成了竞品)。 */
+  @Delete(':entryId')
+  async removeEntry(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) brandId: number,
+    @Param('entryId', ParseIntPipe) entryId: number,
+  ) {
+    await this.brandsService.getOwned(currentAccount(req).accountId, brandId);
+    await this.db
+      .delete(recognitionEntries)
+      .where(and(eq(recognitionEntries.brandId, brandId), eq(recognitionEntries.id, entryId)));
+    await this.brandsService.snapshotRecognition(brandId);
+    return { deleted: true };
   }
 }

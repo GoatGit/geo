@@ -3,13 +3,15 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import Link from 'next/link';
-import { api } from '@/lib/api';
+import { api, apiDownload } from '@/lib/api';
+import { useToast } from '@/components/toast';
 import { Badge, EmptyState, PageHeader, Skeleton } from '@/components/ui';
-import { INSIGHT_BLOCK_TYPES, type InsightBlock } from '@geo/shared';
+import { INSIGHT_BLOCK_TYPES, INSIGHT_WINDOW_CHOICES, type InsightBlock, type InsightBuildStatus } from '@geo/shared';
 
 /**
  * 平台后台 · 行业洞察(docs/01 §3.10 扩展):
- * 行业配置(增/停用)+ 洞察报告 CRUD;blocks 以 JSON 编辑(结构校验前后端各一道)。
+ * 行业配置(增/删/停用)+ 洞察报告「运行」(worker 按行业聚合采集数据自动成稿)
+ * + 手工微调 blocks JSON + 发布/精选 + PDF 下载。
  */
 
 interface IndustryRow {
@@ -29,6 +31,10 @@ interface AdminInsightDto {
   blocks: InsightBlock[];
   status: 'draft' | 'published';
   featured: boolean;
+  buildStatus: InsightBuildStatus;
+  buildError: string | null;
+  builtAt: string | null;
+  windowDays: number | null;
   publishedAt: string | null;
 }
 
@@ -73,10 +79,19 @@ const EMPTY_EDITOR: EditorState = {
 
 export default function AdminInsightsPage() {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const industries = useQuery({ queryKey: ['admin-insight-industries'], queryFn: () => api<IndustryRow[]>('/admin/insights/industries') });
-  const list = useQuery({ queryKey: ['admin-insights'], queryFn: () => api<AdminInsightDto[]>('/admin/insights') });
+  const list = useQuery({
+    queryKey: ['admin-insights'],
+    queryFn: () => api<AdminInsightDto[]>('/admin/insights'),
+    // 有运行中的聚合时轮询,直到回写完成
+    refetchInterval: (q) =>
+      ((q.state.data ?? []) as AdminInsightDto[]).some((r) => r.buildStatus === 'running') ? 2500 : false,
+  });
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [newIndustry, setNewIndustry] = useState('');
+  const [windowDays, setWindowDays] = useState<number | null>(30);
+  const [busyId, setBusyId] = useState<number | 'industry' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = () => {
@@ -95,9 +110,55 @@ export default function AdminInsightsPage() {
     }
   };
 
+  const removeIndustry = async (row: IndustryRow) => {
+    if (!window.confirm(`删除行业「${row.name}」?其下报告需先删除。`)) return;
+    try {
+      await api(`/admin/insights/industries/${row.id}`, { method: 'DELETE' });
+      toast('行业已删除');
+      refresh();
+    } catch (err) {
+      toast((err as Error).message, 'err');
+    }
+  };
+
   const toggleIndustry = async (row: IndustryRow) => {
     await api(`/admin/insights/industries/${row.id}`, { method: 'PATCH', json: { active: !row.active } });
     refresh();
+  };
+
+  /** 运行行业洞察:对该行业最新一期报告(无则自动创建)触发数据聚合。 */
+  const runInsight = async (row: AdminInsightDto) => {
+    const industry = (industries.data ?? []).find((i) => i.name === row.industry);
+    if (!industry) {
+      setError('找不到行业配置');
+      return;
+    }
+    setBusyId(row.id);
+    setError(null);
+    try {
+      await api(`/admin/insights/industries/${industry.id}/run`, {
+        method: 'POST',
+        json: windowDays ? { windowDays } : {},
+      });
+      toast(`已开始聚合「${row.industry}」${windowDays ? `近 ${windowDays} 天` : '全量'}数据,完成后自动刷新`);
+      refresh();
+    } catch (err) {
+      toast((err as Error).message, 'err');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const downloadPdf = async (row: AdminInsightDto) => {
+    setBusyId(row.id);
+    setError(null);
+    try {
+      await apiDownload(`/admin/insights/${row.id}/pdf`, `insight-${row.id}.pdf`);
+    } catch (err) {
+      toast((err as Error).message, 'err');
+    } finally {
+      setBusyId(null);
+    }
   };
 
   const openEditor = async (row?: AdminInsightDto) => {
@@ -177,7 +238,7 @@ export default function AdminInsightsPage() {
     <>
       <PageHeader
         title="行业洞察"
-        desc="配置洞察行业与报告内容;已发布报告进入会员总览,精选报告在官网首页展示。"
+        desc="配置行业 → 运行聚合自动成稿 → 微调发布 → 下载 PDF;已发布进入会员总览,精选上官网首页。"
         actions={
           <button onClick={() => openEditor()} className="btn-primary" disabled={(industries.data ?? []).length === 0}>
             新建洞察报告
@@ -255,31 +316,53 @@ export default function AdminInsightsPage() {
 
       {/* 行业配置 */}
       <section className="card mt-4 p-6">
-        <h2 className="mb-3 font-semibold text-slate-900">洞察行业</h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-semibold text-slate-900">洞察行业</h2>
+          <label className="flex items-center gap-2 text-xs text-slate-500">
+            运行数据窗口
+            <select
+              value={windowDays ?? ''}
+              onChange={(e) => setWindowDays(e.target.value ? Number(e.target.value) : null)}
+              className="rounded-lg border border-slate-200 px-2 py-1 text-xs"
+            >
+              {INSIGHT_WINDOW_CHOICES.map((d) => (
+                <option key={d} value={d}>近 {d} 天</option>
+              ))}
+              <option value="">全量历史</option>
+            </select>
+          </label>
+        </div>
         <div className="mb-3 flex gap-2">
           <input
             value={newIndustry}
             onChange={(e) => setNewIndustry(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && addIndustry()}
-            placeholder="新增行业,如:内衣 / 服饰运动 / 美妆护肤"
+            placeholder="新增行业,如:新能源汽车 / 内衣 / 美妆护肤"
             className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
           />
           <button onClick={addIndustry} className="btn-ghost">添加</button>
         </div>
         <div className="flex flex-wrap gap-2">
           {(industries.data ?? []).map((i) => (
-            <button
+            <span
               key={i.id}
-              onClick={() => toggleIndustry(i)}
-              className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`group inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                 i.active ? 'border-brand-200 bg-brand-50 text-brand-700' : 'border-slate-200 bg-slate-50 text-slate-400 line-through'
               }`}
-              title={i.active ? '点击停用' : '点击启用'}
             >
-              {i.name}
-            </button>
+              <button onClick={() => toggleIndustry(i)} title={i.active ? '点击停用' : '点击启用'}>
+                {i.name}
+              </button>
+              <button
+                onClick={() => removeIndustry(i)}
+                className="text-slate-300 transition-colors hover:text-bad group-hover:text-slate-400"
+                title="删除行业"
+              >
+                ×
+              </button>
+            </span>
           ))}
-          {(industries.data ?? []).length === 0 && <p className="text-xs text-slate-400">还没有行业:先添加行业再建报告。</p>}
+          {(industries.data ?? []).length === 0 && <p className="text-xs text-slate-400">还没有行业:先添加行业再运行洞察。</p>}
         </div>
       </section>
 
@@ -287,16 +370,17 @@ export default function AdminInsightsPage() {
       <section className="card mt-4 p-6">
         <h2 className="mb-3 font-semibold text-slate-900">洞察报告</h2>
         {(list.data ?? []).length === 0 ? (
-          <EmptyState text="还没有洞察报告:添加行业后点「新建洞察报告」。" />
+          <EmptyState text="还没有洞察报告:添加行业后,在对应行业的报告上点「运行」自动生成数据报告。" />
         ) : (
           <div className="overflow-x-auto">
-          <table className="w-full min-w-[620px] text-left text-[13px]">
+          <table className="w-full min-w-[720px] text-left text-[13px]">
             <thead>
               <tr className="border-b border-slate-100 text-xs text-slate-400">
                 <th className="py-2 font-medium">标题</th>
                 <th className="py-2 font-medium">行业</th>
+                <th className="py-2 font-medium">数据</th>
                 <th className="py-2 font-medium">状态</th>
-                <th className="py-2 font-medium">首页精选</th>
+                <th className="py-2 font-medium">精选</th>
                 <th className="py-2 font-medium text-right">操作</th>
               </tr>
             </thead>
@@ -308,10 +392,23 @@ export default function AdminInsightsPage() {
                     {r.issue && <span className="ml-2 text-xs text-slate-400">{r.issue}</span>}
                   </td>
                   <td className="py-2.5">{r.industry}</td>
+                  <td className="py-2.5 text-xs text-slate-400">
+                    {r.builtAt ? (
+                      `${r.windowDays ? `近${r.windowDays}天` : '全量'} · ${new Date(r.builtAt).toLocaleDateString('zh-CN')}`
+                    ) : (
+                      '未运行'
+                    )}
+                  </td>
                   <td className="py-2.5">
                     <button onClick={() => toggleField(r, 'status')}>
                       <Badge label={r.status === 'published' ? '已发布' : '草稿'} tone={r.status === 'published' ? 'good' : 'slate'} />
                     </button>
+                    {r.buildStatus === 'running' && <span className="ml-1.5"><Badge label="聚合中…" tone="brand" /></span>}
+                    {r.buildStatus === 'failed' && (
+                      <span className="ml-1.5" title={r.buildError ?? '聚合失败'}>
+                        <Badge label="运行失败" tone="bad" />
+                      </span>
+                    )}
                   </td>
                   <td className="py-2.5">
                     <button onClick={() => toggleField(r, 'featured')}>
@@ -319,6 +416,20 @@ export default function AdminInsightsPage() {
                     </button>
                   </td>
                   <td className="py-2.5 text-right text-xs">
+                    <button
+                      onClick={() => runInsight(r)}
+                      disabled={r.buildStatus === 'running' || busyId === r.id}
+                      className="mr-3 font-medium text-brand-600 hover:underline disabled:opacity-40"
+                    >
+                      运行
+                    </button>
+                    <button
+                      onClick={() => downloadPdf(r)}
+                      disabled={busyId === r.id}
+                      className="mr-3 text-slate-500 hover:text-slate-800 disabled:opacity-40"
+                    >
+                      PDF
+                    </button>
                     {r.status === 'published' && (
                       <Link href={`/insights/${r.id}`} className="mr-3 text-brand-600 hover:underline" target="_blank">
                         预览
@@ -333,7 +444,10 @@ export default function AdminInsightsPage() {
           </table>
           </div>
         )}
-        <p className="mt-3 text-[10px] text-slate-400">内容块类型:{INSIGHT_BLOCK_TYPES.join(' / ')} —— 结构口径见 @geo/shared/insights。</p>
+        <p className="mt-3 text-[10px] leading-5 text-slate-400">
+          「运行」按行业聚合全部监测品牌的采集事实,自动生成/覆盖报告内容(含已发布报告)——发布态与精选标记保持不变;
+          聚合由 worker 队列执行,几秒内完成,期间不可重复触发或下载。内容块类型:{INSIGHT_BLOCK_TYPES.join(' / ')}。
+        </p>
       </section>
     </>
   );

@@ -1,10 +1,13 @@
 import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { Queue } from 'bullmq';
 import { industryInsights, insightIndustries } from '@geo/db';
+import { INSIGHTS_QUEUE, type InsightBuildStatus } from '@geo/shared';
 import type { InsightBlock, InsightCover } from '@geo/shared';
 import { INSIGHT_BLOCK_TYPES } from '@geo/shared';
 import { DB } from '../common/infra.module';
+import { loadEnv } from '../config/env';
 
 type InsightRow = typeof industryInsights.$inferSelect;
 type IndustryRow = typeof insightIndustries.$inferSelect;
@@ -41,6 +44,10 @@ export function validateBlocks(blocks: unknown): InsightBlock[] {
  */
 @Injectable()
 export class InsightsService {
+  private readonly insightsQueue = new Queue(INSIGHTS_QUEUE, {
+    connection: { url: loadEnv().redisUrl, maxRetriesPerRequest: null },
+  });
+
   constructor(@Inject(DB) private readonly db: NodePgDatabase) {}
 
   // ===== 行业配置 =====
@@ -61,6 +68,56 @@ export class InsightsService {
     const row = await this.db.update(insightIndustries).set(patch).where(eq(insightIndustries.id, id)).returning();
     if (row.length === 0) throw new HttpException('行业不存在', HttpStatus.NOT_FOUND);
     return row[0]!;
+  }
+
+  /** 删除行业:有报告时拒绝(先删报告),避免静默孤儿报告。 */
+  async deleteIndustry(id: number) {
+    const reports = await this.db
+      .select({ id: industryInsights.id })
+      .from(industryInsights)
+      .where(eq(industryInsights.industryId, id))
+      .limit(1);
+    if (reports.length > 0) {
+      throw new HttpException('该行业下已有洞察报告,请先删除报告', HttpStatus.CONFLICT);
+    }
+    const rows = await this.db.delete(insightIndustries).where(eq(insightIndustries.id, id)).returning({ id: insightIndustries.id });
+    if (rows.length === 0) throw new HttpException('行业不存在', HttpStatus.NOT_FOUND);
+    return { deleted: true };
+  }
+
+  /** 「运行」:对该行业最新一期报告(无则创建)入队数据聚合;聚合中拒绝重复触发。 */
+  async runIndustry(industryId: number, windowDays: number | null) {
+    const industry = (
+      await this.db.select().from(insightIndustries).where(eq(insightIndustries.id, industryId)).limit(1)
+    )[0];
+    if (!industry) throw new HttpException('行业不存在', HttpStatus.NOT_FOUND);
+
+    let insight = (
+      await this.db
+        .select()
+        .from(industryInsights)
+        .where(eq(industryInsights.industryId, industryId))
+        .orderBy(desc(industryInsights.updatedAt))
+        .limit(1)
+    )[0];
+    if (!insight) {
+      insight = (
+        await this.db
+          .insert(industryInsights)
+          .values({ industryId, title: `${industry.name}行业 AI 可见度洞察` })
+          .returning()
+      )[0]!;
+    }
+    if (insight.buildStatus === 'running') {
+      throw new HttpException('该行业洞察正在聚合中,请稍候', HttpStatus.CONFLICT);
+    }
+
+    await this.db
+      .update(industryInsights)
+      .set({ buildStatus: 'running', buildError: null, windowDays, updatedAt: new Date() })
+      .where(eq(industryInsights.id, insight.id));
+    await this.insightsQueue.add('build', { insightId: insight.id, windowDays }, { attempts: 1, removeOnComplete: 100 });
+    return { insightId: insight.id, queued: true };
   }
 
   // ===== 洞察报告(管理侧)=====
@@ -177,6 +234,10 @@ export class InsightsService {
       blocks: r.blocks as InsightBlock[],
       status: r.status as 'draft' | 'published',
       featured: r.featured,
+      buildStatus: r.buildStatus as InsightBuildStatus,
+      buildError: r.buildError,
+      builtAt: r.builtAt,
+      windowDays: r.windowDays,
       publishedAt: r.publishedAt,
       updatedAt: r.updatedAt,
     }));

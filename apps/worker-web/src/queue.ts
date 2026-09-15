@@ -3,6 +3,7 @@ export {
   COLLECT_QUEUE,
   REPUTATION_QUEUE,
   REPORTS_QUEUE,
+  INSIGHTS_QUEUE,
   REDIS_PROGRESS_CHANNEL,
 } from '@geo/shared';
 

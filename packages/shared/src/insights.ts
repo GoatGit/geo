@@ -30,13 +30,13 @@ export interface FunnelBlock {
   stages: Array<{ label: string; note: string; count: number }>;
 }
 
-/** 品牌 × 维度命中热力图:cells 为 0-1 命中率 */
+/** 品牌 × 维度命中热力图:cells 为 0-1 命中率,null = 该列无有效样本(渲染为空白) */
 export interface HeatmapBlock {
   type: 'heatmap';
   title: string;
   note?: string;
   columns: string[];
-  rows: Array<{ name: string; cells: number[] }>;
+  rows: Array<{ name: string; cells: Array<number | null> }>;
 }
 
 /** 多品牌维度形状对比(雷达):values 为 0-1 */
@@ -46,6 +46,16 @@ export interface RadarBlock {
   note?: string;
   axes: string[];
   series: Array<{ name: string; values: number[] }>;
+}
+
+/** 每日趋势(折线):points 按时间升序,value=null 表示当日无有效样本(断线) */
+export interface TrendBlock {
+  type: 'trend';
+  title: string;
+  note?: string;
+  /** 值域提示:'%' 时坐标轴按 0-100 处理,否则按数据范围自适应 */
+  unit?: string;
+  points: Array<{ label: string; value: number | null }>;
 }
 
 /** 双维度散点(可带对角参考线与气泡大小):x/y 为 0-1 命中率 */
@@ -61,9 +71,24 @@ export interface ScatterBlock {
   groups?: Array<{ key: string; label: string; color?: 'brand' | 'gray' | 'accent' }>;
 }
 
-export type InsightBlock = TakeawayBlock | BarRankBlock | FunnelBlock | HeatmapBlock | RadarBlock | ScatterBlock;
+export type InsightBlock =
+  | TakeawayBlock
+  | BarRankBlock
+  | FunnelBlock
+  | HeatmapBlock
+  | RadarBlock
+  | TrendBlock
+  | ScatterBlock;
 
-export const INSIGHT_BLOCK_TYPES = ['takeaway', 'barRank', 'funnel', 'heatmap', 'radar', 'scatter'] as const;
+export const INSIGHT_BLOCK_TYPES = [
+  'takeaway',
+  'barRank',
+  'funnel',
+  'heatmap',
+  'radar',
+  'trend',
+  'scatter',
+] as const;
 
 /** 报告封面指标(列表卡与详情页页眉)。 */
 export interface InsightCover {
@@ -74,6 +99,9 @@ export interface InsightCover {
   testedAt?: string;
 }
 
+/** 「运行」数据聚合状态(0005):idle=就绪 running=聚合中 failed=失败。 */
+export type InsightBuildStatus = 'idle' | 'running' | 'failed';
+
 export interface InsightSummaryDto {
   id: number;
   industry: string;
@@ -83,11 +111,17 @@ export interface InsightSummaryDto {
   cover: InsightCover;
   featured: boolean;
   publishedAt: string | null;
+  buildStatus?: InsightBuildStatus;
+  builtAt?: string | null;
+  windowDays?: number | null;
 }
 
 export interface InsightDetailDto extends InsightSummaryDto {
   blocks: InsightBlock[];
 }
+
+/** 运行参数:聚合窗口天数候选(管理后台「运行」选择)。 */
+export const INSIGHT_WINDOW_CHOICES = [7, 30, 90] as const;
 
 /** 行业档位分类(用于覆盖 PLAN_LIMITS 之外的行业维度,预留)。 */
 export type InsightPlanGate = PlanTier;

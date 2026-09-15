@@ -56,7 +56,8 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
       '[data-testid="chat_text_input"]',
       'textarea[placeholder]',
     ],
-    submitSelectors: ['[data-testid="send_button"]', 'button[type="submit"]', 'button:has-text("发送")'],
+    // 实测(2026-09):发送按钮为输入文字后出现的蓝色高亮按钮(无 testid/aria)
+    submitSelectors: ['button[class*="bg-dbx-fill-highlight"]', '[data-testid="send_button"]', 'button[type="submit"]', 'button:has-text("发送")'],
     // 实测(2026-09,登录态有头):回答流在 message 节点(无 markdown 类);提交后先有
     // ~40s 本地会话空窗(local_xxx)再同步服务端,ASK_TIMEOUT 需 ≥150s
     answerSelectors: ['div[class*="message"]', '[data-testid="receive_message"]', 'div[class*="answer"]', 'div[class*="markdown-body"]'],

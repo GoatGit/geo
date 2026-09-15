@@ -91,3 +91,27 @@ export async function api<T>(
   }
   return body as T;
 }
+
+/** 二进制下载(带凭证):PDF 等附件;失败时按错误包络解析并抛出。 */
+export async function apiDownload(path: string, fallbackName: string): Promise<void> {
+  const token = tokenStore.access;
+  const res = await fetch(`/api${path}`, {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+    throw new ApiError(res.status, body?.error?.message ?? `HTTP ${res.status}`);
+  }
+  const disposition = res.headers.get('content-disposition') ?? '';
+  const utf8 = /filename\*=UTF-8''([^;]+)/.exec(disposition)?.[1];
+  const filename = utf8 ? decodeURIComponent(utf8) : fallbackName;
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}

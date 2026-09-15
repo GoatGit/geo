@@ -348,6 +348,12 @@ export const industryInsights = pgTable('industry_insights', {
   blocks: jsonb('blocks').$type<unknown[]>().notNull().default([]),
   status: text('status').notNull().default('draft'),
   featured: boolean('featured').notNull().default(false),
+  /** 数据聚合状态(docs/01 §3.10「运行」):idle=就绪 running=聚合中 failed=失败(见 buildError) */
+  buildStatus: text('build_status').notNull().default('idle'),
+  buildError: text('build_error'),
+  builtAt: timestamp('built_at', { withTimezone: true }),
+  /** 运行参数:聚合窗口天数,null=全量历史 */
+  windowDays: integer('window_days'),
   publishedAt: timestamp('published_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

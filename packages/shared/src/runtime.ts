@@ -6,6 +6,8 @@
 export const COLLECT_QUEUE = 'collect';
 export const REPUTATION_QUEUE = 'extract-reputation';
 export const REPORTS_QUEUE = 'reports';
+/** 行业洞察数据聚合(docs/01 §3.10「运行」):API 入队,worker 聚合事实表回写 blocks。 */
+export const INSIGHTS_QUEUE = 'insights';
 
 export const REDIS_PROGRESS_CHANNEL = 'geo:progress';
 

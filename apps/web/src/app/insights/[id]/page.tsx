@@ -49,6 +49,14 @@ export default function InsightDetailPage() {
             <span>·</span>
             <span>{d.industry} AI 可见度</span>
             {d.featured && <Badge label="官网精选" tone="brand" />}
+            <a
+              href={`/api/insights/${d.id}/pdf`}
+              className="btn-soft ml-auto h-8 px-3 text-xs"
+              download
+              title="下载 PDF 版报告"
+            >
+              下载 PDF
+            </a>
           </p>
           <h1 className="mt-3 text-[30px] font-bold leading-tight tracking-tight text-slate-900">{d.title}</h1>
           <div className="mt-3 h-1 rounded bg-slate-900/90" />

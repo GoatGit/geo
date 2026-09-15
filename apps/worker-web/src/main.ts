@@ -9,6 +9,7 @@ import { LoginManager } from './login-manager';
 import { RoundScheduler } from './scheduler';
 import { AccountPoolService } from './profiles';
 import { startReportsWorker, startReputationWorker, scheduleWeeklyReports } from './report-worker';
+import { startInsightsWorker } from './insights-worker';
 import { createBrokerFromEnv } from '@geo/browser-session';
 
 /**
@@ -42,6 +43,7 @@ async function bootstrap() {
 
   const reputationWorker = startReputationWorker(db);
   const reportsWorker = startReportsWorker(db);
+  const insightsWorker = startInsightsWorker(db);
   await scheduleWeeklyReports();
 
   // 周报 cron 触发时,给每个活跃品牌入队报告;同一品牌同一周期幂等(failed 除外,可重生成)
@@ -82,7 +84,7 @@ async function bootstrap() {
   cronConsumer.on('error', (err) => console.error('[reports-cron] consumer error', err));
 
   logger.log(
-    `[worker-web] started: concurrency=${concurrency}, queues=[collect,${REPUTATION_QUEUE},${REPORTS_QUEUE}], browser=${process.env.BROWSER_MODE ?? 'mock'}`,
+    `[worker-web] started: concurrency=${concurrency}, queues=[collect,${REPUTATION_QUEUE},${REPORTS_QUEUE},insights], browser=${process.env.BROWSER_MODE ?? 'mock'}`,
   );
 
   const shutdown = async (signal: string) => {
@@ -93,6 +95,7 @@ async function bootstrap() {
       collectWorker.close(),
       reputationWorker.close(),
       reportsWorker.close(),
+      insightsWorker.close(),
       cronConsumer.close(),
       cronQueue.close(),
       collect.shutdown(),
