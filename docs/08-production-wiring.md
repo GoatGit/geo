@@ -16,6 +16,7 @@
 | 缓存 | Redis 1G 主备 `r-bp13fae164f9f734`,`maxmemory-policy=noeviction` | ✅ |
 | 存证 | OSS `gemux-geo-evidence`(evidence pack:answer/snapshot/manifest) | ✅ |
 | 日志 | SLS:四个应用日志收集已配置 | ✅ |
+| 公网出口 | geo-api / geo-worker 各绑定按量 EIP(短信/AgentBay 公网端点所需),2026-09-15 | ✅ |
 | 采集链路 | 调度 → 轮次 → 队列 → 采集 → mention_facts → rankings API,端到端验证(mentionRate 22/40 输出正常) | ✅ |
 | 远程采集 | worker 已切 agentbay 模式(cn-hangzhou),CDP 端到端 PoC 通过(playwright 连 CDP 导航 example.com 成功) | ✅ |
 
