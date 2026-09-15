@@ -34,10 +34,25 @@ export class AgentBaySessionBroker implements SessionBroker {
     const regionId = this.config.regionId ?? 'cn-shanghai';
     const body: Record<string, string> = { Authorization: auth };
 
+    // 登录态持久化(docs/04 §3.1):按 profileKey 取/建 AgentBay Context,
+    // 会话绑定该 Context 后,浏览器 Cookie/localStorage 随 Context 跨会话保存
+    let contextId: string | undefined;
+    try {
+      const ctxRes = await this.rpc('GetContext', {
+        ...body,
+        Name: contextNameFor(profile.profileKey),
+        AllowCreate: 'true',
+      });
+      contextId = strField(ctxRes, ['ContextId', 'contextId']) ?? undefined;
+    } catch (err) {
+      console.error('[agentbay] GetContext failed (降级为无 Context 会话):', (err as Error).message);
+    }
+
     const createRes = await this.rpc('CreateMcpSession', {
       ...body,
       ImageId: this.config.imageId,
       RegionId: regionId,
+      ...(contextId ? { ContextId: contextId } : {}),
       Labels: JSON.stringify({ app: 'geolens' }),
     });
     const sessionId = strField(createRes, ['SessionId', 'sessionId']);
@@ -68,6 +83,7 @@ export class AgentBaySessionBroker implements SessionBroker {
         sessionId,
         cdpUrl,
         imageId: this.config.imageId,
+        contextId,
         release: async () => {
           // 释放失败不阻塞主流程;AgentBay 侧空闲回收兜底
           await this.rpc('ReleaseMcpSession', { ...body, SessionId: sessionId }).catch(() => undefined);
@@ -127,6 +143,11 @@ function strField(obj: Record<string, unknown>, keys: string[]): string | undefi
     }
   }
   return undefined;
+}
+
+/** profileKey('profile:5')→ 合法 Context 名。 */
+function contextNameFor(profileKey: string): string {
+  return `geo-${profileKey.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase()}`;
 }
 
 /** 账号指纹哈希(日志/证据只落哈希,不落原文,docs/07 §10)。 */

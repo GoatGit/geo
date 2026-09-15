@@ -16,6 +16,8 @@ export interface SessionHandle {
   /** CDP WebSocket 端点(wss + token,worker 用 playwright-core connectOverCDP) */
   cdpUrl: string;
   imageId?: string;
+  /** 登录态绑定的持久化 Context ID(成功后写回 profile.contextRef,采集复用) */
+  contextId?: string;
   /** 本地代理直接注入的 Page(免去 connectOverCDP);远程代理为空 */
   page?: unknown;
   /** 用完即毁;Context 已回存登录态 */

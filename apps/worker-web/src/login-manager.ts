@@ -185,9 +185,10 @@ export class LoginManager {
         }
         const success = !cancelled && confirmStreak >= 2;
         if (success) {
+          // agentbay 模式:contextId 即登录态载体,写回 profile 供采集会话复用
           await this.db
             .update(accountProfiles)
-            .set({ status: 'available', contextRef: req.contextRef ?? `local:${req.profileKey}` })
+            .set({ status: 'available', contextRef: session.contextId ?? `local:${req.profileKey}` })
             .where(eq(accountProfiles.id, req.profileId));
           console.log(`[login] session=${req.sessionId} engine=${req.engine} 登录成功,档案 ${req.profileId} 置 available`);
         } else if (!cancelled) {
