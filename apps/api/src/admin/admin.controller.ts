@@ -12,6 +12,7 @@ import {
   REPORTS_QUEUE,
   REPUTATION_QUEUE,
   COLLECT_QUEUE,
+  LOGIN_CANCEL_TTL_SEC,
   LOGIN_REQ_QUEUE,
   LOGIN_STATUS_TTL_SEC,
   WEB_ENGINES,
@@ -19,6 +20,7 @@ import {
   WORKER_HEARTBEAT_STALE_MS,
   breakerManualKey,
   breakerTrippedKey,
+  loginCancelKey,
   loginCmdKey,
   loginFrameKey,
   loginStatusKey,
@@ -332,12 +334,25 @@ export class AdminController implements OnModuleDestroy {
     return { sessionId, engine: profile.engine, profileId: profile.id };
   }
 
-  /** 登录会话状态轮询(queued/running/done/timeout/error;viewer=true 时展示实时画面)。 */
+  /** 登录会话状态轮询(queued/running/done/timeout/error/cancelled;viewer=true 时展示实时画面)。 */
   @Get('login/:sessionId')
   async loginStatus(@Param('sessionId') sessionId: string) {
     const raw = await this.redis.get(loginStatusKey(sessionId));
     if (!raw) throw new NotFoundException('登录会话不存在或已过期');
     return JSON.parse(raw) as { state: string; detail?: string; viewer?: boolean; updatedAt: string };
+  }
+
+  /**
+   * 取消登录:置取消标记,worker 轮询循环发现即终止并释放远程会话。
+   * 失败/挂起的登录不必等满超时窗口,避免占住并发槽阻塞其他账号排队。
+   */
+  @Post('login/:sessionId/cancel')
+  async cancelLogin(@Req() req: Request, @Param('sessionId') sessionId: string) {
+    void currentAccount(req);
+    const raw = await this.redis.get(loginStatusKey(sessionId));
+    if (!raw) throw new NotFoundException('登录会话不存在或已过期');
+    await this.redis.set(loginCancelKey(sessionId), '1', 'EX', LOGIN_CANCEL_TTL_SEC);
+    return { cancelled: true };
   }
 
   /** viewer 模式最新截帧(JPEG base64;viewerLoginFromEnv 的远程登录画面)。 */

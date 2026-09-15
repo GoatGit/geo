@@ -20,7 +20,7 @@ interface AccountRow {
 }
 
 interface LoginState {
-  state: 'queued' | 'running' | 'done' | 'timeout' | 'error';
+  state: 'queued' | 'running' | 'done' | 'timeout' | 'error' | 'cancelled';
   detail?: string;
   viewer?: boolean;
   updatedAt: string;
@@ -168,7 +168,7 @@ export default function AdminAccountsPage() {
       try {
         const st = await api<LoginState>(`/admin/login/${sessionId}`);
         setLoginStates((prev) => ({ ...prev, [profileId]: { ...st, sessionId } }));
-        if (st.state === 'done' || st.state === 'timeout' || st.state === 'error') {
+        if (st.state === 'done' || st.state === 'timeout' || st.state === 'error' || st.state === 'cancelled') {
           clearInterval(timer);
           pollingRef.current.delete(profileId);
           void queryClient.invalidateQueries({ queryKey: ['admin-accounts'] });
@@ -190,6 +190,19 @@ export default function AdminAccountsPage() {
       }
     }, 2_500);
     pollingRef.current.set(profileId, timer);
+  };
+
+  const cancelLogin = async (profileId: number, sessionId: string) => {
+    try {
+      await api(`/admin/login/${sessionId}/cancel`, { method: 'POST' });
+      // 轮询会拉到 cancelled 终态并自行停止;立即置状态给操作者即时反馈
+      setLoginStates((prev) => ({
+        ...prev,
+        [profileId]: { ...(prev[profileId] ?? { viewer: false }), sessionId, state: 'cancelled' as const, detail: '取消中…', updatedAt: new Date().toISOString() },
+      }));
+    } catch (e) {
+      setMessage((e as Error).message);
+    }
   };
 
   const requestLogin = async (id: number) => {
@@ -339,6 +352,11 @@ export default function AdminAccountsPage() {
                       >
                         {busy ? '登录中…' : '人工登录'}
                       </button>
+                      {busy && st?.sessionId && (
+                        <button className="h-8 px-3 text-xs text-bad hover:opacity-80" onClick={() => void cancelLogin(a.id, st.sessionId)}>
+                          取消登录
+                        </button>
+                      )}
                       {a.status === 'retired' ? (
                         <button className="h-8 px-3 text-xs text-slate-500 hover:text-slate-800" onClick={() => void setStatus(a.id, 'enable')}>
                           启用
@@ -352,7 +370,11 @@ export default function AdminAccountsPage() {
                     {st && (
                       <div
                         className={`mt-1 text-xs ${
-                          st.state === 'done' ? 'text-good' : st.state === 'error' || st.state === 'timeout' ? 'text-bad' : 'text-slate-500'
+                          st.state === 'done'
+                            ? 'text-good'
+                            : st.state === 'error' || st.state === 'timeout' || st.state === 'cancelled'
+                              ? 'text-bad'
+                              : 'text-slate-500'
                         }`}
                       >
                         {st.detail ?? st.state}

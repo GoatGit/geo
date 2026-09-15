@@ -9,6 +9,7 @@ import {
   LOGIN_FRAME_TTL_SEC,
   LOGIN_REQ_QUEUE,
   LOGIN_STATUS_TTL_SEC,
+  loginCancelKey,
   loginCmdKey,
   loginFrameKey,
   loginStatusKey,
@@ -24,6 +25,8 @@ import { envInt } from './config';
 const LOGIN_TIMEOUT_MS = envInt('LOGIN_TIMEOUT_MS', 300_000, 30_000, 1_800_000);
 /** viewer 模式截帧间隔(ms):登录操控 1-2fps 足够,降低远程浏览器压力。 */
 const LOGIN_FRAME_MS = envInt('LOGIN_FRAME_MS', 700, 200, 5_000);
+/** 登录并发上限:agentbay 每个登录独立云端沙箱可并行;受 API Key 并发与账号池容量约束。 */
+const LOGIN_CONCURRENCY = envInt('LOGIN_CONCURRENCY', 3, 1, 10);
 
 /**
  * 人工登录编排(worker 侧,docs/04 §3.1 账号生命周期):
@@ -45,23 +48,35 @@ export class LoginManager {
 
   start(): void {
     void this.loop();
-    console.log('[login] manager started: waiting for login requests');
+    console.log(`[login] manager started: concurrency=${LOGIN_CONCURRENCY}, waiting for login requests`);
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
   }
 
+  /**
+   * 队列消费:并发上限内每个登录请求独立开远程会话(agentbay 每会话独立沙箱,
+   * 并行不互扰);达到上限时轮询等待,任一登录结束即释放槽位。
+   */
   private async loop(): Promise<void> {
+    const active = new Set<Promise<void>>();
     while (!this.stopped) {
+      if (active.size >= LOGIN_CONCURRENCY) {
+        await Promise.race(active);
+        continue;
+      }
       try {
-        const raw = await this.redis.blpop(LOGIN_REQ_QUEUE, 5);
+        const raw = await this.redis.blpop(LOGIN_REQ_QUEUE, 2);
         if (!raw) continue;
         const req = JSON.parse(raw[1]!) as LoginRequest;
-        await this.run(req).catch(async (err) => {
-          console.error(`[login] session=${req.sessionId} engine=${req.engine} failed:`, err);
-          await this.setStatus(req.sessionId, { state: 'error', detail: String(err), updatedAt: new Date().toISOString() });
-        });
+        const task = this.run(req)
+          .catch(async (err) => {
+            console.error(`[login] session=${req.sessionId} engine=${req.engine} failed:`, err);
+            await this.setStatus(req.sessionId, { state: 'error', detail: String(err), updatedAt: new Date().toISOString() });
+          })
+          .finally(() => active.delete(task));
+        active.add(task);
       } catch (err) {
         if (!this.stopped) {
           console.error('[login] loop error', err);
@@ -71,7 +86,16 @@ export class LoginManager {
     }
   }
 
+  private async cancelled(sessionId: string): Promise<boolean> {
+    return (await this.redis.get(loginCancelKey(sessionId))) === '1';
+  }
+
   private async run(req: LoginRequest): Promise<void> {
+    // 排队期间可能已被取消:取消的请求直接出队,不占用浏览器资源
+    if (await this.cancelled(req.sessionId)) {
+      await this.setStatus(req.sessionId, { state: 'cancelled', detail: '已手动取消', updatedAt: new Date().toISOString() });
+      return;
+    }
     if (browserModeFromEnv() === 'mock') {
       await this.setStatus(req.sessionId, {
         state: 'error',
@@ -118,10 +142,16 @@ export class LoginManager {
 
       try {
         // 轮询:未登录指示消失 + 提问框可见,连续两轮(间隔 5s)成立才算成功;
-        // 操作者登录后若落在非会话页(如站点首页),周期性重导航回提问页再验证
+        // 操作者登录后若落在非会话页(如站点首页),周期性重导航回提问页再验证;
+        // 每轮检查取消标记——手动取消立即终止并释放远程会话,不占后续登录队列
         let confirmStreak = 0;
         let lastNavAt = Date.now();
+        let cancelled = false;
         while (Date.now() - startedAt < LOGIN_TIMEOUT_MS) {
+          if (await this.cancelled(req.sessionId)) {
+            cancelled = true;
+            break;
+          }
           await this.setStatus(req.sessionId, {
             state: 'running',
             detail: `等待登录…(剩余 ${Math.ceil((LOGIN_TIMEOUT_MS - (Date.now() - startedAt)) / 1000)}s,请${viewer ? '在下方实时画面' : '在弹出的浏览器窗口'}中完成 ${site.displayName} 登录)`,
@@ -141,26 +171,29 @@ export class LoginManager {
           await page.waitForTimeout(5_000);
         }
 
-        const success = confirmStreak >= 2;
+        if (cancelled) {
+          console.warn(`[login] session=${req.sessionId} 手动取消,释放远程会话`);
+        }
+        const success = !cancelled && confirmStreak >= 2;
         if (success) {
           await this.db
             .update(accountProfiles)
             .set({ status: 'available', contextRef: req.contextRef ?? `local:${req.profileKey}` })
             .where(eq(accountProfiles.id, req.profileId));
           console.log(`[login] session=${req.sessionId} engine=${req.engine} 登录成功,档案 ${req.profileId} 置 available`);
-        } else {
+        } else if (!cancelled) {
           console.warn(`[login] session=${req.sessionId} engine=${req.engine} 登录等待超时`);
         }
         await this.setStatus(req.sessionId, {
-          state: success ? 'done' : 'timeout',
-          detail: success ? '登录成功,账号已入可用池' : '等待超时:未检测到登录完成,可重试',
+          state: cancelled ? 'cancelled' : success ? 'done' : 'timeout',
+          detail: cancelled ? '已手动取消,远程会话已释放' : success ? '登录成功,账号已入可用池' : '等待超时:未检测到登录完成,可重试',
           viewer,
           updatedAt: new Date().toISOString(),
         });
       } finally {
         stopViewer.value = true;
         await Promise.allSettled(viewerTasks);
-        await this.redis.del(loginFrameKey(req.sessionId), loginCmdKey(req.sessionId));
+        await this.redis.del(loginFrameKey(req.sessionId), loginCmdKey(req.sessionId), loginCancelKey(req.sessionId));
       }
     } finally {
       await session.release(); // 登录会话立即干净退出:Cookie 刷盘后采集进程才能读到登录态

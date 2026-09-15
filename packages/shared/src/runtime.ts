@@ -39,6 +39,13 @@ export const loginCmdKey = (sessionId: string) => `geo:login:cmd:${sessionId}`;
 /** 截帧 key 保留 120s:覆盖后台轮询间隔,避免崩溃残留。 */
 export const LOGIN_FRAME_TTL_SEC = 120;
 
+/**
+ * 登录取消标记:后台「取消登录」置 '1'(EX 同状态 TTL),worker 轮询循环发现即终止
+ * 当前登录并释放远程会话——失败/挂起的登录不必等满超时窗口,不阻塞后续账号排队。
+ */
+export const loginCancelKey = (sessionId: string) => `geo:login:cancel:${sessionId}`;
+export const LOGIN_CANCEL_TTL_SEC = 3600;
+
 /** 后台 → worker 的远程操控指令。 */
 export type LoginInputCommand =
   | { type: 'click'; x: number; y: number }
@@ -59,7 +66,7 @@ export interface LoginRequest {
 
 /** Worker 登录会话状态(后台轮询展示)。 */
 export interface LoginStatus {
-  state: 'queued' | 'running' | 'done' | 'timeout' | 'error';
+  state: 'queued' | 'running' | 'done' | 'timeout' | 'error' | 'cancelled';
   detail?: string;
   /** true = viewer 远程操控模式:后台应展示实时画面并转发输入 */
   viewer?: boolean;
