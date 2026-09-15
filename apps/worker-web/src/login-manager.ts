@@ -181,16 +181,6 @@ export class LoginManager {
               }
             }
           }
-          // 协议勾选:豆包登录框必须勾选才能扫码成功;semi-ui 为隐藏 input + 自定义样式
-          try {
-            const cb = page.locator('input[type="checkbox"]').first();
-            if ((await cb.count()) > 0 && !(await cb.isChecked().catch(() => true))) {
-              await cb.click({ force: true }).catch(async () => {
-                await page.locator('.semi-checkbox').first().click({ force: true }).catch(() => undefined);
-              });
-              console.log(`[login] 已自动勾选用户协议`);
-            }
-          } catch { /* 无勾选框的站点 */ }
           // 二维码过期自动刷新(弹窗内「二维码失效」文本可点击刷新)
           try {
             const expired = page.getByText(/二维码(失效|过期)/).first();
@@ -198,6 +188,15 @@ export class LoginManager {
               await expired.click().catch(() => undefined);
             }
           } catch { /* 无过期态 */ }
+          // 协议勾选:豆包登录框为 radix 风格 button[role=checkbox][data-state=unchecked],
+          // 无 input 元素,须直接点击该按钮(或其文本标签)勾选
+          try {
+            const unchecked = page.locator('button[role="checkbox"][data-state="unchecked"], [role="checkbox"][aria-checked="false"]').first();
+            if (await unchecked.isVisible({ timeout: 400 }).catch(() => false)) {
+              await unchecked.click({ force: true }).catch(() => undefined);
+              console.log(`[login] 已自动勾选用户协议`);
+            }
+          } catch { /* 无勾选框的站点 */ }
           if (!usable && Date.now() - lastNavAt > 15_000) {
             // 登录成功但落在非会话页(如站点首页):带回提问页
             await page.goto(site.chatUrl, { waitUntil: 'domcontentloaded', timeout: site.navigationTimeoutMs }).catch(() => undefined);
@@ -210,7 +209,7 @@ export class LoginManager {
           }
           confirmStreak = usable ? confirmStreak + 1 : 0;
           if (confirmStreak >= 2) break;
-          await page.waitForTimeout(5_000);
+          await page.waitForTimeout(2_500);
         }
 
         if (cancelled) {

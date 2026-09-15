@@ -60,6 +60,25 @@ async function openLoginUi(): Promise<string> {
 const clicked = await openLoginUi();
 log(clicked ? `已自动点击登录入口(${clicked}),二维码应已弹出` : '未自动点开登录入口,请在画面中手动点击');
 
+/** 勾选协议(radix checkbox)+ 刷新过期二维码;每轮调用。 */
+async function ensureAgreeAndFreshQr(): Promise<void> {
+  try {
+    const expired = page.getByText(/二维码(失效|过期)/).first();
+    if (await expired.isVisible({ timeout: 300 }).catch(() => false)) {
+      await expired.click().catch(() => undefined);
+      log('↻ 已刷新过期二维码');
+    }
+  } catch { /* 无过期态 */ }
+  try {
+    const unchecked = page.locator('[role="checkbox"][data-state="unchecked"], [role="checkbox"][aria-checked="false"]').first();
+    if (await unchecked.isVisible({ timeout: 400 }).catch(() => false)) {
+      await unchecked.click({ force: true }).catch(() => undefined);
+      log('☑ 已勾选用户协议');
+    }
+  } catch { /* 无勾选框 */ }
+}
+await ensureAgreeAndFreshQr();
+
 let frame: Buffer | null = null;
 let vw = 1920, vh = 992;
 try {
@@ -92,6 +111,8 @@ let known = new Set<string>(startCookies);
         log(`★新增Cookie:[${fresh.join(',')}] → 全部Cookie:[${[...now].join(',')}]`);
         known = now;
       }
+      await ensureAgreeAndFreshQr();
+      try { frame = await page.screenshot({ type: 'jpeg', quality: 70, timeout: 5000 }); (await import('node:fs')).writeFileSync(`/tmp/recon-${engine}-latest.jpg`, frame); } catch {}
       // 二维码过期自动刷新 + 协议自动勾选
       try {
         const expired = page.getByText(/二维码(失效|过期)/).first();
@@ -106,7 +127,7 @@ let known = new Set<string>(startCookies);
       } catch { /* 无勾选框 */ }
       log(`loggedIn=${JSON.stringify(loggedIn)}${hint ? ` (${hint})` : ''} input=${input} url=${page.url().slice(0, 70)}`);
     } catch (e) { log('诊断循环错误:', String(e).slice(0, 80)); }
-    await page.waitForTimeout(5_000).catch(() => undefined);
+    await page.waitForTimeout(2_500).catch(() => undefined);
   }
 })();
 
