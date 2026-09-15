@@ -43,19 +43,38 @@ export class AgentBaySessionBroker implements SessionBroker {
         Name: contextNameFor(profile.profileKey),
         AllowCreate: 'true',
       });
-      // GetContext 的 XML 响应中 Context ID 位于 <Id> 字段(形如 SdkCtx-xxx)
+      // GetContext 响应中 Context ID 位于 Id 字段(形如 SdkCtx-xxx;XML/JSON 双形态均兼容)
       contextId = strField(ctxRes, ['Id', 'ContextId', 'contextId']) ?? undefined;
     } catch (err) {
       console.error('[agentbay] GetContext failed (降级为无 Context 会话):', (err as Error).message);
     }
 
-    const createRes = await this.rpc('CreateMcpSession', {
-      ...body,
-      ImageId: this.config.imageId,
-      RegionId: regionId,
-      ...(contextId ? { ContextId: contextId } : {}),
-      Labels: JSON.stringify({ app: 'geolens' }),
-    });
+    // Context 绑定可能被平台拒绝(实测:租户未加白时 CreateMcpSession -> Context.AccessDenied
+    // "tenantId not in whitelist")→ 自动降级为无 Context 会话重试:登录/采集流程不阻塞,
+    // 仅登录态不跨会话保留;无影侧为租户加白后自动恢复持久化。
+    const createSession = (withContext: boolean) =>
+      this.rpc('CreateMcpSession', {
+        ...body,
+        ImageId: this.config.imageId,
+        RegionId: regionId,
+        ...(withContext && contextId ? { ContextId: contextId } : {}),
+        Labels: JSON.stringify({ app: 'geolens' }),
+      });
+
+    let createRes: Record<string, unknown>;
+    try {
+      createRes = await createSession(true);
+    } catch (err) {
+      if (contextId && err instanceof BrokerError && err.message.includes('Context.AccessDenied')) {
+        console.warn(
+          `[agentbay] Context 绑定被拒(${err.message}),降级为无 Context 会话:登录态不跨会话保留`,
+        );
+        contextId = undefined;
+        createRes = await createSession(false);
+      } else {
+        throw err;
+      }
+    }
     const sessionId = strField(createRes, ['SessionId', 'sessionId']);
     if (!sessionId) {
       throw new BrokerError('agentbay create: no SessionId in response', undefined, JSON.stringify(createRes).slice(0, 300));
@@ -120,7 +139,8 @@ export class AgentBaySessionBroker implements SessionBroker {
       throw new BrokerError(`agentbay ${action} network error`, undefined, (err as Error).message);
     }
     const text = await res.text();
-    // 同一网关对部分动作返回 JSON、部分返回 XML(实测 CreateMcpSession/GetCdpLink/GetContext 为 XML),统一解析
+    // 同一网关对同一动作可能返回 JSON 或 XML(实测 GetContext 在 cn-hangzhou 返回 JSON、
+    // 其他区域/版本为 XML),按首字符统一解析
     const parsed = text.trimStart().startsWith('{') ? parseJsonLoose(text) : parseXmlLoose(text);
     const code = String(parsed.Code ?? 'ok');
     if (code !== 'ok' && code !== 'OK' && code !== 'Success') {
