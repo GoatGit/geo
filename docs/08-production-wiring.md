@@ -17,6 +17,7 @@
 | 存证 | OSS `gemux-geo-evidence`(evidence pack:answer/snapshot/manifest) | ✅ |
 | 日志 | SLS:四个应用日志收集已配置 | ✅ |
 | 采集链路 | 调度 → 轮次 → 队列 → 采集 → mention_facts → rankings API,端到端验证(mentionRate 22/40 输出正常) | ✅ |
+| 远程采集 | worker 已切 agentbay 模式(cn-hangzhou),CDP 端到端 PoC 通过(playwright 连 CDP 导航 example.com 成功) | ✅ |
 
 已修复的关键问题:账号池为空时任务无限延迟重排(worker 启动时 mock 模式自动补种,见 `apps/worker-web/src/profiles.ts` `ensureMockProfiles`)。
 
@@ -82,7 +83,7 @@ ALIPAY_PUBLIC_KEY_PATH=/app/certs/alipay/alipay_public_key.pem
 
 **回调地址**:支付回调经 `X-Forwarded-Proto` 组装,域名走 `https://geo.gemux.cn/api/billing/notify/...`;确认 CLB 443 已透传该头(当前配置已透传)。密钥文件路径以镜像内为准,Dockerfile 部署时用 build secret 注入,不要写进仓库。
 
-## 4. 远程 CDP 浏览器(AgentBay)——待控制台复制密钥
+## 4. 远程 CDP 浏览器(AgentBay)——✅ 已接线(2026-09-15)
 
 代码侧已校准(W1-2 完成):broker 按 POP RPC 协议重写——端点 `agentbay.cn-shanghai.aliyuncs.com`、
 Version 2025-05-06、`Authorization: Bearer <akm-key>` 在 form body(与官方 wuying-agentbay-sdk 一致)。
