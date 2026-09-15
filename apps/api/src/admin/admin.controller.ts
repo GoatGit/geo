@@ -240,7 +240,6 @@ export class AdminController implements OnModuleDestroy {
         dailyUsed: accountProfiles.dailyUsed,
         cooldownUntil: accountProfiles.cooldownUntil,
         retiredAt: accountProfiles.retiredAt,
-        hasLoginState: sql<boolean>`(${accountProfiles.contextRef} is not null)`,
         createdAt: accountProfiles.createdAt,
       })
       .from(accountProfiles)

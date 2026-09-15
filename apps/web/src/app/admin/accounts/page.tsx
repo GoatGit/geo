@@ -15,7 +15,6 @@ interface AccountRow {
   dailyUsed: number;
   cooldownUntil: string | null;
   retiredAt: string | null;
-  hasLoginState: boolean;
   createdAt: string;
 }
 
@@ -315,7 +314,6 @@ export default function AdminAccountsPage() {
               <th className="px-5 py-3 font-medium">状态</th>
               <th className="px-5 py-3 font-medium">健康分</th>
               <th className="px-5 py-3 font-medium">今日用量</th>
-              <th className="px-5 py-3 font-medium">登录态</th>
               <th className="px-5 py-3 font-medium">操作</th>
             </tr>
           </thead>
@@ -342,7 +340,6 @@ export default function AdminAccountsPage() {
                   </td>
                   <td className="px-5 py-3 tabular-nums">{a.healthScore}</td>
                   <td className="px-5 py-3 tabular-nums">{a.dailyUsed}</td>
-                  <td className="px-5 py-3 text-xs">{a.hasLoginState ? '已注入' : '未注入'}</td>
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-2">
                       <button
