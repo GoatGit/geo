@@ -56,14 +56,12 @@ export class AgentBaySessionBroker implements SessionBroker {
         return undefined;
       });
 
-      // CreateMcpSession 若已直接回 WsUrl 可省一次 GetCdpLink
-      let cdpUrl = strField(createRes, ['WsUrl', 'wsUrl', 'Url', 'url']);
+      // 浏览器 CDP 端点必须走 GetCdpLink(9333 端口);
+      // CreateMcpSession 的 WsUrl 是 MCP 内部通道(需 X-Access-Token),不能作为 cdpUrl
+      const linkRes = await this.rpc('GetCdpLink', { ...body, SessionId: sessionId });
+      const cdpUrl = strField(linkRes, ['Url', 'url', 'WsUrl', 'Link']);
       if (!cdpUrl) {
-        const linkRes = await this.rpc('GetCdpLink', { ...body, SessionId: sessionId });
-        cdpUrl = strField(linkRes, ['Url', 'url', 'WsUrl', 'Link']);
-      }
-      if (!cdpUrl) {
-        throw new BrokerError('agentbay: no CDP url in response', undefined, JSON.stringify(createRes).slice(0, 300));
+        throw new BrokerError('agentbay: no CDP url in GetCdpLink response', undefined, JSON.stringify(linkRes).slice(0, 300));
       }
 
       return {
