@@ -110,6 +110,7 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     loginUrlPatterns: [],
     inputSelectors: ['[contenteditable="true"]', 'div[id*="chat-input"]', 'textarea'],
     // 实测(2026-09,登录态):发送按钮 aria-label="发送消息"
+    loggedInCookieHints: ['tongyi_sso_ticket'],
     submitSelectors: ['button[aria-label="发送消息"]', 'button:has-text("发送")', 'button[type="submit"]'],
     answerSelectors: ['div[class*="answer"]', 'div[class*="markdown"]'],
     stopSelectors: ['button:has-text("停止")'],
