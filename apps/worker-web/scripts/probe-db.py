@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """在 geo-api 容器里直接测试 RDS 认证,找出可用密码。"""
 import json
+import os
 import subprocess
 import sys
 import time
@@ -15,8 +16,8 @@ USER = "geo"
 
 infra = json.load(open("/tmp/geo-prod-infra.json"))
 candidates = [
-    infra.get("rds_pass", ""),        # 我重置的随机密码
-    "bekvom-weBvyx-6nogri",           # 用户环境变量里的原密码
+    infra.get("rds_pass", ""),
+    os.environ.get("PG_PASS", ""),    # 凭据一律走环境变量,勿写进代码(曾泄漏需轮换)
 ]
 
 PROBE = (

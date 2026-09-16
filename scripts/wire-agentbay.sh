@@ -66,7 +66,7 @@ aliyun sae DescribeChangeOrder --RegionId "$REGION" --ChangeOrderId "$ORDER" \
 
 echo "== ③ PoC:触发一轮采集并对比落库 =="
 PG_HOST="${PG_HOST:-geopub.pg.rds.aliyuncs.com}"; PG_PORT="${PG_PORT:-15432}"
-PG_USER="${PG_USER:-geo}"; PG_PASS="${PG_PASS:-bekvom-weBvyx-6nogri}"; PG_DB="${PG_DB:-geo}"
+PG_USER="${PG_USER:?请设置 PG_USER}"; PG_PASS="${PG_PASS:?请设置 PG_PASS(勿写进代码,已泄漏需轮换)}"; PG_DB="${PG_DB:-geo}"
 BEFORE=$(PGPASSWORD="$PG_PASS" psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DB" -tAc \
   "select count(*) from query_runs" 2>/dev/null || echo "?")
 PGPASSWORD="$PG_PASS" psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DB" -c \

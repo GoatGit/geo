@@ -2,7 +2,7 @@ import { chromium } from 'playwright-core';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { siteConfigOf } from '@geo/engine-adapters';
-const TOKEN = 'akm-ca8df948-74c6-4ac9-b2fd-2b5f77bbd129';
+const TOKEN = process.env.AGENTBAY_API_TOKEN ?? (console.error('需要 AGENTBAY_API_TOKEN(node --env-file=.env.debug 运行)'), process.exit(1));
 const rpc = (a: string, x: Record<string,string> = {}) => execFileSync('curl', ['-s','--max-time','180','-X','POST','-H','content-type: application/x-www-form-urlencoded','--data-binary', new URLSearchParams({Action:a,Version:'2025-05-06',Authorization:`Bearer ${TOKEN}`,RegionId:'cn-hangzhou',Timestamp:new Date().toISOString().replace(/\.\d{3}Z$/,'Z'),SignatureNonce:randomUUID(),...x}).toString(), 'https://agentbay.cn-hangzhou.aliyuncs.com/']).toString();
 const xml = (s: string, t: string) => s.match(new RegExp(`<${t}>(.*?)</${t}>`))?.[1] ?? null;
 const sid = xml(rpc('CreateMcpSession', { ImageId: 'browser_latest' }), 'SessionId');

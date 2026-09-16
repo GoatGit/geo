@@ -9,10 +9,10 @@ import { chromium } from 'playwright-core';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
-import { ENGINE_SITES, siteConfigOf, checkLogin } from '@geo/engine-adapters';
+import { siteConfigOf, checkLogin } from '@geo/engine-adapters';
 import type { EngineId } from '@geo/shared';
 
-const TOKEN = 'akm-ca8df948-74c6-4ac9-b2fd-2b5f77bbd129';
+const TOKEN = process.env.AGENTBAY_API_TOKEN ?? (console.error('需要 AGENTBAY_API_TOKEN(node --env-file=.env.debug 运行)'), process.exit(1));
 const REGION = 'cn-hangzhou';
 const engine = (process.argv[2] ?? 'yuanbao') as EngineId;
 const PORT = Number(process.argv[3] ?? 8791);
