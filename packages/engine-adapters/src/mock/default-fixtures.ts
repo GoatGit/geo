@@ -66,18 +66,8 @@ export function buildDefaultFixtures(): MockFixture[] {
       citations: sc.citations,
     });
 
-    // 口碑场景(口碑词问题):正负印象混合
-    out.push({
-      engine,
-      answerMarkdown: [
-        `关于${engine === 'doubao' ? '' : ''}小米汽车的质量与口碑,综合公开讨论:`,
-        '',
-        '- 正面:做工与质感在同价位有竞争力,车机生态联动是亮点。',
-        '- 争议:部分车主反馈售后服务响应慢,以及价格波动带来的保值顾虑。',
-        '- 总体:品牌热度高,质量口碑整体偏正面,服务体验是主要槽点。',
-      ].join('\n'),
-      citations: [{ url: 'https://www.zhihu.com/question/5100', title: '小米汽车口碑怎么样' }],
-    });
+    // 口碑场景(口碑词问题):按引擎差异化措辞/情感/引用,证据样本有区分度
+    for (const f of REPUTATION_FIXTURES[engine] ?? []) out.push(f);
 
     // 空回答态(ok_empty,docs/02 §1.1)
     out.push({
@@ -90,3 +80,72 @@ export function buildDefaultFixtures(): MockFixture[] {
 
   return out;
 }
+
+/**
+ * 口碑 fixtures(按引擎措辞与情感倾向差异化:豆包/深求正面、文心中性、千问偏负、元宝生态视角)。
+ * 情感用词与 worker 抽取词库一致,确保印象词/情感分布有区分度。
+ */
+const REPUTATION_FIXTURES: Record<EngineId, MockFixture[]> = {
+  doubao: [
+    {
+      engine: 'doubao',
+      kind: 'reputation',
+      answerMarkdown: [
+        '综合公开讨论,小米汽车的口碑整体偏正面:',
+        '做工与质感被普遍认为有竞争力,车机生态联动是一大亮点,智能化体验领先;',
+        '主要槽点是部分门店售后服务响应慢,以及价格波动带来的保值顾虑。',
+        '总体而言值得推荐。',
+      ].join('\n'),
+      citations: [{ url: 'https://www.douyin.com/video/7301', title: '车主口碑实测视频' }],
+    },
+  ],
+  deepseek: [
+    {
+      engine: 'deepseek',
+      kind: 'reputation',
+      answerMarkdown: [
+        '小米汽车口碑分析(基于公开舆情):',
+        '优势——做工扎实、生态联动领先,性价比口碑好;',
+        '争议——售后网络覆盖不足,部分用户反馈交付与响应较慢。',
+        '舆情以正面为主,服务体验是主要槽点。',
+      ].join('\n'),
+      citations: [{ url: 'https://www.zhihu.com/question/5100', title: '小米汽车口碑怎么样' }],
+    },
+  ],
+  wenxin: [
+    {
+      engine: 'wenxin',
+      kind: 'reputation',
+      answerMarkdown: [
+        '综合车主反馈,小米汽车的口碑褒贬均有:',
+        '产品做工与智能座舱获得认可,生态体验是亮点;',
+        '负面主要集中在售后响应偏慢与保值顾虑,质量口碑整体平稳。',
+      ].join('\n'),
+      citations: [{ url: 'https://baijiahao.baidu.com/s?id=9100', title: '小米汽车车主真实反馈' }],
+    },
+  ],
+  qwen: [
+    {
+      engine: 'qwen',
+      kind: 'reputation',
+      answerMarkdown: [
+        '小米汽车的口碑目前存在一定争议:',
+        '车机生态与做工是公认的亮点,但近期投诉集中在售后服务响应慢、门店体验参差,保值顾虑较多;',
+        '建议到店试驾对比后再做决定。',
+      ].join('\n'),
+      citations: [{ url: 'https://www.toutiao.com/article/9200', title: '小米汽车服务体验讨论' }],
+    },
+  ],
+  yuanbao: [
+    {
+      engine: 'yuanbao',
+      kind: 'reputation',
+      answerMarkdown: [
+        '腾讯元宝综合微信生态讨论:小米汽车口碑热度高,',
+        '生态互联互通被广泛认为领先,做工出色,车主推荐意愿强;',
+        '少数用户提及售后响应慢与价格偏贵的问题,整体口碑偏好。',
+      ].join('\n'),
+      citations: [{ url: 'https://new.qq.com/rain/a/9300', title: '微信生态热议:小米汽车口碑' }],
+    },
+  ],
+};

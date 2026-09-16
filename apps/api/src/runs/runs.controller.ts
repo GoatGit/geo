@@ -66,4 +66,54 @@ export class RunsController {
       evidence,
     };
   }
+
+  /** 原文证据内容:直接返回 answer.json 解析结果(免前端二次取签名 URL;docs/05 §6)。 */
+  @Get(':id/answer')
+  async answer(@Req() req: Request, @Param('id', ParseIntPipe) runId: number) {
+    const accountId = currentAccount(req).accountId;
+    const run = (
+      await this.db
+        .select({
+          brandId: queryRuns.brandId,
+          status: queryRuns.status,
+          engine: queryRuns.engine,
+          ranAt: queryRuns.ranAt,
+          questionId: queryRuns.questionId,
+          answerRef: queryRuns.answerRef,
+          evidenceHash: queryRuns.evidenceHash,
+        })
+        .from(queryRuns)
+        .where(eq(queryRuns.id, runId))
+        .limit(1)
+    )[0];
+    if (!run) throw new HttpException('采集记录不存在', HttpStatus.NOT_FOUND);
+    await this.brandsService.getOwned(accountId, run.brandId);
+
+    if (!run.answerRef) {
+      throw new HttpException('该记录没有存证(失败/拦截任务不产生回答证据)', HttpStatus.NOT_FOUND);
+    }
+    let answer: {
+      answerText?: string;
+      citations?: Array<{ url: string; title?: string }>;
+      question?: string;
+      timings?: Record<string, string>;
+    };
+    try {
+      answer = JSON.parse((await this.storage.get(run.answerRef)).toString('utf8'));
+    } catch {
+      throw new HttpException('证据包读取失败(可能已过保留期)', HttpStatus.GONE);
+    }
+    return {
+      runId,
+      status: run.status,
+      engine: run.engine,
+      ranAt: run.ranAt,
+      questionId: run.questionId,
+      question: answer.question ?? null,
+      answerText: answer.answerText ?? '',
+      citations: answer.citations ?? [],
+      manifestHash: run.evidenceHash,
+      answerRef: run.answerRef,
+    };
+  }
 }

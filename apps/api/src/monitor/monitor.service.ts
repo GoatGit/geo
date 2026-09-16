@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, gte, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import {
   brands,
@@ -7,6 +7,7 @@ import {
   dailyMetrics,
   mentionFacts,
   monitoringQuestions,
+  queryRuns,
   reputationFacts,
 } from '@geo/db';
 import {
@@ -418,11 +419,30 @@ export class MonitorService {
     const all = [...terms.values()].sort((a, b) => b.runs - a.runs);
     const sentimentScore = rows.length > 0 ? Math.round((pos / rows.length) * 100) : null;
 
+    // 证据样本补充引擎信息(reputation_facts 不落引擎,从 query_runs 关联)
+    const sampleRunIds = [...new Set(rows.slice(0, 20).map((r) => r.runId))];
+    const runEngines = new Map(
+      sampleRunIds.length > 0
+        ? (
+            await this.db
+              .select({ id: queryRuns.id, engine: queryRuns.engine })
+              .from(queryRuns)
+              .where(inArray(queryRuns.id, sampleRunIds))
+          ).map((r) => [r.id, r.engine])
+        : [],
+    );
+
     return {
       totals: { runs: rows.length, pos, neu, neg, sentimentScore, hasData: rows.length > 0 },
       strengths: all.filter((t) => t.polarity === 'pos').slice(0, 6),
       weaknesses: all.filter((t) => t.polarity === 'neg').slice(0, 6),
-      samples: rows.slice(0, 20).map((r) => ({ runId: r.runId, sentiment: r.sentiment, excerpt: r.excerpt, ranAt: r.ranAt })),
+      samples: rows.slice(0, 20).map((r) => ({
+        runId: r.runId,
+        sentiment: r.sentiment,
+        excerpt: r.excerpt,
+        engine: runEngines.get(r.runId) ?? null,
+        ranAt: r.ranAt,
+      })),
     };
   }
 
