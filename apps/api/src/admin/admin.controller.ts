@@ -1,4 +1,4 @@
-import { Body, Controller, Get, OnModuleDestroy, Param, ParseIntPipe, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpException, HttpStatus, OnModuleDestroy, Param, ParseIntPipe, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { BadRequestException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
@@ -55,6 +55,44 @@ export class AdminController implements OnModuleDestroy {
     @Inject(DB) private readonly db: NodePgDatabase,
     @Inject(REDIS) private readonly redis: Redis,
   ) {}
+
+  /** 删除品牌及其全部从属数据(平台运营处置;确认操作,不可逆)。 */
+  @Delete('brands/:id')
+  async deleteBrand(@Param('id', ParseIntPipe) id: number) {
+    const brand = (
+      await this.db.select({ id: brands.id, name: brands.name }).from(brands).where(eq(brands.id, id)).limit(1)
+    )[0];
+    if (!brand) throw new HttpException('品牌不存在', HttpStatus.NOT_FOUND);
+
+    const tables = [
+      'audit_tasks',
+      'mention_facts',
+      'citation_facts',
+      'reputation_facts',
+      'query_runs',
+      'daily_metrics',
+      'collection_rounds',
+      'collection_plans',
+      'monitoring_questions',
+      'recognition_entries',
+      'recognition_versions',
+      'competitor_candidates',
+      'reports',
+      'subscriptions',
+    ];
+    const deleted: Record<string, number> = {};
+    for (const table of tables) {
+      const r = await this.db.execute(
+        sql.raw(`delete from ${table} where brand_id = ${Number(id)}`),
+      );
+      deleted[table] = r.rowCount ?? 0;
+    }
+    const brandDeleted = await this.db
+      .delete(brands)
+      .where(eq(brands.id, id))
+      .returning({ id: brands.id });
+    return { deleted: true, brand: brand.name, rows: deleted };
+  }
 
   async onModuleDestroy() {
     await Promise.allSettled(this.queues.map((q) => q.close()));

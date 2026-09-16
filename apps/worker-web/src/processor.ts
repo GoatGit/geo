@@ -263,6 +263,10 @@ export class CollectProcessor {
         if (!page && /^wss?:\/\//.test(session.cdpUrl)) {
           cdpBrowser = await chromium.connectOverCDP(session.cdpUrl);
           const context = cdpBrowser.contexts()[0] ?? (await cdpBrowser.newContext());
+          // 注入持久化 Cookie(docs/04 §3.1):登录导出的引擎会话态先于导航生效
+          if (profile.cookies?.length) {
+            await context.addCookies(profile.cookies as never[]).catch(() => undefined);
+          }
           page = context.pages()[0] ?? (await context.newPage());
         }
         const adapter = this.registry.get(engine as never, 'web');

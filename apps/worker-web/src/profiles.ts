@@ -10,6 +10,8 @@ export interface AcquiredProfile {
   fingerprint: Record<string, unknown>;
   proxyHint: string | null;
   contextRef: string | null;
+  /** 登录成功导出的 Cookie(采集会话注入,登录态留存不依赖平台 Context 能力) */
+  cookies: Array<Record<string, unknown>> | null;
 }
 
 /** 单账号单日提问上限(docs/04 §3.2 配额内化,超限强制轮换)。 */
@@ -42,6 +44,7 @@ export class AccountPoolService {
       fingerprint: Record<string, unknown>;
       proxy_hint: string | null;
       context_ref: string | null;
+      cookies: Array<Record<string, unknown>> | null;
     }>(
       `with picked as (
          select id from account_profiles
@@ -58,7 +61,7 @@ export class AccountPoolService {
            daily_date = current_date
        from picked
        where ap.id = picked.id
-       returning ap.id, ap.fingerprint, ap.proxy_hint, ap.context_ref`,
+       returning ap.id, ap.fingerprint, ap.proxy_hint, ap.context_ref, ap.cookies`,
       [engine, excludeIds.size > 0 ? [...excludeIds] : [-1]],
     );
     const row = res.rows[0];
@@ -69,6 +72,7 @@ export class AccountPoolService {
       fingerprint: row.fingerprint,
       proxyHint: row.proxy_hint,
       contextRef: row.context_ref,
+      cookies: row.cookies,
     };
   }
 

@@ -234,12 +234,18 @@ export class LoginManager {
         }
         const success = !cancelled && confirmStreak >= 2;
         if (success) {
-          // agentbay 模式:contextId 即登录态载体,写回 profile 供采集会话复用
+          // Cookie 持久化(docs/04 §3.1):Context 同步不可靠(AccessDenied/延迟),
+          // 登录成功即导出 Cookie 落库,采集会话注入——登录态留存不再依赖平台能力
+          const exported = await page.context().cookies().catch(() => []);
           await this.db
             .update(accountProfiles)
-            .set({ status: 'available', contextRef: session.contextId ?? `local:${req.profileKey}` })
+            .set({
+              status: 'available',
+              contextRef: session.contextId ?? `local:${req.profileKey}`,
+              cookies: exported,
+            })
             .where(eq(accountProfiles.id, req.profileId));
-          console.log(`[login] session=${req.sessionId} engine=${req.engine} 登录成功,档案 ${req.profileId} 置 available`);
+          console.log(`[login] session=${req.sessionId} engine=${req.engine} 登录成功,档案 ${req.profileId} 置 available(cookies=${exported.length})`);
         } else if (!cancelled) {
           // 超时诊断:页面 URL + 当前 Cookie 名(校准各站登录 Cookie 标记)
           const cookieNames = await page
