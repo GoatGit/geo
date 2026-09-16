@@ -25,6 +25,21 @@ export default function CollectionPage() {
     refetchInterval: 10_000,
   });
 
+  const [triggering, setTriggering] = useState(false);
+  const triggerNow = async () => {
+    setMsg(null);
+    setTriggering(true);
+    try {
+      await api('/collection/trigger', { method: 'POST', json: { brand: brandId } });
+      setMsg('已触发立即采集,调度器将在 1 分钟内开始');
+      void queryClient.invalidateQueries({ queryKey: ['collection', brandId] });
+    } catch (err) {
+      setMsg((err as Error).message);
+    } finally {
+      setTriggering(false);
+    }
+  };
+
   const retryFailed = async (roundId: number) => {
     setMsg(null);
     setRetrying(roundId);
@@ -47,7 +62,14 @@ export default function CollectionPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="采集状态" />
+      <PageHeader
+        title="采集状态"
+        actions={
+          <button onClick={triggerNow} disabled={triggering} className="btn-primary h-9 px-4 text-xs disabled:opacity-40">
+            {triggering ? '触发中…' : '立即采集'}
+          </button>
+        }
+      />
 
       <section className="grid gap-4 lg:grid-cols-2">
         <div className="card rise-1 p-6">

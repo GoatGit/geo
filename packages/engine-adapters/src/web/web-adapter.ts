@@ -14,6 +14,29 @@ export function needsLoginOf(result: AskResult): boolean {
   return result.engineMeta?.needsLogin === true;
 }
 
+const stripEchoNoise = (s: string) => normalizeTextLite(s.replace(/\s+/g, ''));
+
+/** 轻量归一(仅采集端回声判定用):去标点/空白 + 小写。 */
+function normalizeTextLite(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[?？!！。,，.、:：;；"'“”‘’()（）\[\]【】——\-—…·\s]/g, '');
+}
+
+/**
+ * 回声判定(docs/04 §2.1 采集防污染):抓到的"回答"≈问题原文 = 输入气泡被当成回答
+ * (实测豆包游客态:请求被静默拦截时,聊天流里最长文本是用户输入回显)。
+ * 回声不是有效样本 → 调用方按失败收口并触发人工登录,不得计入口径。
+ */
+export function isEchoOfQuestion(answer: string, question: string): boolean {
+  const a = stripEchoNoise(answer);
+  const q = stripEchoNoise(question);
+  if (!a || !q) return false;
+  if (a === q) return true;
+  // 回显可能携带少量站点噪声(时间戳/建议词):答案显著短于问题且被问题包含,同判为回声
+  return a.length <= q.length + 8 && q.includes(a);
+}
+
 /** 登录态检测(适配器与人工登录编排共用)。判定顺序:
  * ① 正向信号:站点配置的登录 Cookie(如 doubao sessionid / wenxin BDUSS)存在 → 已登录
  *    (部分站点登录后页面仍有残留"登录"文案,Cookie 是最可靠的正向信号);
@@ -132,6 +155,22 @@ export class DomWebAdapter implements EngineAdapter {
       const cleaned = text ? this.stripNoiseLines(text) : text;
       if (!cleaned) {
         return this.fail(timedOut ? '完成判定超时且无答案文本' : '回答容器为空(页面改版?需校准 answerSelectors)', queuedAt);
+      }
+      // 回声防污染(docs/04 §2.1):回答≈问题原文 = 输入回显被当回答(游客态被静默拦截的实测形态)
+      if (isEchoOfQuestion(cleaned, question)) {
+        return {
+          status: 'failed',
+          answerText: '',
+          rawHtml: null,
+          citations: [],
+          timing: this.timing(queuedAt),
+          engineMeta: {
+            error: 'answer_echo_of_question',
+            needsLogin: true,
+            profileKey: ctx.profileKey,
+            echo: cleaned.slice(0, 80),
+          },
+        };
       }
 
       return {

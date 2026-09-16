@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpException, HttpStatus, Inject, Post, Query, Req } from '@nestjs/common';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Request } from 'express';
 import { Redis } from 'ioredis';
@@ -77,6 +77,43 @@ export class CollectionController {
       rounds,
       lastRuns: recent.slice(0, 50),
     };
+  }
+
+  /** 立即采集:把采集计划的 next_run_at 提前到当前,调度器 60s 内建轮次(docs/04 §5 轮次触发)。 */
+  @Post('trigger')
+  async trigger(@Req() req: Request, @Body() body: { brand?: number }) {
+    const brandId = Number(body?.brand);
+    if (!Number.isInteger(brandId) || brandId <= 0) {
+      throw new HttpException('brand 参数非法', HttpStatus.BAD_REQUEST);
+    }
+    await this.brandsService.getOwned(currentAccount(req).accountId, brandId);
+
+    const plan = (
+      await this.db.select().from(collectionPlans).where(eq(collectionPlans.brandId, brandId)).limit(1)
+    )[0];
+    if (!plan) throw new HttpException('采集计划不存在', HttpStatus.NOT_FOUND);
+    if (!plan.active) throw new HttpException('采集计划已停用', HttpStatus.CONFLICT);
+
+    // 进行中的轮次不重复触发
+    const running = await this.db
+      .select({ id: collectionRounds.id })
+      .from(collectionRounds)
+      .where(
+        and(
+          eq(collectionRounds.brandId, brandId),
+          sql`finished_at is null and started_at > now() - interval '2 hours'`,
+        ),
+      )
+      .limit(1);
+    if (running.length > 0) {
+      throw new HttpException('已有进行中的采集轮次,请等待完成', HttpStatus.CONFLICT);
+    }
+
+    await this.db
+      .update(collectionPlans)
+      .set({ nextRunAt: new Date() })
+      .where(eq(collectionPlans.brandId, brandId));
+    return { triggered: true, note: '已触发,调度器将在 1 分钟内开始本轮采集' };
   }
 
   /** 重试轮次失败项(docs/02 §1.1 四态失败可见可处置):封装为新轮次入队,幂等防连点。 */

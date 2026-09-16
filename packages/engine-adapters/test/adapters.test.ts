@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { AdapterRegistry } from '../src/registry';
 import { MockEngineAdapter } from '../src/mock/mock-adapter';
 import { buildDefaultFixtures } from '../src/mock/default-fixtures';
+import { isEchoOfQuestion } from '../src/web/web-adapter';
 
 const ctx = (profileKey = 'p1') => ({ mode: 'mock' as const, fingerprint: {}, profileKey });
 
@@ -76,5 +77,31 @@ describe('AdapterRegistry', () => {
     expect(engines.size).toBe(5);
     expect(fixtures.some((f) => f.status === 'ok_empty')).toBe(true);
     expect(fixtures.some((f) => f.answerMarkdown.includes('口碑'))).toBe(true);
+  });
+});
+
+describe('isEchoOfQuestion(采集防污染:输入回显不得计为回答)', () => {
+  const q = '理想汽车的口碑和质量到底怎么样?有什么优缺点?';
+
+  it('回答=问题原文(全角标点/空白差异)判为回声', () => {
+    expect(isEchoOfQuestion('理想汽车的口碑和质量到底怎么样？有什么优缺点？', q)).toBe(true);
+    expect(isEchoOfQuestion(' 理想汽车的口碑和质量到底怎么样?有什么优缺点? \n', q)).toBe(true);
+  });
+
+  it('回声携带少量站点噪声(建议词/时间戳)且不长于问题,判为回声', () => {
+    expect(isEchoOfQuestion('理想汽车的口碑和质量到底怎么样?有什么优缺点?', q)).toBe(true);
+  });
+
+  it('真实回答(长度显著/内容不同)不判为回声', () => {
+    expect(
+      isEchoOfQuestion(
+        '理想汽车整体口碑偏正面:增程式技术成熟,空间大,售后网络在扩张;主要槽点是车机偶发卡顿与保值率一般。总体值得考虑。',
+        q,
+      ),
+    ).toBe(false);
+  });
+
+  it('空文本不判回声', () => {
+    expect(isEchoOfQuestion('', q)).toBe(false);
   });
 });
