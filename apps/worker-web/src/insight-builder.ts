@@ -364,7 +364,7 @@ export async function collectIndustryAggregates(
 
   const landscape = await db.execute(sql`
     select mf.subject_name,
-           max(mf.subject_kind)                                   as subject_kind,
+           min(case mf.subject_kind when 'self' then 1 when 'competitor' then 2 else 3 end) as kind_order,
            count(*) filter (where mf.mentioned)                   as mentions,
            count(distinct mf.run_id) filter (where mf.mentioned)  as runs
     from mention_facts mf
@@ -402,10 +402,19 @@ export async function collectIndustryAggregates(
   `);
 
   const repRows = await db.execute(sql`
-    select rf.sentiment, rf.impression_terms
+    select sentiment, impression_terms
+    from (
+      select rf.sentiment, rf.impression_terms, rf.ran_at
+      from reputation_facts rf
+      where rf.brand_id in (${idList})${winRf}
+      order by rf.ran_at desc
+      limit 2000
+    ) rf
+  `);
+  const repTotal = await db.execute(sql`
+    select count(*)::int as total
     from reputation_facts rf
     where rf.brand_id in (${idList})${winRf}
-    limit 2000
   `);
 
   const trendRows = await db.execute(sql`
@@ -490,11 +499,9 @@ export async function collectIndustryAggregates(
   const sentiment = { pos: 0, neu: 0, neg: 0 };
   const posTerms = new Map<string, number>();
   const negTerms = new Map<string, number>();
-  let repTotal = 0;
   for (const row of rowsOf<{ sentiment: string; impression_terms: Array<{ term: string; polarity: string }> | null }>(
     repRows,
   )) {
-    repTotal += 1;
     if (row.sentiment === 'pos') sentiment.pos += 1;
     else if (row.sentiment === 'neu') sentiment.neu += 1;
     else if (row.sentiment === 'neg') sentiment.neg += 1;
@@ -506,7 +513,7 @@ export async function collectIndustryAggregates(
   const topTerms = (m: Map<string, number>) =>
     [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([term, count]) => ({ term, count }));
   const reputation: ReputationAgg = {
-    total: repTotal,
+    total: num(rowsOf<{ total: number }>(repTotal)[0]?.total),
     ...sentiment,
     posTerms: topTerms(posTerms),
     negTerms: topTerms(negTerms),
@@ -526,10 +533,10 @@ export async function collectIndustryAggregates(
     brands,
     engineHits,
     funnel,
-    landscape: rowsOf<{ subject_name: string; subject_kind: string; mentions: string; runs: string }>(landscape).map(
+    landscape: rowsOf<{ subject_name: string; kind_order: number; mentions: string; runs: string }>(landscape).map(
       (r) => ({
         name: r.subject_name,
-        kind: (r.subject_kind as LandscapeRow['kind']) ?? 'discovered',
+        kind: (r.kind_order === 1 ? 'self' : r.kind_order === 2 ? 'competitor' : 'discovered') as LandscapeRow['kind'],
         mentions: num(r.mentions),
         runs: num(r.runs),
       }),
@@ -572,7 +579,8 @@ export async function runInsightBuild(db: Db, job: InsightBuildJob): Promise<voi
 
     // 期数:同行业已有报告数 + 1(每次运行产生新一期)
     const priorCount = await db.execute(sql`
-      select count(*)::int as n from industry_insights where industry_id = ${row.industryId}
+      select count(*)::int as n from industry_insights
+      where industry_id = ${row.industryId} and id <> ${job.insightId}
     `);
     const issueNo = rowsOf<{ n: number }>(priorCount)[0]?.n ?? 1;
 

@@ -1,5 +1,5 @@
-import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { HttpException, HttpStatus, Inject, Injectable, OnModuleDestroy } from '@nestjs/common';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Queue } from 'bullmq';
 import { industryInsights, insightIndustries } from '@geo/db';
@@ -43,12 +43,16 @@ export function validateBlocks(blocks: unknown): InsightBlock[] {
  * 会员可见已发布报告,featured 报告在官网首页公开,草稿仅后台可见。
  */
 @Injectable()
-export class InsightsService {
+export class InsightsService implements OnModuleDestroy {
   private readonly insightsQueue = new Queue(INSIGHTS_QUEUE, {
     connection: { url: loadEnv().redisUrl, maxRetriesPerRequest: null },
   });
 
   constructor(@Inject(DB) private readonly db: NodePgDatabase) {}
+
+  async onModuleDestroy() {
+    await this.insightsQueue.close().catch(() => undefined);
+  }
 
   // ===== 行业配置 =====
 
@@ -108,14 +112,28 @@ export class InsightsService {
           .returning()
       )[0]!;
     }
-    if (insight.buildStatus === 'running') {
+
+    // 原子占位:running 且租约未过期(10 分钟)时拒绝;worker 崩溃留下的 running
+    // 超过租约自动放行,不必人工改库
+    const claimed = await this.db
+      .update(industryInsights)
+      .set({
+        buildStatus: 'running',
+        buildError: null,
+        windowDays,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(industryInsights.id, insight.id),
+          sql`(industry_insights.build_status <> 'running' or industry_insights.updated_at < now() - interval '10 minutes')`,
+        ),
+      )
+      .returning({ id: industryInsights.id });
+    if (claimed.length === 0) {
       throw new HttpException('该行业洞察正在聚合中,请稍候', HttpStatus.CONFLICT);
     }
 
-    await this.db
-      .update(industryInsights)
-      .set({ buildStatus: 'running', buildError: null, windowDays, updatedAt: new Date() })
-      .where(eq(industryInsights.id, insight.id));
     await this.insightsQueue.add('build', { insightId: insight.id, windowDays }, { attempts: 1, removeOnComplete: 100 });
     return { insightId: insight.id, queued: true };
   }

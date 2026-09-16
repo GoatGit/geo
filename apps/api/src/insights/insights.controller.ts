@@ -88,6 +88,33 @@ class UpsertInsightDto {
   featured?: boolean;
 }
 
+/** PATCH 专用:全字段可选(ValidationPipe 按类元数据校验,Partial<T> 类型别名不生效)。 */
+class UpdateInsightDto {
+  @IsOptional() @IsInt()
+  industryId?: number;
+
+  @IsOptional() @IsString() @MinLength(1)
+  title?: string;
+
+  @IsOptional() @IsString()
+  issue?: string;
+
+  @IsOptional() @IsString()
+  summary?: string;
+
+  @IsOptional() @IsObject()
+  cover?: Record<string, unknown>;
+
+  @IsOptional() @IsArray()
+  blocks?: Array<Record<string, unknown>>;
+
+  @IsOptional() @IsIn(['draft', 'published'])
+  status?: 'draft' | 'published';
+
+  @IsOptional() @IsBoolean()
+  featured?: boolean;
+}
+
 /**
  * 行业洞察(docs/01 §3.10 扩展):
  * - 公开:首页精选(featured)、报告详情与 PDF 下载(已发布)——引流入口,无需登录
@@ -178,7 +205,7 @@ export class AdminInsightsController {
   }
 
   @Patch(':id')
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: Partial<UpsertInsightDto>) {
+  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateInsightDto) {
     if (Object.keys(dto).length === 0) {
       throw new HttpException('空更新', HttpStatus.BAD_REQUEST);
     }
