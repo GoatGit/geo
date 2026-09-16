@@ -1,7 +1,6 @@
 import { execFileSync } from 'node:child_process';
 const BASE = 'http://localhost:3001';
 const phone = '13810497490';
-const token = (await import('node:fs')).readFileSync('/tmp/local-admin-token', 'utf8').trim();
 const c1 = JSON.parse(execFileSync('curl', ['-s','--max-time','20','-X','POST','-H','content-type: application/json','-d',JSON.stringify({phone}),`${BASE}/api/auth/sms/code`]).toString());
 const v = JSON.parse(execFileSync('curl', ['-s','--max-time','20','-X','POST','-H','content-type: application/json','-d',JSON.stringify({phone, code: c1.devCode}),`${BASE}/api/auth/sms/verify`]).toString());
 const t = v.accessToken;

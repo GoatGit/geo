@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import { MockSessionBroker } from '../src/mock-broker';
 import { AgentBaySessionBroker } from '../src/agentbay-broker';
 import { BrokerError } from '../src/types';
