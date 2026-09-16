@@ -72,7 +72,7 @@ export default function CitationsPage() {
             {data.items.map((c, i) => (
               <tr key={i} className="border-t">
                 <td className="max-w-80 truncate px-4 py-2">
-                  <a href={c.url} target="_blank" rel="noreferrer" className="text-brand hover:underline">
+                  <a href={/^https?:\/\//.test(c.url) ? c.url : undefined} target="_blank" rel="noreferrer" className="text-brand hover:underline">
                     {c.title ?? c.url}
                   </a>
                 </td>

@@ -23,19 +23,23 @@ export default function InsightDetailPage() {
     enabled: Number.isFinite(id),
   });
 
+  // hooks 必须在条件 return 之前:本页为公开营销页,顺序违规会让数据到达后的
+  // 重渲染多执行一个 hook,React 直接抛错白屏
+  const title = query.data?.title;
+  useEffect(() => {
+    if (!title) return;
+    document.title = `${title} · 青柠GEO`;
+    return () => {
+      document.title = '青柠GEO · AI 搜索品牌可见性监测';
+    };
+  }, [title]);
+
   if (query.isLoading) return <Skeleton />;
   if (query.error || !query.data) {
     return <EmptyState title="报告不存在" text="该洞察报告不存在或尚未发布。" action={<Link href="/" className="btn-ghost">返回官网</Link>} />;
   }
   const d = query.data;
   const cover = d.cover ?? {};
-
-  useEffect(() => {
-    document.title = `${d.title} · 青柠GEO`;
-    return () => {
-      document.title = '青柠GEO · AI 搜索品牌可见性监测';
-    };
-  }, [d.title]);
 
   return (
     <div className="min-h-screen bg-slate-50">

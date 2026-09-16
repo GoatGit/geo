@@ -76,7 +76,9 @@ export default function ReportsPage() {
       const a = document.createElement('a');
       a.href = `data:text/html;charset=utf-8;base64,${r.contentBase64}`;
       a.download = r.filename;
+      document.body.appendChild(a);
       a.click();
+      a.remove();
       toast('已开始下载(浏览器打印即可另存为 PDF)');
     } catch (e) {
       toast((e as Error).message, 'err');
@@ -91,11 +93,11 @@ export default function ReportsPage() {
         title="报告中心"
         actions={
           <>
-            <button className="btn-ghost" onClick={() => generate.mutate('weekly')}>
-              生成周报
+            <button className="btn-ghost" disabled={generate.isPending} onClick={() => generate.mutate('weekly')}>
+              {generate.isPending ? '提交中…' : '生成周报'}
             </button>
-            <button className="btn-primary" onClick={() => generate.mutate('monthly')}>
-              生成月报
+            <button className="btn-primary" disabled={generate.isPending} onClick={() => generate.mutate('monthly')}>
+              {generate.isPending ? '提交中…' : '生成月报'}
             </button>
           </>
         }
@@ -208,7 +210,7 @@ export default function ReportsPage() {
                 </button>
               </div>
             </div>
-            <iframe title={`报告 ${preview.id}`} srcDoc={preview.html} className="h-full w-full flex-1 bg-slate-100" />
+            <iframe title={`报告 ${preview.id}`} srcDoc={preview.html} sandbox="allow-popups allow-modals" className="h-full w-full flex-1 bg-slate-100" />
           </div>
         </div>
       )}

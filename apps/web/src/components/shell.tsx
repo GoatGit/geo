@@ -80,10 +80,12 @@ const ADMIN_NAV: NavGroup = {
 
 /** 公开路由:官网首页与登录页不套控制台壳(未登录访问首页不再跳登录)。 */
 const PUBLIC_ROUTES = ['/', '/login'];
+/** 公开前缀:已发布洞察详情是官网引流页(API 层即 @Public),匿名可看。 */
+const PUBLIC_PREFIXES = ['/insights/'];
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  if (PUBLIC_ROUTES.includes(pathname)) {
+  if (PUBLIC_ROUTES.includes(pathname) || PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) {
     return <div className="min-h-screen">{children}</div>;
   }
   return <ConsoleShell pathname={pathname}>{children}</ConsoleShell>;

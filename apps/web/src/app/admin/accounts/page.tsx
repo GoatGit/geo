@@ -320,7 +320,7 @@ export default function AdminAccountsPage() {
           <tbody>
             {accounts.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-5 py-8 text-center text-xs text-slate-400">
+                <td colSpan={5} className="px-5 py-8 text-center text-xs text-slate-400">
                   账号池为空:先登记档案,再人工登录注入账号态
                 </td>
               </tr>

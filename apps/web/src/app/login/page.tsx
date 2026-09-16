@@ -175,7 +175,7 @@ export default function LoginPage() {
                   maxLength={6}
                   value={code}
                   onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-                  onKeyDown={(e) => e.key === 'Enter' && code.length === 6 && verify()}
+                  onKeyDown={(e) => e.key === 'Enter' && code.length === 6 && !busy && verify()}
                 />
                 <button
                   className="btn-soft h-11 shrink-0 px-4 disabled:opacity-40"

@@ -32,6 +32,18 @@ export function InsightBlocks({ blocks }: { blocks: InsightBlock[] }) {
 }
 
 export function InsightBlockView({ block: b }: { block: InsightBlock }) {
+  // 管理端手编 JSON 可能缺数组字段:守卫失败渲染占位,公开页不因脏数据白屏
+  const arrays = {
+    barRank: 'items' in b && Array.isArray(b.items) && b.items.length > 0,
+    funnel: 'stages' in b && Array.isArray(b.stages) && b.stages.length > 0,
+    heatmap: 'columns' in b && 'rows' in b && Array.isArray(b.columns) && b.columns.length > 0 && Array.isArray(b.rows) && b.rows.length > 0,
+    radar: 'axes' in b && 'series' in b && Array.isArray(b.axes) && b.axes.length >= 3 && Array.isArray(b.series) && b.series.length > 0,
+    trend: 'points' in b && Array.isArray(b.points) && b.points.length >= 2,
+    scatter: 'points' in b && Array.isArray(b.points) && b.points.length > 0,
+  } as Record<string, boolean>;
+  if (b.type !== 'takeaway' && !arrays[b.type]) {
+    return null;
+  }
   switch (b.type) {
     case 'takeaway':
       return (
@@ -83,7 +95,7 @@ function ChartCard({ title, note, children }: { title: string; note?: string; ch
 /* ===== 排行榜(横向条形,如「32 品牌 AI 可见度榜」) ===== */
 
 function BarRankChart({ total, unit, items }: Extract<InsightBlock, { type: 'barRank' }>) {
-  const max = Math.max(...items.map((it) => it.value), 1);
+  const max = Math.max(...items.map((it) => it.value ?? 0), 1);
   return (
     <div className="space-y-1.5">
       {items.map((it, i) => {

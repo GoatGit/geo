@@ -113,7 +113,7 @@ export default function RankingsPage() {
             ))}
             {data.matrix.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={data.engineStats.length + 3} className="px-4 py-8 text-center text-slate-400">
                   暂无监控问题
                 </td>
               </tr>

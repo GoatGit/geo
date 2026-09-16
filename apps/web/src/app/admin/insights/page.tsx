@@ -167,7 +167,13 @@ export default function AdminInsightsPage() {
       setEditor({ ...EMPTY_EDITOR });
       return;
     }
-    const detail = await api<AdminInsightDto>(`/admin/insights/${row.id}`);
+    let detail: AdminInsightDto;
+    try {
+      detail = await api<AdminInsightDto>(`/admin/insights/${row.id}`);
+    } catch (err) {
+      toast((err as Error).message, 'err');
+      return;
+    }
     const cover = (detail.cover ?? {}) as Record<string, unknown>;
     setEditor({
       id: detail.id,
@@ -194,6 +200,10 @@ export default function AdminInsightsPage() {
       blocks = JSON.parse(editor.blocksText);
     } catch {
       setError('blocks 不是合法 JSON');
+      return;
+    }
+    if (!editor.industryId) {
+      setError('请选择所属行业');
       return;
     }
     const json = {
@@ -223,13 +233,21 @@ export default function AdminInsightsPage() {
   };
 
   const remove = async (row: AdminInsightDto) => {
-    await api(`/admin/insights/${row.id}`, { method: 'DELETE' });
-    refresh();
+    try {
+      await api(`/admin/insights/${row.id}`, { method: 'DELETE' });
+      refresh();
+    } catch (err) {
+      toast((err as Error).message, 'err');
+    }
   };
 
   const toggleField = async (row: AdminInsightDto, field: 'status' | 'featured') => {
-    await api(`/admin/insights/${row.id}`, { method: 'PATCH', json: { [field]: field === 'status' ? (row.status === 'published' ? 'draft' : 'published') : !row.featured } });
-    refresh();
+    try {
+      await api(`/admin/insights/${row.id}`, { method: 'PATCH', json: { [field]: field === 'status' ? (row.status === 'published' ? 'draft' : 'published') : !row.featured } });
+      refresh();
+    } catch (err) {
+      toast((err as Error).message, 'err');
+    }
   };
 
   if (industries.isLoading || list.isLoading) return <Skeleton />;

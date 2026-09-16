@@ -50,6 +50,3 @@ export function useRankings(days: number) {
   });
 }
 
-export function useApi<T>(key: unknown[], path: string, enabled = true) {
-  return useQuery({ queryKey: key, queryFn: () => api<T>(path), enabled: enabled && !!useBrandId() });
-}
