@@ -11,6 +11,11 @@
 ## 部署步骤(发布流水线)
 
 1. ACR 构建镜像(根目录 Dockerfile);
+   ⚠️ **必须传构建参数** `--build-arg API_ORIGIN=http://<geo-api 内网SLB VIP>:3000`
+   (Next 的 rewrites 在 `next build` 时固化,运行时环境变量无效——漏传会导致
+   geo-web 全部 /api 请求 500,容器内日志表现为 ECONNREFUSED localhost:3000);
+   另注意在 Apple Silicon 机器上构建需加 `--platform linux/amd64`,否则 SAE
+   x86 节点拉起即 CrashLoopBackOff(且实例日志为空);
 2. SAE 三个应用分别指向同一镜像,配置不同启动命令与环境变量(见根目录 `.env.example`);
 3. RDS PostgreSQL:发布前执行 `pnpm db:migrate`(或发布后由 worker 启动兜底执行分区预建);
 4. OSS:创建 geo-evidence 桶,配置 **合规保留策略(WORM)** 与录屏前缀 7 天生命周期(docs/07 §6);
