@@ -58,6 +58,8 @@ export class AgentBaySessionBroker implements SessionBroker {
       ...body,
       ImageId: this.config.imageId,
       RegionId: regionId,
+      // 登录会话声明手动释放:防止云端按默认时长自动回收,扫码中途窗口消失(释放仍由 finally 兜底)
+      ...(profile.purpose === 'login' ? { ManualRelease: 'true' } : {}),
       Labels: JSON.stringify({ app: 'geolens' }),
     });
     const sessionId = strField(createRes, ['SessionId', 'sessionId']);

@@ -21,8 +21,9 @@ import { checkLogin, hasVisibleInput, siteConfigOf } from '@geo/engine-adapters'
 import { browserModeFromEnv, viewerLoginFromEnv, type SessionBroker } from '@geo/browser-session';
 import { envInt } from './config';
 
-/** 人工登录等待窗口:操作者扫码/验证码在此时间内完成,超时置 timeout 可重试。 */
-const LOGIN_TIMEOUT_MS = envInt('LOGIN_TIMEOUT_MS', 300_000, 30_000, 1_800_000);
+/** 人工登录等待窗口:操作者扫码/验证码在此时间内完成,超时置 timeout 可重试。
+ *  10 分钟起步:扫码后常要切换手机 App 再确认,窗口太短会"刚扫完就关"(可用 LOGIN_TIMEOUT_MS 覆盖)。 */
+const LOGIN_TIMEOUT_MS = envInt('LOGIN_TIMEOUT_MS', 600_000, 30_000, 1_800_000);
 /** viewer 模式截帧间隔(ms):登录操控 1-2fps 足够,降低远程浏览器压力。 */
 const LOGIN_FRAME_MS = envInt('LOGIN_FRAME_MS', 700, 200, 5_000);
 /** 登录并发上限:agentbay 每个登录独立云端沙箱可并行;受 API Key 并发与账号池容量约束。 */
@@ -208,7 +209,23 @@ export class LoginManager {
                 : recheck.loggedIn !== false && (await hasVisibleInput(page, site));
           }
           confirmStreak = usable ? confirmStreak + 1 : 0;
-          if (confirmStreak >= 2) break;
+          if (confirmStreak >= 2) {
+            // 成功前硬校验:扫码后手机端确认未完成时,桌面端登录弹窗会先关闭,
+            // "无登录UI + 输入框可见"会误判成功 → 会话被提前释放、窗口消失。
+            // 校验 = 重新整页导航再验一轮:真登录的 Cookie 过导航仍在;误判则回到等待循环,
+            // 窗口继续保留,操作者可在手机端完成确认后自然通过。
+            await page
+              .goto(site.chatUrl, { waitUntil: 'domcontentloaded', timeout: site.navigationTimeoutMs })
+              .catch(() => undefined);
+            await page.waitForTimeout(2_000);
+            const verify = await checkLogin(page, site);
+            const verifyUsable =
+              site.requireLoginCookie && verify.loggedIn !== true
+                ? false
+                : verify.loggedIn !== false && (await hasVisibleInput(page, site));
+            if (verifyUsable) break;
+            confirmStreak = 0;
+          }
           await page.waitForTimeout(2_500);
         }
 
