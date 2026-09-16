@@ -35,6 +35,8 @@ export interface AgentBayConfig {
   apiKey: string;
   imageId: string;
   regionId?: string;
+  /** Context 同步目录(沙箱内绝对路径,默认 /home/wuying/workspace):浏览器登录态持久化的载体 */
+  contextPath?: string;
   /** 会话操作超时(冷启动预算 ≤15s,PoC 校准 docs/07 §13) */
   timeoutMs?: number;
 }

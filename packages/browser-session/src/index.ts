@@ -24,6 +24,7 @@ export function createBrokerFromEnv(env: NodeJS.ProcessEnv = process.env): Sessi
       apiKey: env.AGENTBAY_API_TOKEN ?? '',
       imageId: env.AGENTBAY_IMAGE_ID ?? 'browser_latest',
       regionId: env.AGENTBAY_REGION_ID,
+      contextPath: env.AGENTBAY_CONTEXT_PATH,
     });
   }
   if (mode === 'local') {

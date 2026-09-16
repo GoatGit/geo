@@ -21,6 +21,9 @@ import {
 
 const RPC_VERSION = '2025-05-06';
 
+/** Context 同步目录(沙箱内绝对路径):浏览器登录态随该目录与 Context 双向同步。 */
+const DEFAULT_CONTEXT_PATH = '/home/wuying/workspace';
+
 export class AgentBaySessionBroker implements SessionBroker {
   private readonly config: AgentBayConfig;
 
@@ -49,35 +52,30 @@ export class AgentBaySessionBroker implements SessionBroker {
       console.error('[agentbay] GetContext failed (降级为无 Context 会话):', (err as Error).message);
     }
 
-    // Context 绑定可能被平台拒绝(实测:租户未加白时 CreateMcpSession -> Context.AccessDenied
-    // "tenantId not in whitelist")→ 自动降级为无 Context 会话重试:登录/采集流程不阻塞,
-    // 仅登录态不跨会话保留;无影侧为租户加白后自动恢复持久化。
-    const createSession = (withContext: boolean) =>
-      this.rpc('CreateMcpSession', {
-        ...body,
-        ImageId: this.config.imageId,
-        RegionId: regionId,
-        ...(withContext && contextId ? { ContextId: contextId } : {}),
-        Labels: JSON.stringify({ app: 'geolens' }),
-      });
-
-    let createRes: Record<string, unknown>;
-    try {
-      createRes = await createSession(true);
-    } catch (err) {
-      if (contextId && err instanceof BrokerError && err.message.includes('Context.AccessDenied')) {
-        console.warn(
-          `[agentbay] Context 绑定被拒(${err.message}),降级为无 Context 会话:登录态不跨会话保留`,
-        );
-        contextId = undefined;
-        createRes = await createSession(false);
-      } else {
-        throw err;
-      }
-    }
+    // 创建会话:禁止直传 ContextId —— 该传参方式已被平台废弃
+    // (实测返回 Context.AccessDenied "tenantId not in whitelist"),持久化改走第③步 BindContexts。
+    const createRes = await this.rpc('CreateMcpSession', {
+      ...body,
+      ImageId: this.config.imageId,
+      RegionId: regionId,
+      Labels: JSON.stringify({ app: 'geolens' }),
+    });
     const sessionId = strField(createRes, ['SessionId', 'sessionId']);
     if (!sessionId) {
       throw new BrokerError('agentbay create: no SessionId in response', undefined, JSON.stringify(createRes).slice(0, 300));
+    }
+
+    // ③ 显式绑定 Context(2025-05+ 协议:BindContexts + PersistenceDataList)。
+    // 失败一律降级为无 Context 会话(登录/采集照常,仅登录态不跨会话保留)。
+    if (contextId) {
+      try {
+        await this.bindContext(sessionId, contextId);
+      } catch (err) {
+        console.warn(
+          `[agentbay] Context 绑定失败(${(err as Error).message}),降级为无 Context 会话:登录态不跨会话保留`,
+        );
+        contextId = undefined;
+      }
     }
 
     try {
@@ -113,6 +111,28 @@ export class AgentBaySessionBroker implements SessionBroker {
       await this.rpc('ReleaseMcpSession', { ...body, SessionId: sessionId }).catch(() => undefined);
       throw err;
     }
+  }
+
+  /**
+   * 显式绑定 Context 到会话(2025-05+ 协议,替代废弃的 CreateMcpSession ContextId 直传):
+   * BindContexts(PersistenceDataList,元素 PascalCase:{ContextId, Path})→
+   * 轮询 DescribeSessionContexts 直至登记可见(≤12s,超时非致命 —— 登记最终一致)。
+   * 同一会话内一条 Path 只能绑定一个 Context(重复绑返回 PathAlreadyBound)。
+   */
+  private async bindContext(sessionId: string, contextId: string): Promise<void> {
+    const body = { Authorization: `Bearer ${this.config.apiKey}` };
+    const path = this.config.contextPath ?? DEFAULT_CONTEXT_PATH;
+    await this.rpc('BindContexts', {
+      ...body,
+      SessionId: sessionId,
+      PersistenceDataList: JSON.stringify([{ ContextId: contextId, Path: path }]),
+    });
+    for (let i = 0; i < 6; i++) {
+      const res = await this.rpc('DescribeSessionContexts', { ...body, SessionId: sessionId });
+      if (JSON.stringify(res).includes(contextId)) return;
+      await new Promise((r) => setTimeout(r, 2_000));
+    }
+    console.warn('[agentbay] Context 绑定登记轮询超时(非致命,继续;持久化可能延迟生效)');
   }
 
   /** POP RPC:POST form,Anonymous + Bearer key 在 body(docs/07 §4 W1-2 校准)。 */

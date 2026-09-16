@@ -56,10 +56,12 @@ describe('AgentBaySessionBroker(PoC 闸门:路径形状见 docs/07 §13)', () =>
   const ok = (data: unknown) => ({ Code: 'ok', Success: true, Data: data });
   const fail = (code: string, message: string) => ({ Code: code, Message: message });
 
-  it('acquire:GetContext → CreateMcpSession(带 ContextId) → InitBrowser → GetCdpLink;release 销毁', async () => {
+  it('acquire:GetContext → CreateMcpSession(废弃的 ContextId 直传已移除)→ BindContexts → GetCdpLink;release 销毁', async () => {
     const calls = stubRpc({
       GetContext: ok({ Id: 'SdkCtx-1', State: 'available', Name: 'geo-profile-5' }),
       CreateMcpSession: ok({ SessionId: 'sess-1', WsUrl: 'wss://mcp' }),
+      BindContexts: ok({}),
+      DescribeSessionContexts: ok([{ ContextId: 'SdkCtx-1', Path: '/home/wuying/workspace' }]),
       InitBrowser: ok({}),
       GetCdpLink: ok({ Url: 'wss://cdp/token' }),
       ReleaseMcpSession: ok({}),
@@ -80,29 +82,31 @@ describe('AgentBaySessionBroker(PoC 闸门:路径形状见 docs/07 §13)', () =>
     // Context 名由 profileKey 派生
     expect(byAction.GetContext.fields.Name).toBe('geo-profile-5');
     expect(byAction.GetContext.fields.AllowCreate).toBe('true');
-    // 会话绑定 Context + 镜像 + 区域
-    expect(byAction.CreateMcpSession.fields.ContextId).toBe('SdkCtx-1');
+    // 废弃传参不得再出现:CreateMcpSession 不携带 ContextId
+    expect(byAction.CreateMcpSession.fields.ContextId).toBeUndefined();
     expect(byAction.CreateMcpSession.fields.ImageId).toBe('browser_latest');
     expect(byAction.CreateMcpSession.fields.RegionId).toBe('cn-hangzhou');
+    // 持久化走 BindContexts(PersistenceDataList,PascalCase 元素)+ 绑定登记可查
+    const pdl = JSON.parse(byAction.BindContexts.fields.PersistenceDataList) as Array<Record<string, string>>;
+    expect(pdl).toEqual([{ ContextId: 'SdkCtx-1', Path: '/home/wuying/workspace' }]);
+    expect(byAction.BindContexts.fields.SessionId).toBe('sess-1');
+    expect(byAction.DescribeSessionContexts.fields.SessionId).toBe('sess-1');
 
     await h.release();
     expect(calls.at(-1)?.action).toBe('ReleaseMcpSession');
     expect(calls.at(-1)?.fields.SessionId).toBe('sess-1');
   });
 
-  it('Context 被拒(AccessDenied/租户未加白):自动降级为无 Context 会话,流程不中断', async () => {
+  it('BindContexts 被拒(AccessDenied):自动降级为无 Context 会话,流程不中断', async () => {
     const calls = stubRpc({
       GetContext: ok({ Id: 'SdkCtx-2', State: 'available' }),
-      CreateMcpSession: () => {
-        const last = calls.at(-1)!;
-        if (last.fields.ContextId) {
-          return new Response(
-            JSON.stringify({ Code: 'Context.AccessDenied', Message: 'tenantId not in whitelist' }),
-            { status: 400 },
-          );
-        }
-        return ok({ SessionId: 'sess-2' });
-      },
+      CreateMcpSession: ok({ SessionId: 'sess-2' }),
+      BindContexts: () =>
+        new Response(
+          JSON.stringify({ Code: 'Context.AccessDenied', Message: 'tenantId not in whitelist' }),
+          { status: 400 },
+        ),
+      InitBrowser: ok({}),
       GetCdpLink: ok({ Url: 'wss://cdp/no-ctx' }),
       ReleaseMcpSession: ok({}),
     });
@@ -117,11 +121,11 @@ describe('AgentBaySessionBroker(PoC 闸门:路径形状见 docs/07 §13)', () =>
     expect(h.sessionId).toBe('sess-2');
     expect(h.cdpUrl).toBe('wss://cdp/no-ctx');
     expect(h.contextId).toBeUndefined();
-    // CreateMcpSession 被调两次:带 Context 拒 → 不带 Context 成
-    const creates = calls.filter((c) => c.action === 'CreateMcpSession');
-    expect(creates).toHaveLength(2);
-    expect(creates[0]!.fields.ContextId).toBe('SdkCtx-2');
-    expect(creates[1]!.fields.ContextId).toBeUndefined();
+    // 绑定失败后流程继续:InitBrowser/GetCdpLink 照常,不再轮询绑定登记
+    const actions = calls.map((c) => c.action);
+    expect(actions).toContain('InitBrowser');
+    expect(actions).toContain('GetCdpLink');
+    expect(actions).not.toContain('DescribeSessionContexts');
   });
 
   it('GetCdpLink 失败:销毁会话并抛 BrokerError(防泄漏)', async () => {
