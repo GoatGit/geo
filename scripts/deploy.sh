@@ -11,6 +11,9 @@ set -euo pipefail
 
 REGION="cn-hangzhou"
 REGISTRY="crpi-fgbi72bokijrd5cd.cn-hangzhou.personal.cr.aliyuncs.com/gemux/geo"
+# geo-api 内网 SLB VIP(DescribeApplicationSlbs IntranetIp):Next rewrites 在 build 期固化,
+# 不传此构建参数会导致 geo-web 全部 /api 请求 500(容器内 ECONNREFUSED localhost:3000,见 docs/sae 事故复盘)
+API_ORIGIN="http://10.115.0.73:3000"
 APPS=(
   "geo-api:878a6fb6-c546-4561-8afa-72c84e649a33"
   "geo-worker:ffd157f3-36b3-4e7c-b998-af2fa9049a27"
@@ -28,7 +31,8 @@ fi
 IMAGE="$REGISTRY:$TAG"
 echo "== ① 构建 $IMAGE(linux/amd64,无 provenance:ACR 个人版不接受 attestation 清单)=="
 git diff --quiet || { echo "工作区有未提交改动,将一并进入镜像(建议先提交)"; }
-docker buildx build --platform linux/amd64 --provenance=false --sbom=false -t "$IMAGE" .
+docker buildx build --platform linux/amd64 --provenance=false --sbom=false \
+  --build-arg API_ORIGIN="$API_ORIGIN" -t "$IMAGE" .
 
 echo "== ② 推送 ACR =="
 docker push "$IMAGE"
