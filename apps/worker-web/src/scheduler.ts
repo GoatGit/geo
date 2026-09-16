@@ -3,6 +3,7 @@ import type { Db } from '@geo/db';
 import { loadPlatformSettings } from '@geo/db';
 import { Queue } from 'bullmq';
 import Redis from 'ioredis';
+import type { Pool, PoolClient } from 'pg';
 import {
   WEB_ENGINES,
   WORKER_HEARTBEAT_KEY,
@@ -15,12 +16,16 @@ import {
   subscriptions,
 } from '@geo/db';
 import { COLLECT_QUEUE, bullConnection, priorityOf, type CollectJobData } from './queue';
+import { EngineBreaker } from './breaker';
 
 /** 单 tick 的派发预算:全局与每引擎剩余额度(Infinity = 不限),随入队扣减。 */
 export interface Budget {
   globalRemaining: number;
   engineRemaining: Map<string, number>;
 }
+
+/** 多实例互斥锁键:同一时刻全集群只允许一个 tick 在派发(防双发烧配额)。 */
+const TICK_LOCK_KEY = "hashtext('geo-scheduler-tick')";
 
 const DAY_MS = 24 * 3600 * 1000;
 
@@ -87,6 +92,7 @@ export class RoundScheduler {
     connection: bullConnection(),
   });
   private readonly redis = new Redis(bullConnection().url, { lazyConnect: true, maxRetriesPerRequest: 3 });
+  private readonly breaker = new EngineBreaker(this.redis);
 
   constructor(private readonly db: Db) {}
 
@@ -107,44 +113,62 @@ export class RoundScheduler {
   async tick(): Promise<void> {
     if (this.ticking) return;
     this.ticking = true;
+    // 多实例互斥(docs/07 定时弹性可横向扩容):pg 会话级 advisory lock,
+    // 拿不到锁说明另一实例正在派发;实例崩溃连接断开,锁自动释放。
+    const pool = (this.db as unknown as { $client?: Pool }).$client;
+    let lockClient: PoolClient | null = null;
     try {
-      await this.heartbeat();
-      const settings = await loadPlatformSettings(this.db);
-      if (!settings.schedulerEnabled) return; // 总开关:停派发,心跳照写,在途任务不回收
-
-      const budget = await this.buildBudget(settings);
-      if (budget.globalRemaining <= 0) {
-        console.warn('[scheduler] 全局每日任务上限已达,今日暂停派发(管理后台可调整)');
-        return;
-      }
-
-      const due = await this.db
-        .select()
-        .from(collectionPlans)
-        .where(
-          and(
-            eq(collectionPlans.active, true),
-            sql`${collectionPlans.nextRunAt} is not null and ${collectionPlans.nextRunAt} <= now()`,
-          ),
-        )
-        // 到期早的先派发:同优先级下近似品牌轮转 fair-share(docs/04 §5)
-        .orderBy(collectionPlans.nextRunAt)
-        .limit(50);
-
-      for (const plan of due) {
-        const canContinue = await this.dispatchRound(plan.brandId, plan.engines as string[], plan.timezone, budget);
-        // 次日白天随机(品牌时区,docs/04 §3.4:每日总量按地域时区白天重、夜间轻)
-        const nextRunAt = nextRunAtFrom(new Date(), plan.timezone);
-        await this.db
-          .update(collectionPlans)
-          .set({ nextRunAt })
-          .where(eq(collectionPlans.id, plan.id));
-        if (!canContinue) {
-          console.warn('[scheduler] 全局每日预算耗尽,剩余计划明日续派');
-          break;
+      if (pool) {
+        lockClient = await pool.connect();
+        const locked = await lockClient.query<{ locked: boolean }>(
+          `select pg_try_advisory_lock(${TICK_LOCK_KEY}) as locked`,
+        );
+        if (!locked.rows[0]?.locked) {
+          return; // 其他实例正在派发,本 tick 直接让位
         }
       }
+      try {
+        await this.heartbeat();
+        const settings = await loadPlatformSettings(this.db);
+        if (!settings.schedulerEnabled) return; // 总开关:停派发,心跳照写,在途任务不回收
+
+        const budget = await this.buildBudget(settings);
+        if (budget.globalRemaining <= 0) {
+          console.warn('[scheduler] 全局每日任务上限已达,今日暂停派发(管理后台可调整)');
+          return;
+        }
+
+        const due = await this.db
+          .select()
+          .from(collectionPlans)
+          .where(
+            and(
+              eq(collectionPlans.active, true),
+              sql`${collectionPlans.nextRunAt} is not null and ${collectionPlans.nextRunAt} <= now()`,
+            ),
+          )
+          // 到期早的先派发:同优先级下近似品牌轮转 fair-share(docs/04 §5)
+          .orderBy(collectionPlans.nextRunAt)
+          .limit(50);
+
+        for (const plan of due) {
+          const canContinue = await this.dispatchRound(plan.brandId, plan.engines as string[], budget);
+          // 次日白天随机(品牌时区,docs/04 §3.4:每日总量按地域时区白天重、夜间轻)
+          const nextRunAt = nextRunAtFrom(new Date(), plan.timezone);
+          await this.db
+            .update(collectionPlans)
+            .set({ nextRunAt })
+            .where(eq(collectionPlans.id, plan.id));
+          if (!canContinue) {
+            console.warn('[scheduler] 全局每日预算耗尽,剩余计划明日续派');
+            break;
+          }
+        }
+      } finally {
+        if (lockClient) await lockClient.query(`select pg_advisory_unlock(${TICK_LOCK_KEY})`);
+      }
     } finally {
+      if (lockClient) lockClient.release();
       this.ticking = false;
     }
   }
@@ -192,13 +216,7 @@ export class RoundScheduler {
   }
 
   /** 返回 false = 全局预算耗尽,调用方应停止处理后续计划。 */
-  private async dispatchRound(
-    brandId: number,
-    engines: string[],
-    _timezone: string,
-    budget: Budget,
-  ): Promise<boolean> {
-    void _timezone;
+  private async dispatchRound(brandId: number, engines: string[], budget: Budget): Promise<boolean> {
     const questions = await this.db
       .select()
       .from(monitoringQuestions)
@@ -208,19 +226,31 @@ export class RoundScheduler {
     const sub = (
       await this.db.select().from(subscriptions).where(eq(subscriptions.brandId, brandId)).limit(1)
     )[0];
-    const accountId = sub?.accountId;
-    if (!accountId) return true;
+    // 过期/停用订阅不派发(按原计划付费口径,docs/01 §3.10)
+    if (!sub || sub.accountId == null || (sub.status && sub.status !== 'active')) return true;
+    const accountId = sub.accountId;
     const priority = priorityOf(sub?.plan ?? 'free');
 
-    const engineList = engines.filter(
-      (e) => (WEB_ENGINES as readonly string[]).includes(e) && (budget.engineRemaining.get(e) ?? 0) > 0,
-    );
+    // 引擎三重过滤:白名单 + 引擎日预算 + 熔断/手动暂停(熔断中不入队,避免任务堆积延迟重排)
+    const engineList: string[] = [];
+    for (const e of engines) {
+      if (!(WEB_ENGINES as readonly string[]).includes(e)) continue;
+      if ((budget.engineRemaining.get(e) ?? 0) <= 0) continue;
+      if (await this.breaker.isTripped(e)) continue;
+      engineList.push(e);
+    }
     if (engineList.length === 0) return true;
 
     const maxJobs = Math.min(budget.globalRemaining, questions.length * engineList.length);
     const round = (
       await this.db.insert(collectionRounds).values({ brandId }).returning()
     )[0]!;
+
+    // totals 先行写入(only-total):避免与 processor 的 done 增量发生"先增后覆盖"竞态
+    await this.db
+      .update(collectionRounds)
+      .set({ totals: { total: maxJobs, enqueued: 0, done: 0, ok: 0, failed: 0 } })
+      .where(eq(collectionRounds.id, round.id));
 
     let enqueued = 0;
     for (const q of questions) {
@@ -240,7 +270,13 @@ export class RoundScheduler {
             surface: 'web',
             priority,
           },
-          { jobId: `round${round.id}-q${q.id}-${engine}`, priority },
+          {
+            jobId: `round${round.id}-q${q.id}-${engine}`,
+            priority,
+            // 采集载荷大(含问题文本),completed/failed 只留最近 500 条防 Redis 无界增长
+            removeOnComplete: { count: 500 },
+            removeOnFail: { count: 500 },
+          },
         );
         enqueued += 1;
         budget.engineRemaining.set(engine, (budget.engineRemaining.get(engine) ?? 0) - 1);
@@ -249,11 +285,14 @@ export class RoundScheduler {
     }
     budget.globalRemaining -= enqueued;
 
-    // totals 按实际入队数:预算截断的轮次进度仍可走完,缺口次日由新轮次补齐
-    await this.db
-      .update(collectionRounds)
-      .set({ totals: { total: enqueued, enqueued, done: 0, ok: 0, failed: 0 } })
-      .where(eq(collectionRounds.id, round.id));
+    // 只补 enqueued 键,不覆盖 processor 已增量写入的 done/ok/failed
+    if (enqueued !== maxJobs) {
+      await this.db.execute(sql`
+        update collection_rounds
+        set totals = jsonb_set(totals, '{enqueued}', ${enqueued}::text::jsonb)
+        where id = ${round.id}
+      `);
+    }
 
     return budget.globalRemaining > 0;
   }

@@ -29,6 +29,8 @@ import { discoverCompetitors, runInstantExtraction, toSubjects, type SubjectDef,
 
 /** 失败重试上限(docs/04 §5:重试最多 2 次,必须更换账号):1 次首发 + 2 次轮换重试。 */
 const MAX_ATTEMPTS = envInt('COLLECT_ATTEMPTS', 3, 1, 5);
+/** 延迟重排上限:熔断(60s/次)或账号池耗尽(120s/次)累计等待约 15-30 分钟后收口为 quota_blocked。 */
+const MAX_DEFERRED = envInt('COLLECT_MAX_DEFERRED', 15, 1, 100);
 /** 单次 ask 超时:挂死的会话不能永久占用 worker 并发槽(视为 failed,进熔断/健康分)。 */
 const ASK_TIMEOUT_MS = envInt('ASK_TIMEOUT_MS', 120_000, 10_000, 600_000);
 const RETRY_BACKOFF_MS = envInt('COLLECT_RETRY_BACKOFF_MS', 3_000, 0, 60_000);
@@ -89,10 +91,22 @@ export class CollectProcessor {
     const data = job.data;
     const engine = data.engine;
     const startedAt = Date.now();
+    const deferredCount = data.deferredCount ?? 0;
+
+    // 延迟重排上限:熔断/账号池长时间不恢复时,任务不能无限自我复制(docs/02 §1.1:
+    // 配额拦截必须可见)——落 quota_blocked 四态收口,轮次进度同步走完
+    if (deferredCount >= MAX_DEFERRED) {
+      console.error(
+        `[collect] engine=${engine} brand=${data.brandId} 延迟重排 ${deferredCount} 次仍未执行,落 quota_blocked 收口`,
+      );
+      await this.recordQuotaBlocked(data);
+      await this.bumpRound(data.roundId, 'quota_blocked').catch(() => undefined);
+      return { status: 'deferred' };
+    }
 
     // 熔断(docs/04 §5):该引擎通道维护中 → 延迟重排,不产生 failed 污染口径
     if (await this.breaker.isTripped(engine)) {
-      await this.requeue.add('collect', data, { delay: 60_000, priority: data.priority });
+      await this.requeue.add('collect', { ...data, deferredCount: deferredCount + 1 }, { delay: 60_000, priority: data.priority });
       return { status: 'deferred' };
     }
 
@@ -102,7 +116,7 @@ export class CollectProcessor {
     let profile = await this.pool.acquire(engine);
     if (!profile) {
       // 账号池耗尽(docs/04 §3.2):延迟重排,扩容与冗余由运营策略解决
-      await this.requeue.add('collect', data, { delay: 120_000, priority: data.priority });
+      await this.requeue.add('collect', { ...data, deferredCount: deferredCount + 1 }, { delay: 120_000, priority: data.priority });
       return { status: 'deferred' };
     }
 
@@ -185,24 +199,33 @@ export class CollectProcessor {
         .where(eq(queryRuns.id, runId));
 
       // ===== 即时抽取(ok_* 才进口径)=====
+      // 抽取失败不回改 run 状态:事实缺失只是样本损失,状态与事实互相矛盾更伤口径
       if (ask.status !== 'failed') {
-        await this.extractAndEnqueue(data, runId, engine, ranAt, ask, adapter.strategy);
+        await this.extractAndEnqueue(data, runId, engine, ranAt, ask, adapter.strategy).catch((err) =>
+          console.error(`[collect] extract failed run=${runId} engine=${engine}:`, err),
+        );
       }
 
-      await this.publishProgress(data, ask.status, runId);
-      await this.bumpRound(data.roundId, ask.status);
+      // 状态已定格:进度推送/轮次计数失败只记日志,成功 run 不因旁路故障降级为 failed
+      await this.publishProgress(data, ask.status, runId).catch((err) =>
+        console.error(`[collect] progress publish failed run=${runId}:`, err),
+      );
+      await this.bumpRound(data.roundId, ask.status).catch((err) =>
+        console.error(`[collect] bump round failed run=${runId}:`, err),
+      );
     } catch (err) {
       console.error(
         `[collect] persist failed run=${runId ?? 'n/a'} engine=${engine} brand=${data.brandId}:`,
         err,
       );
+      // 落库失败(含 insert 本身失败)也要给轮次收口计数,否则轮次进度漂移、永远走不完
+      await this.bumpRound(data.roundId, 'failed').catch(() => undefined);
       if (runId !== undefined) {
         await this.db
           .update(queryRuns)
           .set({ status: 'failed', meta: { priority: data.priority, strategy: adapter.strategy, error: String(err) } })
           .where(eq(queryRuns.id, runId))
           .catch(() => undefined);
-        await this.bumpRound(data.roundId, 'failed').catch(() => undefined);
       }
       return { status: 'failed' };
     }
@@ -356,17 +379,19 @@ export class CollectProcessor {
     }
   }
 
-  private async bumpRound(roundId: number, status: AskStatus | 'deferred'): Promise<void> {
+  private async bumpRound(roundId: number, status: AskStatus | 'deferred' | 'quota_blocked'): Promise<void> {
     // 单次赋值嵌套 jsonb_set:UPDATE 中所有引用都看旧行,链式嵌套安全;分开两次赋值会报
     // "multiple assignments to same column totals"(仅失败轮次触发,曾掩盖真实失败原因)
-    const okInc = status === 'failed' || status === 'deferred' ? 0 : 1;
+    const okInc = status === 'failed' || status === 'deferred' || status === 'quota_blocked' ? 0 : 1;
     const failInc = status === 'failed' ? 1 : 0;
+    const blockedInc = status === 'quota_blocked' ? 1 : 0;
     await this.db.execute(sql`
       update collection_rounds
-      set totals = jsonb_set(jsonb_set(jsonb_set(coalesce(totals, '{}'::jsonb),
+      set totals = jsonb_set(jsonb_set(jsonb_set(jsonb_set(coalesce(totals, '{}'::jsonb),
             '{done}', (coalesce((totals->>'done')::int, 0) + 1)::text::jsonb),
             '{ok}', (coalesce((totals->>'ok')::int, 0) + ${okInc})::text::jsonb),
-            '{failed}', (coalesce((totals->>'failed')::int, 0) + ${failInc})::text::jsonb)
+            '{failed}', (coalesce((totals->>'failed')::int, 0) + ${failInc})::text::jsonb),
+            '{quota_blocked}', (coalesce((totals->>'quota_blocked')::int, 0) + ${blockedInc})::text::jsonb)
       where id = ${roundId}
     `);
     const round = (await this.db.select().from(collectionRounds).where(eq(collectionRounds.id, roundId)).limit(1))[0];
@@ -377,5 +402,22 @@ export class CollectProcessor {
         .set({ finishedAt: new Date() })
         .where(eq(collectionRounds.id, roundId));
     }
+  }
+
+  /** 延迟重排超限收口:落 quota_blocked run(docs/02 §1.1 四态之配额拦截,必须可见)。 */
+  private async recordQuotaBlocked(data: CollectJobData): Promise<void> {
+    await this.db
+      .insert(queryRuns)
+      .values({
+        brandId: data.brandId,
+        questionId: data.questionId,
+        engine: data.engine,
+        surface: 'web',
+        roundId: data.roundId,
+        status: 'quota_blocked',
+        ranAt: new Date(),
+        meta: { deferredCount: data.deferredCount ?? 0 },
+      })
+      .catch((err) => console.error('[collect] record quota_blocked failed:', err));
   }
 }

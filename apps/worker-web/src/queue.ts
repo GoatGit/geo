@@ -19,6 +19,8 @@ export interface CollectJobData {
   surface: 'web';
   /** 队列优先级:docs/04 §5 快速体检 > 专业 > 标准 > 入门 > 免费 */
   priority: number;
+  /** 延迟重排次数(熔断/账号池耗尽);超过 MAX_DEFERRED 落 quota_blocked 收口,防无限自我复制 */
+  deferredCount?: number;
 }
 
 export interface ReputationJobData {
