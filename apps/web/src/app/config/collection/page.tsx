@@ -1,6 +1,7 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 import { api, useBrandId } from '@/lib/queries';
 import { EmptyState, PageHeader, Skeleton } from '@/components/ui';
 
@@ -14,12 +15,32 @@ interface StatusDto {
 /** 采集状态页(docs/01 IA ④,"透明可信"的可见性锚点):引擎覆盖/健康度/熔断/轮次。 */
 export default function CollectionPage() {
   const brandId = useBrandId();
+  const queryClient = useQueryClient();
+  const [retrying, setRetrying] = useState<number | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
   const { data, isLoading } = useQuery({
     queryKey: ['collection', brandId],
     queryFn: () => api<StatusDto>(`/collection/status?brand=${brandId}`),
     enabled: !!brandId,
     refetchInterval: 10_000,
   });
+
+  const retryFailed = async (roundId: number) => {
+    setMsg(null);
+    setRetrying(roundId);
+    try {
+      const r = await api<{ retried: number; roundId?: number; note?: string }>('/collection/retry-failed', {
+        method: 'POST',
+        json: { brand: brandId, roundId },
+      });
+      setMsg(r.retried > 0 ? `已提交重试:${r.retried} 项,新轮次 #${r.roundId}` : r.note ?? '没有失败项');
+      void queryClient.invalidateQueries({ queryKey: ['collection', brandId] });
+    } catch (err) {
+      setMsg((err as Error).message);
+    } finally {
+      setRetrying(null);
+    }
+  };
 
   if (isLoading) return <Skeleton />;
   if (!data) return <EmptyState text="暂无采集计划" />;
@@ -68,20 +89,33 @@ export default function CollectionPage() {
               const t = r.totals ?? {};
               const done = t.done ?? 0;
               const total = t.total ?? 0;
+              const failed = t.failed ?? 0;
               return (
-                <li key={r.id} className="flex items-center justify-between">
+                <li key={r.id} className="flex items-center justify-between gap-2">
                   <span>轮次 #{r.id}</span>
                   <span className="metric-num text-xs text-slate-500">
-                    {done}/{total} {r.finishedAt ? '· 已完成' : '· 进行中'}
+                    {done}/{total}
+                    {failed > 0 && <span className="text-bad"> · 失败 {failed}</span>}
+                    {r.finishedAt ? ' · 已完成' : ' · 进行中'}
                   </span>
                   <div className="h-1.5 w-32 rounded bg-slate-100">
                     <div className="h-1.5 rounded bg-brand" style={{ width: total ? `${(done / total) * 100}%` : 0 }} />
                   </div>
+                  {r.finishedAt && failed > 0 && (
+                    <button
+                      onClick={() => retryFailed(r.id)}
+                      disabled={retrying !== null}
+                      className="btn-soft h-7 shrink-0 px-2.5 text-[11px] disabled:opacity-40"
+                    >
+                      {retrying === r.id ? '提交中…' : '重试失败项'}
+                    </button>
+                  )}
                 </li>
               );
             })}
             {data.rounds.length === 0 && <li className="text-slate-400">还没有轮次</li>}
           </ul>
+          {msg && <p className="mt-3 rounded-lg bg-brand-50 px-3 py-2 text-xs text-brand-700">{msg}</p>}
         </div>
       </section>
 
