@@ -52,7 +52,9 @@ export class AuthController {
   async refresh(@Body() dto: RefreshDto) {
     const env = loadEnv();
     const principal = verifyRefreshToken(env, dto.refreshToken);
-    return this.tokens(principal);
+    // 角色从库重读:防止被摘除 admin 的账号凭旧声明续权(30 天 refresh 窗口)
+    const role = await this.authService.roleOf(principal.accountId);
+    return this.tokens({ ...principal, role });
   }
 
   @Get('me')

@@ -23,81 +23,99 @@ export class BrandsService {
   /**
    * 品牌初始化(docs/01 §3.1):解析 → 档案草稿 → 识别口径预填(A1 对策:
    * 自有产品线别名默认确认)→ 订阅 → 全引擎采集计划(引导用户补问题)。
+   * 全程单事务:任一步失败整体回滚,不留"无订阅/无采集计划"的品牌残骸。
+   * 档位强制跟随账号会员(不信任租户传入 plan —— 防 plan 提权,docs/01 §3.10)。
    */
-  async create(input: { accountId: number; description: string; plan?: PlanTier }) {
+  async create(input: { accountId: number; description: string }) {
     const draft = parseBrandDescription(input.description);
-    // 默认档位跟随账号会员(docs/01 §3.10 会员为账号级);显式传参仅平台侧使用
     const membership = await this.billing.accountMembership(input.accountId);
-    const plan: PlanTier = input.plan ?? membership.plan;
+    const plan: PlanTier = membership.plan;
 
-    const brand = (
-      await this.db
-        .insert(brands)
-        .values({
-          accountId: input.accountId,
-          name: draft.name,
-          industry: draft.industry,
-          website: draft.website,
-          intro: draft.intro,
-        })
-        .returning()
-    )[0]!;
-
-    // 识别口径:本品 + AI 建议别名(默认勾选),竞品进入草稿(待确认)
-    const selfEntry = (
-      await this.db
-        .insert(recognitionEntries)
-        .values({
-          brandId: brand.id,
-          kind: 'self',
-          name: draft.name,
-          aliases: draft.suggestedAliases,
-          note: 'AI 建议别名(含自有产品线,默认勾选)',
-          source: 'ai',
-          confirmed: true,
-        })
-        .returning()
-    )[0]!;
-    for (const c of draft.suggestedCompetitors) {
-      await this.db.insert(recognitionEntries).values({
-        brandId: brand.id,
-        kind: 'competitor',
-        name: c.name,
-        aliases: [],
-        note: c.note,
-        source: 'ai',
-        confirmed: false,
-      });
+    // 套餐门控:multiBrand 上限(docs/01 §3.10;custom/无限档跳过)
+    const maxBrands = PLAN_LIMITS[plan].multiBrand;
+    if (Number.isFinite(maxBrands)) {
+      const owned = await this.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(brands)
+        .where(eq(brands.accountId, input.accountId));
+      if ((owned[0]?.n ?? 0) >= maxBrands) {
+        throw new HttpException(
+          `当前套餐最多创建 ${maxBrands} 个品牌,升级套餐可解锁更多`,
+          HttpStatus.FORBIDDEN,
+        );
+      }
     }
-    await this.snapshotRecognition(brand.id);
 
-    const limits = PLAN_LIMITS[plan];
-    await this.db.insert(subscriptions).values({
-      accountId: input.accountId,
-      brandId: brand.id,
-      plan,
-      questionQuota: { ranking: limits.rankingQuota, reputation: limits.reputationQuota },
-      engineQuota: { web: limits.webEngines, app: limits.appEngines },
-      freq: 1,
+    return this.db.transaction(async (tx) => {
+      const brand = (
+        await tx
+          .insert(brands)
+          .values({
+            accountId: input.accountId,
+            name: draft.name,
+            industry: draft.industry,
+            website: draft.website,
+            intro: draft.intro,
+          })
+          .returning()
+      )[0]!;
+
+      // 识别口径:本品 + AI 建议别名(默认勾选),竞品进入草稿(待确认)
+      const selfEntry = (
+        await tx
+          .insert(recognitionEntries)
+          .values({
+            brandId: brand.id,
+            kind: 'self',
+            name: draft.name,
+            aliases: draft.suggestedAliases,
+            note: 'AI 建议别名(含自有产品线,默认勾选)',
+            source: 'ai',
+            confirmed: true,
+          })
+          .returning()
+      )[0]!;
+      for (const c of draft.suggestedCompetitors) {
+        await tx.insert(recognitionEntries).values({
+          brandId: brand.id,
+          kind: 'competitor',
+          name: c.name,
+          aliases: [],
+          note: c.note,
+          source: 'ai',
+          confirmed: false,
+        });
+      }
+      await this.snapshotRecognitionTx(tx, brand.id);
+
+      const limits = PLAN_LIMITS[plan];
+      await tx.insert(subscriptions).values({
+        accountId: input.accountId,
+        brandId: brand.id,
+        plan,
+        questionQuota: { ranking: limits.rankingQuota, reputation: limits.reputationQuota },
+        engineQuota: { web: limits.webEngines, app: limits.appEngines },
+        freq: 1,
+      });
+
+      // 采集计划:网页端全引擎(免费版按档位引擎数,与 M0 交付对齐)
+      const engines = WEB_ENGINES.slice(0, limits.webEngines);
+      await tx.insert(collectionPlans).values({
+        brandId: brand.id,
+        engines: engines as unknown as string[],
+        surfaces: ['web'],
+        freq: 1,
+        nextRunAt: null, // 首轮由"问题配置完成"触发,避免空跑(教训 #3)
+      });
+
+      return {
+        brand,
+        profileDraft: draft,
+        recognition: { self: selfEntry, competitorsDraft: draft.suggestedCompetitors },
+        plan,
+        engines,
+      };
     });
-
-    // 采集计划:网页端全引擎(免费版取前 3 个,与 M0 交付对齐)
-    const engines = WEB_ENGINES.slice(0, plan === 'free' ? limits.webEngines : WEB_ENGINES.length);
-    await this.db.insert(collectionPlans).values({
-      brandId: brand.id,
-      engines: engines as unknown as string[],
-      surfaces: ['web'],
-      freq: 1,
-      nextRunAt: null, // 首轮由"问题配置完成"触发,避免空跑(教训 #3)
-    });
-
-    return {
-      brand,
-      profileDraft: draft,
-      recognition: { self: selfEntry, competitorsDraft: draft.suggestedCompetitors },
-      plan,
-      engines,
-    };
   }
 
   async list(accountId: number) {
@@ -123,6 +141,25 @@ export class BrandsService {
       .from(recognitionEntries)
       .where(eq(recognitionEntries.brandId, brandId));
     await this.db.insert(recognitionVersions).values({
+      brandId,
+      profile: {
+        self: entries.find((e) => e.kind === 'self') ?? null,
+        competitors: entries.filter((e) => e.kind === 'competitor'),
+        takenAt: new Date().toISOString(),
+      },
+    });
+  }
+
+  /** 事务内快照(创建品牌路径使用,与口径写入同事务提交)。 */
+  private async snapshotRecognitionTx(
+    tx: Parameters<Parameters<NodePgDatabase['transaction']>[0]>[0],
+    brandId: number,
+  ) {
+    const entries = await tx
+      .select()
+      .from(recognitionEntries)
+      .where(eq(recognitionEntries.brandId, brandId));
+    await tx.insert(recognitionVersions).values({
       brandId,
       profile: {
         self: entries.find((e) => e.kind === 'self') ?? null,

@@ -5,26 +5,38 @@ import {
   HttpException,
   HttpStatus,
   Inject,
+  OnModuleDestroy,
   Param,
   ParseIntPipe,
   Post,
   Req,
 } from '@nestjs/common';
-import { desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Request } from 'express';
+import { IsIn, IsInt } from 'class-validator';
 import { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
-import { REPORT_TYPES, type ReportType } from '@geo/shared';
+import { REPORT_TYPES, PLAN_LIMITS, PLAN_LABELS, type ReportType } from '@geo/shared';
 import { brands, reports } from '@geo/db';
 import { createStorageFromEnv, type EvidenceStorage } from '@geo/evidence';
 import { currentAccount } from '../common/auth';
 import { DB, REDIS } from '../common/infra.module';
 import { BrandsService } from '../brands/brands.service';
+import { BillingService } from '../billing/billing.service';
 import { ReportRenderService } from './render.service';
+import { loadEnv } from '../config/env';
+
+class GenerateReportDto {
+  @IsInt()
+  brandId!: number;
+
+  @IsIn(REPORT_TYPES as unknown as string[])
+  type!: ReportType;
+}
 
 @Controller('reports')
-export class ReportsController {
+export class ReportsController implements OnModuleDestroy {
   private readonly queue: Queue;
   private readonly storage: EvidenceStorage = createStorageFromEnv();
 
@@ -32,9 +44,14 @@ export class ReportsController {
     @Inject(DB) private readonly db: NodePgDatabase,
     @Inject(REDIS) redis: Redis,
     private readonly brandsService: BrandsService,
+    private readonly billing: BillingService,
     private readonly renderer: ReportRenderService,
   ) {
     this.queue = new Queue('reports', { connection: this.connOptions(redis) });
+  }
+
+  async onModuleDestroy() {
+    await this.queue.close().catch(() => undefined);
   }
 
   /** 仅返回本人品牌下的报告(跨租户隔离;admin 走平台后台总览)。 */
@@ -60,22 +77,43 @@ export class ReportsController {
     return this.renderer.templates();
   }
 
-  /** 手动触发生成(docs/05 §6);周/月报另由 worker cron 自动生成。 */
+  /** 手动触发生成(docs/05 §6);周/月报另由 worker cron 自动生成。套餐门控 + 当日频控。 */
   @Post('generate')
-  async generate(@Req() req: Request, @Body() body: { brandId?: number; type?: string }) {
-    const type = body?.type ?? '';
-    if (!REPORT_TYPES.includes(type as ReportType)) {
-      throw new HttpException(`unknown report type: ${type}`, HttpStatus.BAD_REQUEST);
+  async generate(@Req() req: Request, @Body() dto: GenerateReportDto) {
+    const account = currentAccount(req);
+    const type = dto.type;
+    await this.brandsService.getOwned(account.accountId, dto.brandId);
+
+    // 套餐门控(docs/01 §3.10):free 档无周报/月报;诊断报告所有档位可用
+    const membership = await this.billing.accountMembership(account.accountId);
+    const limits = PLAN_LIMITS[membership.plan] ?? PLAN_LIMITS.free;
+    const gated = type === 'weekly' ? limits.weeklyReport : type === 'monthly' ? limits.monthlyReport : true;
+    if (!gated) {
+      throw new HttpException(`${PLAN_LABELS[membership.plan]}不包含${type === 'weekly' ? '周报' : '月报'},升级套餐解锁`, HttpStatus.FORBIDDEN);
     }
-    const brandId = Number(body?.brandId);
-    if (!brandId) throw new HttpException('brandId is required', HttpStatus.BAD_REQUEST);
-    await this.brandsService.getOwned(currentAccount(req).accountId, brandId);
+
+    // 同品牌同类型当天已有排队/生成中的任务则拒绝重复下单(防双击与滥用)
+    const inflight = await this.db
+      .select({ id: reports.id })
+      .from(reports)
+      .where(
+        and(
+          eq(reports.brandId, dto.brandId),
+          eq(reports.type, type),
+          inArray(reports.status, ['queued', 'generating']),
+          gte(reports.createdAt, new Date(Date.now() - 24 * 3600 * 1000)),
+        ),
+      )
+      .limit(1);
+    if (inflight.length > 0) {
+      throw new HttpException('该报告正在生成中,请稍候', HttpStatus.CONFLICT);
+    }
 
     const period = new Date().toISOString().slice(0, 10);
     const row = (
-      await this.db.insert(reports).values({ brandId, type: type as ReportType, period }).returning()
+      await this.db.insert(reports).values({ brandId: dto.brandId, type, period }).returning()
     )[0]!;
-    await this.queue.add('generate', { reportId: row.id, brandId, type, period }, { attempts: 3 });
+    await this.queue.add('generate', { reportId: row.id, brandId: dto.brandId, type, period }, { attempts: 3 });
     return row;
   }
 
@@ -137,7 +175,8 @@ export class ReportsController {
   }
 
   private connOptions(redis: Redis) {
+    // Redis 只用于取连接配置;URL 以集中 env 配置为单一事实源
     void redis;
-    return { url: process.env.REDIS_URL ?? 'redis://localhost:6379', maxRetriesPerRequest: null };
+    return { url: loadEnv().redisUrl, maxRetriesPerRequest: null };
   }
 }

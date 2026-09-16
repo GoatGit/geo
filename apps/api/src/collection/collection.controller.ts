@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Query, Req } from '@nestjs/common';
+import { Controller, Get, HttpException, HttpStatus, Inject, Query, Req } from '@nestjs/common';
 import { desc, eq } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Request } from 'express';
@@ -24,6 +24,9 @@ export class CollectionController {
   @Get('status')
   async status(@Req() req: Request, @Query('brand') brand: string) {
     const brandId = Number(brand);
+    if (!Number.isInteger(brandId) || brandId <= 0) {
+      throw new HttpException('brand 参数非法', HttpStatus.BAD_REQUEST);
+    }
     await this.brandsService.getOwned(currentAccount(req).accountId, brandId);
 
     const plan = (

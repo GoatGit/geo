@@ -1,4 +1,4 @@
-import { HttpException, Inject, Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { createHmac } from 'node:crypto';
 import { createHash, randomInt, randomUUID } from 'node:crypto';
@@ -120,8 +120,12 @@ export class AuthService {
         .where(eq(smsCodes.phone, phone));
       return false;
     }
-    await this.db.delete(smsCodes).where(eq(smsCodes.phone, phone));
-    return true;
+    // 核销即消费:DELETE 影响行数即凭证,防并发同码复用(select→delete 窗口内第二个请求仍通过)
+    const consumed = await this.db
+      .delete(smsCodes)
+      .where(eq(smsCodes.phone, phone))
+      .returning({ phone: smsCodes.phone });
+    return consumed.length > 0;
   }
 
   async upsertAccountByPhone(phone: string): Promise<{ id: number; phone: string; role: string }> {
@@ -129,6 +133,10 @@ export class AuthService {
     const role = env.adminPhones.includes(phone) ? 'admin' : 'user';
     const existing = (await this.db.select().from(accounts).where(eq(accounts.phone, phone)).limit(1))[0];
     if (existing) {
+      // 封禁/停用账号拒绝登录(schema 有 status 字段,无消费方则封禁是假能力)
+      if (existing.status && existing.status !== 'active') {
+        throw new HttpException('账号已被停用,请联系客服', HttpStatus.FORBIDDEN);
+      }
       // 名单新增时给已有账号补授角色;移出名单不自动降级(降级需显式操作,避免误伤在用管理员)
       if (existing.role !== role && role === 'admin') {
         await this.db.update(accounts).set({ role }).where(eq(accounts.id, existing.id));
@@ -139,6 +147,15 @@ export class AuthService {
       await this.db.insert(accounts).values({ phone, role }).returning({ id: accounts.id, phone: accounts.phone, role: accounts.role })
     )[0]!;
     return inserted;
+  }
+
+  /** 刷新令牌时从库重读角色:被移出管理名单的账号不再靠旧 JWT 声明续权。 */
+  async roleOf(accountId: number): Promise<string> {
+    const row = (
+      await this.db.select({ role: accounts.role, status: accounts.status }).from(accounts).where(eq(accounts.id, accountId)).limit(1)
+    )[0];
+    if (!row || (row.status && row.status !== 'active')) throw new HttpException('账号不可用', HttpStatus.FORBIDDEN);
+    return row.role;
   }
 }
 

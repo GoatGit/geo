@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Req } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { currentAccount } from '../common/auth';
 import { BrandsService } from '../brands/brands.service';
@@ -12,6 +12,8 @@ export class MonitorController {
   ) {}
 
   private async owned(req: Request, id: number) {
+    // 统一入口校验:NaN/非正整数直接 400,避免脏参落库报 bigint 500
+    if (!Number.isInteger(id) || id <= 0) throw new BadRequestException('brand 参数非法');
     await this.brandsService.getOwned(currentAccount(req).accountId, id);
   }
 

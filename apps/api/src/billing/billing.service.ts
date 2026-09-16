@@ -194,13 +194,16 @@ export class BillingService {
       orderId: row.id,
       outTradeNo,
       plan: input.plan,
+      planLabel: PLAN_LABELS[input.plan] ?? input.plan,
       period: input.period,
       channel: provider.channel,
       amountCents,
+      status: row.status,
       mock: provider.channel === 'mock',
       qrDataUrl,
       payUrl: channelOrder.codeUrl,
       expireAt,
+      createdAt: row.createdAt,
     };
   }
 
@@ -217,12 +220,15 @@ export class BillingService {
       orderId: row.id,
       outTradeNo: row.outTradeNo,
       plan: row.plan as PlanTier,
+      planLabel: PLAN_LABELS[row.plan as PlanTier] ?? row.plan,
       period: row.period as BillingPeriod,
       channel: row.channel,
+      mock: row.channel === 'mock',
       amountCents: row.amountCents,
       status: row.status,
       qrDataUrl: (row.meta as Record<string, string>).qrDataUrl ?? null,
       paidAt: row.paidAt,
+      expireAt: row.expireAt,
       createdAt: row.createdAt,
     };
   }
@@ -305,35 +311,42 @@ export class BillingService {
   /**
    * 发货(幂等):created → paid 原子流转(已支付行由触发器保护,不可二次变更);
    * 金额与订单不一致时拒绝发货并保留 created 供人工对账(docs/02 §7.2 流水对账口径)。
+   * 认领与订阅刷新同事务:中途失败整体回滚,渠道重试可重新认领取发货——
+   * 否则"已 paid 但订阅未刷新"将成为永久态(付费不生效且无法自愈)。
    */
   private async settle(order: typeof orders.$inferSelect, channelTradeId: string | null, amountCents: number | null) {
     if (amountCents !== null && amountCents !== order.amountCents) {
       console.error(`[billing] amount mismatch: order ${order.outTradeNo} expect ${order.amountCents} got ${amountCents}`);
       throw new HttpException('回调金额与订单不一致', HttpStatus.CONFLICT);
     }
-    const claimed = await this.db
-      .update(orders)
-      .set({ status: 'paid', channelTradeId, paidAt: new Date() })
-      .where(and(eq(orders.id, order.id), eq(orders.status, 'created')))
-      .returning({ id: orders.id });
-    if (claimed.length === 0) return;
 
     const plan = order.plan as PlanTier;
     const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS.free;
     const now = new Date();
-    // 会员为账号级:名下全部活跃品牌订阅统一刷新(配额执行点在 subscriptions 行)
-    const subs = await this.db.select().from(subscriptions).where(eq(subscriptions.accountId, order.accountId));
-    for (const s of subs) {
-      if (s.status !== 'active') continue;
-      await this.db
-        .update(subscriptions)
-        .set({
-          plan,
-          questionQuota: { ranking: limits.rankingQuota, reputation: limits.reputationQuota },
-          engineQuota: { web: limits.webEngines, app: limits.appEngines },
-          periodEnd: nextPeriodEnd(s.periodEnd, order.period as BillingPeriod, now),
-        })
-        .where(eq(subscriptions.id, s.id));
-    }
+    const period = order.period as BillingPeriod;
+
+    await this.db.transaction(async (tx) => {
+      const claimed = await tx
+        .update(orders)
+        .set({ status: 'paid', channelTradeId, paidAt: new Date() })
+        .where(and(eq(orders.id, order.id), eq(orders.status, 'created')))
+        .returning({ id: orders.id });
+      if (claimed.length === 0) return; // 已被并发/上次回调认领
+
+      // 会员为账号级:名下全部活跃品牌订阅统一刷新(配额执行点在 subscriptions 行)
+      const subs = await tx.select().from(subscriptions).where(eq(subscriptions.accountId, order.accountId));
+      for (const s of subs) {
+        if (s.status !== 'active') continue;
+        await tx
+          .update(subscriptions)
+          .set({
+            plan,
+            questionQuota: { ranking: limits.rankingQuota, reputation: limits.reputationQuota },
+            engineQuota: { web: limits.webEngines, app: limits.appEngines },
+            periodEnd: nextPeriodEnd(s.periodEnd, period, now),
+          })
+          .where(eq(subscriptions.id, s.id));
+      }
+    });
   }
 }

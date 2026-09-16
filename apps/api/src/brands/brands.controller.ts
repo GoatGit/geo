@@ -10,10 +10,6 @@ class CreateBrandDto {
   description!: string;
 
   @IsOptional()
-  @IsString()
-  plan?: string;
-
-  @IsOptional()
   @IsInt()
   @Min(1)
   dummy?: number;
@@ -26,10 +22,10 @@ export class BrandsController {
   @Post()
   async create(@Req() req: Request, @Body() dto: CreateBrandDto) {
     const account = currentAccount(req);
+    // 档位一律跟随账号会员:不接受租户传入 plan(防提权,service 强制覆盖)
     return this.brandsService.create({
       accountId: account.accountId,
       description: dto.description,
-      plan: dto.plan as never,
     });
   }
 

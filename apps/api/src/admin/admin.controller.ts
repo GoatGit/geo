@@ -406,7 +406,7 @@ export class AdminController implements OnModuleDestroy {
   }
 
   private assertEngine(engine: string) {
-    if (!(WEB_ENGINES as readonly string[]).includes(engine)) throw new NotFoundException(`未知引擎: ${engine}`);
+    if (!(WEB_ENGINES as readonly string[]).includes(engine)) throw new BadRequestException(`未知引擎: ${engine}`);
     if (!this.redis.status || this.redis.status === 'end') {
       throw new ServiceUnavailableException('Redis 不可用,无法操作熔断位');
     }

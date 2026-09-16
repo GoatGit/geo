@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Param, ParseIntPipe, Post, Req } from '@nestjs/common';
+import { Controller, Get, Inject, Req } from '@nestjs/common';
 import { desc, eq } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Request } from 'express';
@@ -25,9 +25,4 @@ export class AccountController {
   }
 
   /** 充值下单占位(P2 支付对接;此处仅生成订单语义)。 */
-  @Post('credits:purchase')
-  purchase(@Param('amount', ParseIntPipe) _amount: number) {
-    void _amount;
-    return { status: 'not_available', note: '支付对接 P2 上线;所有积分入口显式标价(docs/research 03 A10 对策)' };
-  }
 }
