@@ -165,6 +165,10 @@ export class CollectProcessor {
             adapterVersion: adapter.schemaVersion,
             accountFingerprint: fingerprintHash(profile.profileKey),
             ranAt,
+            // 失败原因落 meta:失败必须可诊断(展示层透出,docs/02 §1.1 可见性)
+            ...(ask.status === 'failed'
+              ? { meta: { error: String(ask.engineMeta?.error ?? 'unknown') } }
+              : {}),
           })
           .returning({ id: queryRuns.id })
       )[0]!;
@@ -194,7 +198,11 @@ export class CollectProcessor {
           snapshotRef: pack.refs.snapshotRef,
           recordingRef: pack.refs.recordingRef,
           evidenceHash: pack.manifestHash,
-          meta: { priority: data.priority, strategy: adapter.strategy },
+          // 合并而非覆盖:失败原因(insert 时写入)必须保留
+          meta: sql`coalesce(query_runs.meta, '{}'::jsonb) || ${JSON.stringify({
+            priority: data.priority,
+            strategy: adapter.strategy,
+          })}::jsonb`,
         })
         .where(eq(queryRuns.id, runId));
 

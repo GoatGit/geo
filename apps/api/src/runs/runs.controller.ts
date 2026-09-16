@@ -97,9 +97,15 @@ export class RunsController {
       citations?: Array<{ url: string; title?: string }>;
       question?: string;
       timings?: Record<string, string>;
-    };
+    } = {};
+    let engineMeta: Record<string, unknown> = {};
     try {
       answer = JSON.parse((await this.storage.get(run.answerRef)).toString('utf8'));
+      // meta.json 记录 engineMeta(如 needs_login 的 hint),失败原因可诊断
+      engineMeta =
+        JSON.parse(
+          (await this.storage.get(`evidence/${runId}/meta.json`)).toString('utf8'),
+        ).engineMeta ?? {};
     } catch {
       throw new HttpException('证据包读取失败(可能已过保留期)', HttpStatus.GONE);
     }
@@ -114,6 +120,7 @@ export class RunsController {
       citations: answer.citations ?? [],
       manifestHash: run.evidenceHash,
       answerRef: run.answerRef,
+      engineMeta,
     };
   }
 }

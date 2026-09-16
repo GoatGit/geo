@@ -46,6 +46,8 @@ export class CollectionController {
         status: queryRuns.status,
         engine: queryRuns.engine,
         ranAt: queryRuns.ranAt,
+        roundId: queryRuns.roundId,
+        error: sql`coalesce(query_runs.meta ->> 'error', null)`,
       })
       .from(queryRuns)
       .where(eq(queryRuns.brandId, brandId))
@@ -75,7 +77,13 @@ export class CollectionController {
         : null,
       engines: byEngine,
       rounds,
-      lastRuns: recent.slice(0, 50),
+      lastRuns: recent.slice(0, 50).map((r) => ({
+        status: r.status,
+        engine: r.engine,
+        ranAt: r.ranAt,
+        roundId: r.roundId,
+        error: (r as { error?: string }).error ?? null,
+      })),
     };
   }
 
