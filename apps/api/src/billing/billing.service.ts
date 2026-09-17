@@ -3,13 +3,14 @@ import { randomUUID } from 'node:crypto';
 import { and, desc, eq } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import QRCode from 'qrcode';
-import { creditLedger, orders, subscriptions } from '@geo/db';
+import { creditLedger, collectionPlans, orders, subscriptions } from '@geo/db';
 import {
   BILLING_PERIODS,
   PLAN_LABELS,
   PLAN_LIMITS,
   PLAN_PRICING,
   PURCHASABLE_PLANS,
+  WEB_ENGINES,
   type BillingPeriod,
   type PayChannel,
   type PlanTier,
@@ -346,6 +347,12 @@ export class BillingService {
             periodEnd: nextPeriodEnd(s.periodEnd, period, now),
           })
           .where(eq(subscriptions.id, s.id));
+        // 采集计划引擎同步刷新:否则建号时的旧档位引擎列表(如 3 引擎)在升级后仍然生效,
+        // 轮次任务数 = 题数 × 旧引擎数,套餐扩容不生效(实测 12 ≠ 20 事故)
+        await tx
+          .update(collectionPlans)
+          .set({ engines: WEB_ENGINES.slice(0, limits.webEngines) })
+          .where(eq(collectionPlans.brandId, s.brandId));
       }
     });
   }

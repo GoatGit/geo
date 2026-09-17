@@ -231,9 +231,29 @@ export class RoundScheduler {
     const accountId = sub.accountId;
     const priority = priorityOf(sub?.plan ?? 'free');
 
+    // 生效引擎 = 订阅档位的引擎面(WEB_ENGINES 前 N 个,单一事实源=订阅行 engineQuota.web)。
+    // collectionPlans.engines 是建号/结算时物化的缓存,档位升级后可能滞后(实测升级到
+    // 5 引擎仍派 3 引擎)→ 此处按订阅校正并回写缓存,下一轮起任务数 = 题数 × 新引擎数。
+    let cached = engines.filter((e) => (WEB_ENGINES as readonly string[]).includes(e));
+    const quotaWeb = (sub.engineQuota as { web?: number } | null)?.web;
+    if (typeof quotaWeb === 'number' && quotaWeb > 0) {
+      const effective = WEB_ENGINES.slice(0, quotaWeb);
+      const same = effective.length === cached.length && effective.every((e) => cached.includes(e));
+      if (!same) {
+        console.warn(
+          `[scheduler] brand=${brandId} 引擎面与订阅档位不一致(${cached.join('/')} → ${effective.join('/')}),已校正`,
+        );
+        cached = effective;
+        await this.db
+          .update(collectionPlans)
+          .set({ engines: effective as unknown as string[] })
+          .where(eq(collectionPlans.brandId, brandId));
+      }
+    }
+
     // 引擎三重过滤:白名单 + 引擎日预算 + 熔断/手动暂停(熔断中不入队,避免任务堆积延迟重排)
     const engineList: string[] = [];
-    for (const e of engines) {
+    for (const e of cached) {
       if (!(WEB_ENGINES as readonly string[]).includes(e)) continue;
       if ((budget.engineRemaining.get(e) ?? 0) <= 0) continue;
       if (await this.breaker.isTripped(e)) continue;
