@@ -136,7 +136,8 @@ export class CollectProcessor {
       if (ask.status !== 'failed') break;
       console.error(
         `[collect] run attempt ${attempt}/${MAX_ATTEMPTS} failed engine=${engine} brand=${data.brandId} ` +
-          `profile=${profile.id} cost=${Date.now() - startedAt}ms error=${String(ask.engineMeta?.error ?? 'unknown')}`,
+          `profile=${profile.id} cost=${Date.now() - startedAt}ms error=${String(ask.engineMeta?.error ?? 'unknown')}` +
+          `${ask.engineMeta?.hint ? ` hint=${ask.engineMeta.hint}` : ''}`,
       );
       if (attempt === MAX_ATTEMPTS) break;
       await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS));
@@ -265,7 +266,12 @@ export class CollectProcessor {
           const context = cdpBrowser.contexts()[0] ?? (await cdpBrowser.newContext());
           // 注入持久化 Cookie(docs/04 §3.1):登录导出的引擎会话态先于导航生效
           if (profile.cookies?.length) {
-            await context.addCookies(profile.cookies as never[]).catch(() => undefined);
+            try {
+              await context.addCookies(profile.cookies as never[]);
+              console.log(`[collect] engine=${engine} profile=${profile.id} 注入持久化 Cookie ${profile.cookies.length} 条`);
+            } catch (err) {
+              console.error(`[collect] engine=${engine} profile=${profile.id} Cookie 注入失败:`, (err as Error).message);
+            }
           }
           page = context.pages()[0] ?? (await context.newPage());
         }
