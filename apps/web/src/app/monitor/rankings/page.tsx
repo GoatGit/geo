@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { MetricCardView } from '@/components/metric-card';
 import { EmptyState, PageHeader, Skeleton } from '@/components/ui';
 import { useRankings } from '@/lib/queries';
+import { EvidenceModal } from '@/components/evidence-modal';
 
 const LAYER_LABEL: Record<string, string> = {
   L1: 'L1 全线领先',
@@ -15,6 +16,7 @@ const LAYER_LABEL: Record<string, string> = {
 /** 排名透视(docs/01 §3.3):指标卡组 → 矩阵 → 漏斗 → 引擎分化。 */
 export default function RankingsPage() {
   const [days, setDays] = useState(1);
+  const [evidenceRun, setEvidenceRun] = useState<number | null>(null);
   const { data, isLoading, error } = useRankings(days);
 
   if (isLoading) return <Skeleton />;
@@ -87,22 +89,33 @@ export default function RankingsPage() {
                     <td key={e.engine} className="px-3 py-2.5">
                       {!cell ? (
                         <span className="text-slate-300">—</span>
-                      ) : cell.rank !== null ? (
-                        <span
-                          className={`metric-num rounded px-1.5 py-0.5 text-xs ${
-                            cell.rank === 1
-                              ? 'bg-good-50 text-good'
-                              : cell.rank <= 3
-                                ? 'bg-brand-50 text-brand'
-                                : 'bg-slate-100 text-slate-600'
+                      ) : (
+                        <button
+                          disabled={!cell.runId}
+                          onClick={() => cell.runId && setEvidenceRun(cell.runId)}
+                          title={cell.runId ? '点击查看该引擎的 AI 回答原文与存证' : '该单元格暂无可回溯的采集记录'}
+                          className={`rounded transition-transform ${
+                            cell.runId ? 'hover:-translate-y-px hover:shadow-sm' : 'cursor-default'
                           }`}
                         >
-                          #{cell.rank}
-                        </span>
-                      ) : cell.mentioned ? (
-                        <span className="text-xs text-slate-400">提及未上榜</span>
-                      ) : (
-                        <span className="rounded bg-bad-50 px-1.5 py-0.5 text-xs text-bad">未上榜</span>
+                          {cell.rank !== null ? (
+                            <span
+                              className={`metric-num block rounded px-1.5 py-0.5 text-xs ${
+                                cell.rank === 1
+                                  ? 'bg-good-50 text-good'
+                                  : cell.rank <= 3
+                                    ? 'bg-brand-50 text-brand'
+                                    : 'bg-slate-100 text-slate-600'
+                              }`}
+                            >
+                              #{cell.rank}
+                            </span>
+                          ) : cell.mentioned ? (
+                            <span className="block px-1 py-0.5 text-xs text-slate-400">提及未上榜</span>
+                          ) : (
+                            <span className="block rounded bg-bad-50 px-1.5 py-0.5 text-xs text-bad">未上榜</span>
+                          )}
+                        </button>
                       )}
                     </td>
                   );
@@ -177,6 +190,7 @@ export default function RankingsPage() {
           </table>
         </div>
       </section>
+      <EvidenceModal runId={evidenceRun} onClose={() => setEvidenceRun(null)} />
     </div>
   );
 }

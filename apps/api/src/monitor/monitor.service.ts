@@ -140,6 +140,7 @@ export class MonitorService {
         engine: mentionFacts.engine,
         mentioned: mentionFacts.mentioned,
         rank: mentionFacts.rank,
+        runId: mentionFacts.runId,
       })
       .from(mentionFacts)
       .where(
@@ -160,14 +161,17 @@ export class MonitorService {
     const rows: MatrixRow[] = questions.map((q) => {
       const fs = byQuestion.get(q.id) ?? [];
       // 每引擎取窗口内最好位次(同名问题多轮次取更优,趋势用日结层)
-      const perEngine = new Map<string, { mentioned: boolean; rank: number | null }>();
+      const perEngine = new Map<string, { mentioned: boolean; rank: number | null; runId: number | null }>();
       for (const f of fs) {
         const prev = perEngine.get(f.engine);
         const better =
           !prev ||
           (f.mentioned && !prev.mentioned) ||
-          (f.mentioned && f.rank !== null && (prev.rank === null || f.rank < prev.rank));
-        if (better) perEngine.set(f.engine, { mentioned: f.mentioned, rank: f.rank });
+          (f.mentioned && f.rank !== null && (prev.rank === null || f.rank < prev.rank)) ||
+          // 位次相同取更新一次(回溯入口指向最新证据)
+          (f.mentioned === prev.mentioned &&
+            ((f.rank ?? null) === (prev.rank ?? null) && f.runId > (prev.runId ?? 0)));
+        if (better) perEngine.set(f.engine, { mentioned: f.mentioned, rank: f.rank, runId: f.runId });
       }
       const cells = [...perEngine.entries()].map(([e, v]) => ({
         engine: e as EngineId,
@@ -175,6 +179,8 @@ export class MonitorService {
         status: 'ok_with_answer' as const,
         mentioned: v.mentioned,
         rank: v.rank,
+        /** 最佳位次那次采集的 runId(点击单元格回溯 AI 原文快照) */
+        runId: v.runId ?? null,
       }));
       const collected = cells.length;
       const normalized = cells.map((c) => (c.mentioned && c.rank !== null ? c.rank : collected + 1));

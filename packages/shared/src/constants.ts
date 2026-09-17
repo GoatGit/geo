@@ -232,6 +232,8 @@ export interface MatrixCell {
   mentioned: boolean;
   /** 有序列表位次;散文提及为 null */
   rank: number | null;
+  /** 最佳位次那次采集的 runId(前端点击单元格回溯 AI 原文快照) */
+  runId?: number | null;
 }
 
 export interface MatrixRow {

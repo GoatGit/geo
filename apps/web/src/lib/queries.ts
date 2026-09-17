@@ -28,7 +28,7 @@ export interface RankingsDto {
     questionText: string;
     compositeRank: number | null;
     layer: string | null;
-    cells: Array<{ engine: string; mentioned: boolean; rank: number | null }>;
+    cells: Array<{ engine: string; mentioned: boolean; rank: number | null; runId?: number | null }>;
   }>;
   engineStats: Array<{ engine: string; mentionRate: number; top3Rate: number; top1Rate: number }>;
   trend: Array<{ date: string; mentionRate: number | null; top3Rate: number | null; top1Rate: number | null }>;
