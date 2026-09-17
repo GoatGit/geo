@@ -28,6 +28,8 @@ interface LeaderRow {
 export default function CompetitorsPage() {
   const brandId = useBrandId();
   const queryClient = useQueryClient();
+  const [mergeFrom, setMergeFrom] = useState<string | null>(null);
+  const [mergeBusy, setMergeBusy] = useState(false);
   const days = 7;
   const leader = useQuery({
     queryKey: ['competitors', brandId],
@@ -52,9 +54,6 @@ export default function CompetitorsPage() {
     return `rgba(111,124,109,${alpha.toFixed(2)})`;
   };
   const heatText = (v: number | null): string => (v != null && v > 0.55 ? '#f4f6f3' : 'inherit');
-
-  const [mergeFrom, setMergeFrom] = useState<string | null>(null);
-  const [mergeBusy, setMergeBusy] = useState(false);
 
   const doMerge = async (fromKey: string) => {
     if (!mergeFrom || mergeFrom === fromKey) return;
