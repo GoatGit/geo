@@ -19,7 +19,7 @@ import {
 } from '@geo/shared';
 import { checkLogin, hasVisibleInput, siteConfigOf } from '@geo/engine-adapters';
 import { browserModeFromEnv, viewerLoginFromEnv, type SessionBroker } from '@geo/browser-session';
-import { createProxyPoolFromEnv, type QgProxyPool } from './qg-proxy';
+import { ProxyPoolManager } from './qg-proxy';
 import { envInt } from './config';
 
 /** 人工登录等待窗口:操作者扫码/验证码在此时间内完成,超时置 timeout 可重试。
@@ -40,7 +40,7 @@ const LOGIN_CONCURRENCY = envInt('LOGIN_CONCURRENCY', 3, 1, 10);
  * 成功则把档案置 available 并落 contextRef(登录态持久化),失败/超时写状态供后台展示。
  */
 export class LoginManager {
-  private readonly proxyPool: QgProxyPool;
+  private readonly proxyPool: ProxyPoolManager;
   private stopped = false;
 
   constructor(
@@ -48,7 +48,7 @@ export class LoginManager {
     private readonly redis: Redis,
     private readonly broker: SessionBroker,
   ) {
-    this.proxyPool = createProxyPoolFromEnv();}
+    this.proxyPool = new ProxyPoolManager(db, process.env.QG_PROXY_KEY ?? '');}
 
   start(): void {
     void this.loop();

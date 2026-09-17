@@ -16,4 +16,8 @@ export class UpdateSettingsDto {
   @IsOptional()
   @IsObject()
   engineDailyCaps?: Record<string, number>;
+
+  @IsOptional()
+  @IsObject()
+  proxyPool?: { enabled: boolean; key: string };
 }

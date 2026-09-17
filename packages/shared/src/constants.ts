@@ -143,15 +143,18 @@ export interface PlatformSettings {
   globalDailyRunCap: number;
   /** 每引擎每日任务上限;0 或缺省 = 不限 */
   engineDailyCaps: Record<string, number>;
+  /** 代理池(青果网络长效代理,docs/07 §13 闸门 #2):登录/采集共用稳定出口 IP */
+  proxyPool: { enabled: boolean; key: string };
 }
 
 export const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
   schedulerEnabled: true,
   globalDailyRunCap: 0,
   engineDailyCaps: {},
+  proxyPool: { enabled: false, key: '' },
 };
 
-export const PLATFORM_SETTING_KEYS = ['schedulerEnabled', 'globalDailyRunCap', 'engineDailyCaps'] as const;
+export const PLATFORM_SETTING_KEYS = ['schedulerEnabled', 'globalDailyRunCap', 'engineDailyCaps', 'proxyPool'] as const;
 export type PlatformSettingKey = (typeof PLATFORM_SETTING_KEYS)[number];
 
 /** 深合并存储值与默认值,并做类型与边界净化(脏数据不致命,回退默认)。 */
@@ -178,6 +181,14 @@ export function mergePlatformSettings(stored: Partial<Record<string, unknown>> |
     schedulerEnabled: byKey.get('schedulerEnabled') === undefined ? true : Boolean(byKey.get('schedulerEnabled')),
     globalDailyRunCap: num(byKey.get('globalDailyRunCap'), 0),
     engineDailyCaps,
+    proxyPool: (() => {
+      const raw = byKey.get('proxyPool');
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        const r = raw as { enabled?: unknown; key?: unknown };
+        return { enabled: Boolean(r.enabled), key: typeof r.key === 'string' ? r.key : '' };
+      }
+      return { enabled: false, key: '' };
+    })(),
   };
 }
 

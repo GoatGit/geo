@@ -236,8 +236,39 @@ export class AdminController implements OnModuleDestroy {
     if (dto.schedulerEnabled !== undefined) patch.schedulerEnabled = dto.schedulerEnabled;
     if (dto.globalDailyRunCap !== undefined) patch.globalDailyRunCap = dto.globalDailyRunCap;
     if (dto.engineDailyCaps !== undefined) patch.engineDailyCaps = dto.engineDailyCaps;
+    if (dto.proxyPool !== undefined) {
+      const key = typeof dto.proxyPool.key === 'string' ? dto.proxyPool.key.trim() : '';
+      if (dto.proxyPool.enabled && !key) {
+        throw new HttpException('启用代理池必须提供青果 Key', HttpStatus.BAD_REQUEST);
+      }
+      patch.proxyPool = { enabled: Boolean(dto.proxyPool.enabled), key };
+    }
     const settings = await savePlatformSettings(this.db, patch, currentAccount(req).accountId);
     return { settings };
+  }
+
+  /** 代理池实时状态:配置 + 通道/在用租约/白名单(直连青果接口;Key 未配置时仅返回配置)。 */
+  @Get('proxy-pool/status')
+  async proxyPoolStatus() {
+    const settings = await loadPlatformSettings(this.db);
+    const key = settings.proxyPool.key;
+    if (!settings.proxyPool.enabled || !key) {
+      return { settings: settings.proxyPool, live: null, note: '代理池未启用(仅展示配置)' };
+    }
+    const get = async (url: string) =>
+      (await fetch(url, { signal: AbortSignal.timeout(10_000) })).text().catch(() => '');
+    const [chRaw, inuseRaw, wlRaw] = await Promise.all([
+      get(`https://longterm.proxy.qg.net/channels?key=${key}&format=json`),
+      get(`https://longterm.proxy.qg.net/query?key=${key}&format=json`),
+      get(`https://proxy.qg.net/whitelist/query?Key=${key}&format=json`),
+    ]);
+    const safeParse = (t: string): Record<string, unknown> => {
+      try { return JSON.parse(t) as Record<string, unknown>; } catch { return { raw: t.slice(0, 120) }; }
+    };
+    return {
+      settings: settings.proxyPool,
+      live: { channels: safeParse(chRaw), inUse: safeParse(inuseRaw), whitelist: safeParse(wlRaw) },
+    };
   }
 
   @Get('rounds')

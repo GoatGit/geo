@@ -37,10 +37,20 @@ export class QgProxyPool {
   private whitelistedEgress: string | null = null;
   private lastChannelWarn = 0;
 
-  constructor(private readonly key: string) {}
+  constructor(private key: string) {}
 
   get enabled(): boolean {
     return Boolean(this.key);
+  }
+
+  /** 管理后台改 Key 后热切换:清空租约,后续 acquire 用新 Key 提取。 */
+  rekey(key: string): void {
+    const next = key ?? '';
+    if (next === this.key) return;
+    this.key = next;
+    this.lease = null;
+    this.whitelistedEgress = null;
+    console.log(`[proxy-pool] Key 已更新(管理后台),租约重置`);
   }
 
   /** 当前租约(内存缓存;进程重启后重新提取同一静态 IP 或新 IP 均可接受)。 */
@@ -163,4 +173,54 @@ export class QgProxyPool {
 /** 从环境构建(QG_PROXY_KEY 为空则禁用,直连模式不变)。 */
 export function createProxyPoolFromEnv(env: NodeJS.ProcessEnv = process.env): QgProxyPool {
   return new QgProxyPool(env.QG_PROXY_KEY ?? '');
+}
+
+/**
+ * 管理后台可配置的代理池(平台旋钮 docs/03 §3.2):
+ * 配置存 platform_settings.proxyPool(60s 热加载),env QG_PROXY_KEY 为兜底默认。
+ * processor / login-manager 统一经本管理器取代理。
+ */
+export class ProxyPoolManager {
+  private pool: QgProxyPool;
+  private timer?: NodeJS.Timeout;
+  private readonly db: { select: unknown };
+
+  constructor(db: unknown, fallbackKey: string) {
+    this.db = db as { select: unknown };
+    this.pool = new QgProxyPool(fallbackKey);
+  }
+
+  start(intervalMs = 60_000): void {
+    void this.reload();
+    this.timer = setInterval(() => void this.reload(), intervalMs);
+  }
+
+  stop(): void {
+    if (this.timer) clearInterval(this.timer);
+  }
+
+  private async reload(): Promise<void> {
+    try {
+      const { loadPlatformSettings } = await import('@geo/db');
+      const settings = await loadPlatformSettings(this.db as never);
+      const key = settings.proxyPool.enabled && settings.proxyPool.key
+        ? settings.proxyPool.key
+        : '';
+      this.pool.rekey(key);
+    } catch {
+      // 配置读取失败:保持现状(env 兜底)
+    }
+  }
+
+  async acquire(): Promise<QgProxyLease | null> {
+    return this.pool.acquire();
+  }
+
+  current(): QgProxyLease | null {
+    return this.pool.current();
+  }
+
+  async bootstrap(): Promise<void> {
+    await this.pool.bootstrap();
+  }
 }

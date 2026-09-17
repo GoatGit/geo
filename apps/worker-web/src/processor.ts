@@ -16,7 +16,7 @@ import { Queue, Worker, type Job } from 'bullmq';
 import type { Browser, Page } from 'playwright-core';
 import { chromium } from 'playwright-core';
 import { EngineBreaker } from './breaker';
-import { createProxyPoolFromEnv, type QgProxyPool } from './qg-proxy';
+import { ProxyPoolManager } from './qg-proxy';
 import { envInt } from './config';
 import { AccountPoolService, type AcquiredProfile } from './profiles';
 import {
@@ -64,7 +64,7 @@ export class CollectProcessor {
     this.pool = new AccountPoolService(db);
     // 适配器按 BROWSER_MODE 装配:mock=回放(dev/CI);agentbay/local=真实 DOM 采集(docs/04 §2.1)
     this.realBrowser = browserModeFromEnv() !== 'mock';
-    this.proxyPool = createProxyPoolFromEnv();
+    this.proxyPool = new ProxyPoolManager(db, process.env.QG_PROXY_KEY ?? '');
     for (const engine of WEB_ENGINES) {
       this.registry.register(
         this.realBrowser ? new DomWebAdapter(engine) : MockEngineAdapter.withDefaultFixtures(engine),
@@ -73,7 +73,7 @@ export class CollectProcessor {
   }
 
   private readonly realBrowser: boolean;
-  private readonly proxyPool: QgProxyPool;
+  private readonly proxyPool: ProxyPoolManager;
 
   start(concurrency: number): Worker<CollectJobData> {
     const worker = new Worker<CollectJobData>(COLLECT_QUEUE, (job) => this.process(job), {
