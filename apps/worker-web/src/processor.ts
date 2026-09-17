@@ -125,11 +125,23 @@ export class CollectProcessor {
       ask = await this.askWithTimeout(engine, profile, data.questionText);
       await this.breaker.record(engine, ask.status !== 'failed');
       if (needsLoginOf(ask)) {
-        // 登录态失效是账号供给问题而非滥用:不扣健康分,置 login_required 等人工重登(docs/04 §3.1)
-        await this.pool.markLoginRequired(profile.id);
-        console.error(
-          `[collect] engine=${engine} profile=${profile.id} 登录态失效,已置 login_required(后台"账号池"可重新人工登录)`,
-        );
+        if (profile.cookies?.length) {
+          // 有持久化 Cookie 仍被判未登录:多为 AgentBay 出口 IP 变化被引擎拒绝。
+          // 不置 login_required(否则人工登录立即被一次失败作废,陷入反复重登),
+          // 短冷却后自动重试;根治需接入住宅代理固定出口(docs/07 §13 闸门 #2)
+          await this.pool.markTransientLoginMiss(profile.id);
+          console.error(
+            `[collect] engine=${engine} profile=${profile.id} 有 ${profile.cookies.length} 条 Cookie 仍 needs_login` +
+              `(hint=${String(ask.engineMeta?.hint ?? '?')},cookies=${String(ask.engineMeta?.cookies ?? '?')})` +
+              `——疑似出口 IP 变化,冷却 10 分钟自动重试(不需人工重登)`,
+          );
+        } else {
+          // 真正未登录过的档案才要求人工重登
+          await this.pool.markLoginRequired(profile.id);
+          console.error(
+            `[collect] engine=${engine} profile=${profile.id} 登录态失效(无持久化 Cookie),已置 login_required`,
+          );
+        }
       } else {
         await this.pool.report(engine, profile.id, ask.status !== 'failed');
       }

@@ -76,6 +76,14 @@ export class AccountPoolService {
     };
   }
 
+  /** 有持久化 Cookie 但被引擎判未登录(多为出口 IP 变化):短冷却自动重试,不要求人工重登。 */
+  async markTransientLoginMiss(profileId: number, minutes = 10): Promise<void> {
+    await this.db
+      .update(accountProfiles)
+      .set({ status: 'cooldown', cooldownUntil: new Date(Date.now() + minutes * 60 * 1000) })
+      .where(eq(accountProfiles.id, profileId));
+  }
+
   /** 登录态失效(docs/04 §3.1 生命周期):不扣健康分,摘出可用池等人工重登。 */
   async markLoginRequired(profileId: number): Promise<void> {
     await this.db

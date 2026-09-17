@@ -141,17 +141,27 @@ export class DomWebAdapter implements EngineAdapter {
           rawHtml: null,
           citations: [],
           timing: this.timing(queuedAt),
-          engineMeta: { error: 'needs_login', needsLogin: true, hint: login.hint, profileKey: ctx.profileKey },
+          engineMeta: {
+            error: 'needs_login',
+            needsLogin: true,
+            hint: login.hint,
+            profileKey: ctx.profileKey,
+            // 决定性遥测:此刻会话里的 Cookie 名单(注入是否生效一目了然)
+            cookies: (await page.context().cookies(new URL(this.site.chatUrl).origin))
+              .map((c) => c.name)
+              .join(','),
+          },
         };
       }
       const asGuest = login.loggedIn === false;
 
       const asked = await this.submitQuestion(page, question);
       if (!asked) {
-        return this.fail('未找到可用的提问输入框(页面改版?需校准 inputSelectors)', queuedAt);
+        const bodyHead = (await page.locator('body').innerText({ timeout: 1_000 }).catch(() => '')).slice(0, 80);
+        return this.fail(`未找到可用的提问输入框(url=${page.url()} body="${bodyHead}")`, queuedAt);
       }
 
-      const { main, text, timedOut } = await this.waitForAnswer(page, timeoutMs);
+      const { main, text, timedOut } = await this.waitForAnswer(page, timeoutMs, question);
       const cleaned = text ? this.stripNoiseLines(text) : text;
       if (!cleaned) {
         return this.fail(timedOut ? '完成判定超时且无答案文本' : '回答容器为空(页面改版?需校准 answerSelectors)', queuedAt);
@@ -245,6 +255,7 @@ export class DomWebAdapter implements EngineAdapter {
   private async waitForAnswer(
     page: Page,
     timeoutMs: number,
+    question: string,
   ): Promise<{ main: Locator | null; text: string | null; timedOut: boolean }> {
     const deadline = Date.now() + timeoutMs;
     let lastText = '';
@@ -255,7 +266,9 @@ export class DomWebAdapter implements EngineAdapter {
       const trimmed = text.trim();
       const generating = await this.isGenerating(page);
       const now = Date.now();
-      if (trimmed && !generating) {
+      // 输入回显不计为候选回答:游客态请求被静默拦截时,聊天流里最长文本是问题回显,
+      // 继续等待真实回答流出;直到超时仍只有回显 → 由 ask() 的回声检查按失败收口
+      if (trimmed && !generating && !isEchoOfQuestion(trimmed, question)) {
         if (trimmed === lastText) {
           if (stableSince && now - stableSince >= this.site.completionStableMs) {
             return { main, text: trimmed, timedOut: false };

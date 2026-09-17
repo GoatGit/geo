@@ -56,6 +56,20 @@ export class AdminController implements OnModuleDestroy {
     @Inject(REDIS) private readonly redis: Redis,
   ) {}
 
+  /** 档案重新可用:清除 login_required/cooldown(人工重登完成或误标记后的运营处置)。 */
+  @Post('profiles/:id/recover')
+  async recoverProfile(@Param('id', ParseIntPipe) id: number) {
+    const row = (
+      await this.db
+        .update(accountProfiles)
+        .set({ status: 'available', cooldownUntil: null })
+        .where(eq(accountProfiles.id, id))
+        .returning({ id: accountProfiles.id, engine: accountProfiles.engine, status: accountProfiles.status })
+    )[0];
+    if (!row) throw new HttpException('档案不存在', HttpStatus.NOT_FOUND);
+    return row;
+  }
+
   /** 删除品牌及其全部从属数据(平台运营处置;确认操作,不可逆)。 */
   @Delete('brands/:id')
   async deleteBrand(@Param('id', ParseIntPipe) id: number) {
