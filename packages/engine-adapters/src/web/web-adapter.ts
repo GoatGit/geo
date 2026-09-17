@@ -122,10 +122,11 @@ export class DomWebAdapter implements EngineAdapter {
         timeout: this.site.navigationTimeoutMs,
       });
       await page.waitForTimeout(1_500);
-      // SPA 挂载等待:输入框就绪(最多 15s)再提问,否则输入会打在未初始化的编辑器上(豆包实测)
+      // SPA 挂载等待:输入框就绪再提问,否则输入会打在未初始化的编辑器上(豆包实测)。
+      // 代理出口增加往返延迟,水合更慢——等待窗口放大到 30s
       for (const sel of this.site.inputSelectors) {
         const ready = await page
-          .waitForSelector(sel, { state: 'visible', timeout: 15_000 })
+          .waitForSelector(sel, { state: 'visible', timeout: 30_000 })
           .then(() => true)
           .catch(() => false);
         if (ready) break;

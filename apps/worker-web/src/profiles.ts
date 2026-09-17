@@ -76,6 +76,14 @@ export class AccountPoolService {
     };
   }
 
+  /** Cookie 判死:清空持久化 Cookie 并转人工重登(连续 miss 后由 processor 调用)。 */
+  async expireCookies(profileId: number): Promise<void> {
+    await this.db
+      .update(accountProfiles)
+      .set({ status: 'login_required', cookies: null })
+      .where(eq(accountProfiles.id, profileId));
+  }
+
   /** 有持久化 Cookie 但被引擎判未登录(多为出口 IP 变化):短冷却自动重试,不要求人工重登。 */
   async markTransientLoginMiss(profileId: number, minutes = 10): Promise<void> {
     await this.db

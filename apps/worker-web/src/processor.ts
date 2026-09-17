@@ -74,6 +74,8 @@ export class CollectProcessor {
 
   private readonly realBrowser: boolean;
   private readonly proxyPool: ProxyPoolManager;
+  /** Cookie 连续被拒计数(≥2 判死清空,见 needs_login 处理) */
+  private readonly cookieMisses = new Map<number, number>();
 
   start(concurrency: number): Worker<CollectJobData> {
     const worker = new Worker<CollectJobData>(COLLECT_QUEUE, (job) => this.process(job), {
@@ -129,16 +131,27 @@ export class CollectProcessor {
       await this.breaker.record(engine, ask.status !== 'failed');
       if (needsLoginOf(ask)) {
         if (profile.cookies?.length) {
-          // 有持久化 Cookie 仍被判未登录:多为 AgentBay 出口 IP 变化被引擎拒绝。
-          // 不置 login_required(否则人工登录立即被一次失败作废,陷入反复重登),
-          // 短冷却后自动重试;根治需接入住宅代理固定出口(docs/07 §13 闸门 #2)
+          // 有持久化 Cookie 仍被判未登录:代理出口一致时多为 Cookie 已被引擎判死。
+          // 首次短冷却重试;连续 2 次仍失败 → Cookie 确认失效,清空转人工重登
+          // (避免旧 Cookie 无限冷却循环占用采集窗口)
+          const misses = (this.cookieMisses.get(profile.id) ?? 0) + 1;
+          this.cookieMisses.set(profile.id, misses);
+          if (misses >= 2) {
+            this.cookieMisses.delete(profile.id);
+            await this.pool.expireCookies(profile.id);
+            console.error(
+              `[collect] engine=${engine} profile=${profile.id} Cookie 连续 ${misses} 次被拒,已清空并转人工重登`,
+            );
+          } else {
           await this.pool.markTransientLoginMiss(profile.id);
           console.error(
             `[collect] engine=${engine} profile=${profile.id} 有 ${profile.cookies.length} 条 Cookie 仍 needs_login` +
               `(hint=${String(ask.engineMeta?.hint ?? '?')},cookies=${String(ask.engineMeta?.cookies ?? '?')})` +
-              `——疑似出口 IP 变化,冷却 10 分钟自动重试(不需人工重登)`,
+              `——冷却 10 分钟自动重试(${misses}/2)`,
           );
+          }
         } else {
+          this.cookieMisses.delete(profile.id);
           // 真正未登录过的档案才要求人工重登
           await this.pool.markLoginRequired(profile.id);
           console.error(
