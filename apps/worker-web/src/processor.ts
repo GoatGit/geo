@@ -16,6 +16,7 @@ import { Queue, Worker, type Job } from 'bullmq';
 import type { Browser, Page } from 'playwright-core';
 import { chromium } from 'playwright-core';
 import { EngineBreaker } from './breaker';
+import { createProxyPoolFromEnv, type QgProxyPool } from './qg-proxy';
 import { envInt } from './config';
 import { AccountPoolService, type AcquiredProfile } from './profiles';
 import {
@@ -63,6 +64,7 @@ export class CollectProcessor {
     this.pool = new AccountPoolService(db);
     // 适配器按 BROWSER_MODE 装配:mock=回放(dev/CI);agentbay/local=真实 DOM 采集(docs/04 §2.1)
     this.realBrowser = browserModeFromEnv() !== 'mock';
+    this.proxyPool = createProxyPoolFromEnv();
     for (const engine of WEB_ENGINES) {
       this.registry.register(
         this.realBrowser ? new DomWebAdapter(engine) : MockEngineAdapter.withDefaultFixtures(engine),
@@ -71,6 +73,7 @@ export class CollectProcessor {
   }
 
   private readonly realBrowser: boolean;
+  private readonly proxyPool: QgProxyPool;
 
   start(concurrency: number): Worker<CollectJobData> {
     const worker = new Worker<CollectJobData>(COLLECT_QUEUE, (job) => this.process(job), {
@@ -275,12 +278,21 @@ export class CollectProcessor {
         let page = session.page as Page | undefined;
         if (!page && /^wss?:\/\//.test(session.cdpUrl)) {
           cdpBrowser = await chromium.connectOverCDP(session.cdpUrl);
-          const context = cdpBrowser.contexts()[0] ?? (await cdpBrowser.newContext());
+          // 代理出口(docs/07 §13 闸门 #2):AgentBay BrowserOption.proxy 被静默忽略,
+          // 改用 Playwright context 级代理——全部引擎共用一个稳定长效 IP,
+          // 登录 Cookie 与出口 IP 绑定一致,根治跨 IP 会话被引擎拒绝
+          let context: import('playwright-core').BrowserContext;
+          const lease = await this.proxyPool.acquire();
+          if (lease) {
+            context = await cdpBrowser.newContext({ proxy: { server: `http://${lease.server}` } });
+          } else {
+            context = cdpBrowser.contexts()[0] ?? (await cdpBrowser.newContext());
+          }
           // 注入持久化 Cookie(docs/04 §3.1):登录导出的引擎会话态先于导航生效
           if (profile.cookies?.length) {
             try {
               await context.addCookies(profile.cookies as never[]);
-              console.log(`[collect] engine=${engine} profile=${profile.id} 注入持久化 Cookie ${profile.cookies.length} 条`);
+              console.log(`[collect] engine=${engine} profile=${profile.id} 注入 Cookie ${profile.cookies.length} 条${lease ? ` + 代理出口 ${lease.egressIp}` : '(直连)'}`);
             } catch (err) {
               console.error(`[collect] engine=${engine} profile=${profile.id} Cookie 注入失败:`, (err as Error).message);
             }

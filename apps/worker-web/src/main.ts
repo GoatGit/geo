@@ -8,6 +8,7 @@ import { CollectProcessor } from './processor';
 import { LoginManager } from './login-manager';
 import { RoundScheduler } from './scheduler';
 import { AccountPoolService } from './profiles';
+import { createProxyPoolFromEnv } from './qg-proxy';
 import { startReportsWorker, startReputationWorker, scheduleWeeklyReports } from './report-worker';
 import { startInsightsWorker } from './insights-worker';
 import { createBrokerFromEnv } from '@geo/browser-session';
@@ -34,6 +35,9 @@ async function bootstrap() {
 
   // 全进程共享一个 broker:采集与人工登录(refcount 复用本地浏览器进程/登录态)
   const broker = createBrokerFromEnv();
+  // 青果代理池(闸门 #2):启用时登录与采集共用稳定长效代理出口
+  const proxyPool = createProxyPoolFromEnv();
+  if (proxyPool.enabled) await proxyPool.bootstrap();
   const collect = new CollectProcessor(db, new Redis(bullConnection().url, { maxRetriesPerRequest: 3 }), broker);
   const collectWorker = collect.start(concurrency);
 

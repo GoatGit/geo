@@ -19,6 +19,7 @@ import {
 } from '@geo/shared';
 import { checkLogin, hasVisibleInput, siteConfigOf } from '@geo/engine-adapters';
 import { browserModeFromEnv, viewerLoginFromEnv, type SessionBroker } from '@geo/browser-session';
+import { createProxyPoolFromEnv, type QgProxyPool } from './qg-proxy';
 import { envInt } from './config';
 
 /** 人工登录等待窗口:操作者扫码/验证码在此时间内完成,超时置 timeout 可重试。
@@ -39,13 +40,15 @@ const LOGIN_CONCURRENCY = envInt('LOGIN_CONCURRENCY', 3, 1, 10);
  * 成功则把档案置 available 并落 contextRef(登录态持久化),失败/超时写状态供后台展示。
  */
 export class LoginManager {
+  private readonly proxyPool: QgProxyPool;
   private stopped = false;
 
   constructor(
     private readonly db: Db,
     private readonly redis: Redis,
     private readonly broker: SessionBroker,
-  ) {}
+  ) {
+    this.proxyPool = createProxyPoolFromEnv();}
 
   start(): void {
     void this.loop();
@@ -127,7 +130,13 @@ export class LoginManager {
       let page = session.page as Page | undefined;
       if (!page && /^wss?:\/\//.test(session.cdpUrl)) {
         cdpBrowser = await chromium.connectOverCDP(session.cdpUrl);
-        const context = cdpBrowser.contexts()[0] ?? (await cdpBrowser.newContext());
+        // 登录会话走代理出口(与采集一致):Cookie 与出口 IP 绑定,
+        // 之后采集经同一代理注入 Cookie,引擎才会认(docs/07 §13 闸门 #2)
+        const lease = await this.proxyPool.acquire();
+        const context = lease
+          ? await cdpBrowser.newContext({ proxy: { server: `http://${lease.server}` } })
+          : cdpBrowser.contexts()[0] ?? (await cdpBrowser.newContext());
+        if (lease) console.log(`[login] session=${req.sessionId} 经代理 ${lease.server} 登录(出口 ${lease.egressIp})`);
         page = context.pages()[0] ?? (await context.newPage());
       }
       if (!page) throw new Error('broker 未提供可用页面');
