@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpException, HttpStatus, Post, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { currentAccount } from '../common/auth';
 import { BrandsService } from '../brands/brands.service';
@@ -41,6 +41,23 @@ export class MonitorController {
     await this.owned(req, brandId);
     const r = await this.monitorService.rankings({ brandId, days: Number(days) || 7 });
     return { funnel: r.funnel, excluded: r.excluded, asOf: r.asOf, source: r.source };
+  }
+
+  /** 修正品牌名:把变体竞品(如 SU7/小米SU7)的提及归并到主竞品条目,消除重复计数。 */
+  @Post('competitors/merge')
+  async mergeCompetitors(
+    @Req() req: Request,
+    @Body() body: { brand?: number; fromKey?: string; toKey?: string },
+  ) {
+    const brandId = Number(body?.brand);
+    const fromKey = String(body?.fromKey ?? '');
+    const toKey = String(body?.toKey ?? '');
+    if (!Number.isInteger(brandId) || brandId <= 0 || !fromKey || !toKey || fromKey === toKey) {
+      throw new HttpException('brand/fromKey/toKey 参数非法', HttpStatus.BAD_REQUEST);
+    }
+    await this.owned(req, brandId);
+    const merged = await this.monitorService.mergeCompetitor(brandId, fromKey, toKey);
+    return { merged };
   }
 
   @Get('competitors')
