@@ -158,7 +158,28 @@ export class DomWebAdapter implements EngineAdapter {
       const asked = await this.submitQuestion(page, question);
       if (!asked) {
         const bodyHead = (await page.locator('body').innerText({ timeout: 1_000 }).catch(() => '')).slice(0, 80);
-        return this.fail(`未找到可用的提问输入框(url=${page.url()} body="${bodyHead}")`, queuedAt);
+        // 输入框不可用的高频原因是未登录(游客落地页无输入框):非正登录证据时按
+        // needs_login 收口 → 账号池置 login_required 引导人工登录,而不是误报页面改版
+        const recheck = await checkLogin(page, this.site);
+        if (recheck.loggedIn !== true) {
+          return {
+            status: 'failed',
+            answerText: '',
+            rawHtml: null,
+            citations: [],
+            timing: this.timing(queuedAt),
+            engineMeta: {
+              error: 'no_input_selector',
+              needsLogin: true,
+              hint: recheck.hint ?? `url=${page.url()} body="${bodyHead}"`,
+              profileKey: ctx.profileKey,
+              cookies: (await page.context().cookies(new URL(this.site.chatUrl).origin))
+                .map((c) => c.name)
+                .join(','),
+            },
+          };
+        }
+        return this.fail(`未找到可用的提问输入框(已登录,页面改版?需校准 inputSelectors;url=${page.url()} body="${bodyHead}")`, queuedAt);
       }
 
       const { main, text, timedOut } = await this.waitForAnswer(page, timeoutMs, question);
