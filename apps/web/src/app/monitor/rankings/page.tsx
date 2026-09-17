@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { MetricCardView } from '@/components/metric-card';
-import { EmptyState, PageHeader, Skeleton } from '@/components/ui';
+import { EmptyState, PageHeader, Skeleton, pct } from '@/components/ui';
 import { useRankings } from '@/lib/queries';
 import { EvidenceModal } from '@/components/evidence-modal';
 
@@ -16,6 +16,8 @@ const LAYER_LABEL: Record<string, string> = {
 /** 排名透视(docs/01 §3.3):指标卡组 → 矩阵 → 漏斗 → 引擎分化。 */
 export default function RankingsPage() {
   const [days, setDays] = useState(1);
+  const [engineFilter, setEngineFilter] = useState<string>('all');
+  const [questionFilter, setQuestionFilter] = useState<string>('all');
   const [evidenceRun, setEvidenceRun] = useState<number | null>(null);
   const { data, isLoading, error } = useRankings(days);
 
@@ -24,6 +26,27 @@ export default function RankingsPage() {
     return <EmptyState title="数据加载失败" text={`${(error as Error).message} —— 请稍后重试,或在顶栏切换品牌。`} />;
   }
   if (!data) return <EmptyState text="暂无数据:完成品牌与问题配置后,首轮采集结果将在此展示" />;
+
+  const visibleEngines = engineFilter === 'all' ? data.engineStats.map((e) => e.engine) : [engineFilter];
+  const visibleRows = data.matrix.filter(
+    (r) => questionFilter === 'all' || String(r.questionId) === questionFilter,
+  );
+  const exportMatrix = (rows: typeof data.matrix, engines: string[]) => {
+    const header = ['监控问题', ...engines, '综合名次', '提及率', 'Top3 率', '首推率', '分层'];
+    const lines = rows.map((r) => {
+      const cells = engines.map((eng) => {
+        const c = r.cells.find((x) => x.engine === eng);
+        return c ? (c.rank !== null ? `#${c.rank}` : c.mentioned ? '提及未上榜' : '未上榜') : '—';
+      });
+      return [r.questionText, ...cells, r.compositeRank ?? '', pct(r.mentionRate), pct(r.top3Rate), pct(r.top1Rate), r.layer ?? ''];
+    });
+    const csv = [header, ...lines].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `排名矩阵-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+  };
 
   return (
     <div className="space-y-6">
@@ -62,31 +85,64 @@ export default function RankingsPage() {
         <span className="text-slate-400">综合名次 = 未上榜记 N+1 取中位数(docs/02 §1.3)</span>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={engineFilter}
+          onChange={(e) => setEngineFilter(e.target.value)}
+          className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-sm"
+        >
+          <option value="all">全部引擎</option>
+          {data.engineStats.map((e) => (
+            <option key={e.engine} value={e.engine}>{e.engine}</option>
+          ))}
+        </select>
+        <select
+          value={questionFilter}
+          onChange={(e) => setQuestionFilter(e.target.value)}
+          className="h-9 max-w-[320px] rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-sm"
+        >
+          <option value="all">全部问题</option>
+          {data.matrix.map((r) => (
+            <option key={r.questionId} value={String(r.questionId)}>
+              {r.questionText.slice(0, 30)}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={() => exportMatrix(data.matrix, data.engineStats.map((e) => e.engine))}
+          className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:border-brand-300"
+        >
+          导出 CSV
+        </button>
+      </div>
+
       <section className="table-wrap rise-1">
         <table className="w-full text-sm">
           <thead className="table-head">
             <tr>
               <th className="px-4 py-3">监控问题</th>
-              {data.engineStats.length > 0 &&
-                data.engineStats.map((e) => (
-                  <th key={e.engine} className="px-3 py-2.5">
-                    {e.engine}
-                  </th>
-                ))}
+              {visibleEngines.map((eng) => (
+                <th key={eng} className="px-3 py-2.5">
+                  {eng}
+                </th>
+              ))}
               <th className="px-3 py-2.5">综合名次</th>
+              <th className="px-3 py-2.5 text-right">提及率</th>
+              <th className="px-3 py-2.5 text-right">Top3 率</th>
+              <th className="px-3 py-2.5 text-right">首推率</th>
               <th className="px-3 py-2.5">分层</th>
             </tr>
           </thead>
           <tbody>
-            {data.matrix.map((row) => (
+            {visibleRows.map((row) => (
               <tr key={row.questionId} className="border-t">
                 <td className="max-w-72 truncate px-4 py-2.5" title={row.questionText}>
                   {row.questionText}
                 </td>
-                {data.engineStats.map((e) => {
-                  const cell = row.cells.find((c) => c.engine === e.engine);
+                {visibleEngines.map((eng) => {
+                  const cell = row.cells.find((c) => c.engine === eng);
                   return (
-                    <td key={e.engine} className="px-3 py-2.5">
+                    <td key={eng} className="px-3 py-2.5">
                       {!cell ? (
                         <span className="text-slate-300">—</span>
                       ) : (
@@ -100,7 +156,7 @@ export default function RankingsPage() {
                         >
                           {cell.rank !== null ? (
                             <span
-                              className={`metric-num block rounded px-1.5 py-0.5 text-xs ${
+                              className={`metric-num inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs ${
                                 cell.rank === 1
                                   ? 'bg-good-50 text-good'
                                   : cell.rank <= 3
@@ -109,6 +165,11 @@ export default function RankingsPage() {
                               }`}
                             >
                               #{cell.rank}
+                              {cell.prevRank != null && cell.rank !== cell.prevRank && (
+                                <span className={cell.rank < cell.prevRank ? 'text-good' : 'text-bad'}>
+                                  {cell.rank < cell.prevRank ? '▲' : '▼'}
+                                </span>
+                              )}
                             </span>
                           ) : cell.mentioned ? (
                             <span className="block px-1 py-0.5 text-xs text-slate-400">提及未上榜</span>
@@ -120,7 +181,10 @@ export default function RankingsPage() {
                     </td>
                   );
                 })}
-                <td className="metric-num px-3 py-2.5">{row.compositeRank ?? '—'}</td>
+                <td className="metric-num px-3 py-2.5 font-medium">{row.compositeRank ?? '—'}</td>
+                <td className="metric-num px-3 py-2.5 text-right">{pct(row.mentionRate)}</td>
+                <td className="metric-num px-3 py-2.5 text-right">{pct(row.top3Rate)}</td>
+                <td className="metric-num px-3 py-2.5 text-right">{pct(row.top1Rate)}</td>
                 <td className="px-3 py-2.5 text-xs text-slate-500">{row.layer ? LAYER_LABEL[row.layer] : '样本不足'}</td>
               </tr>
             ))}

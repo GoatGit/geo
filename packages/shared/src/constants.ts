@@ -234,6 +234,9 @@ export interface MatrixCell {
   rank: number | null;
   /** 最佳位次那次采集的 runId(前端点击单元格回溯 AI 原文快照) */
   runId?: number | null;
+  /** 上一窗口同引擎最好位次(环比 ▲▼;null = 上期无数据) */
+  prevRank?: number | null;
+  prevMentioned?: boolean | null;
 }
 
 export interface MatrixRow {
@@ -243,6 +246,10 @@ export interface MatrixRow {
   /** docs/02 §1.3:未上榜记 N+1 取中位数 */
   compositeRank: number | null;
   layer: 'L1' | 'L2' | 'L3' | 'L4' | null;
+  /** 行级三率(全景矩阵列;分母 = 实际参采引擎数) */
+  mentionRate: number | null;
+  top3Rate: number | null;
+  top1Rate: number | null;
 }
 
 export interface RecognitionEntry {

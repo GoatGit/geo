@@ -134,6 +134,8 @@ export class MonitorService {
       .from(monitoringQuestions)
       .where(and(eq(monitoringQuestions.brandId, brandId), eq(monitoringQuestions.status, 'active')));
 
+    const windowMs = Date.now() - since.getTime();
+    const prevSince = new Date(since.getTime() - windowMs);
     const facts = await this.db
       .select({
         questionId: mentionFacts.questionId,
@@ -141,21 +143,38 @@ export class MonitorService {
         mentioned: mentionFacts.mentioned,
         rank: mentionFacts.rank,
         runId: mentionFacts.runId,
+        ranAt: mentionFacts.ranAt,
       })
       .from(mentionFacts)
       .where(
         and(
           eq(mentionFacts.brandId, brandId),
-          gte(mentionFacts.ranAt, since),
+          gte(mentionFacts.ranAt, prevSince),
           eq(mentionFacts.subjectKind, 'self'),
         ),
       );
 
+    // 当前窗口 vs 上一窗口(环比 ▲▼):双层 Map(question×engine)
+    const byQuestionPrev = new Map<number, typeof facts>();
     const byQuestion = new Map<number, typeof facts>();
     for (const f of facts) {
-      const arr = byQuestion.get(f.questionId) ?? [];
+      const bucket = f.ranAt >= since ? byQuestion : byQuestionPrev;
+      const arr = bucket.get(f.questionId) ?? [];
       arr.push(f);
-      byQuestion.set(f.questionId, arr);
+      bucket.set(f.questionId, arr);
+    }
+
+    // 上一窗口最好位次(问题×引擎),用于环比标记
+    const prevBest = new Map<string, { mentioned: boolean; rank: number | null }>();
+    for (const [qid, fs] of byQuestionPrev) {
+      const per = new Map<string, { mentioned: boolean; rank: number | null }>();
+      for (const f of fs) {
+        const prev = per.get(f.engine);
+        const better =
+          !prev || (f.mentioned && !prev.mentioned) || (f.mentioned && f.rank !== null && (prev.rank === null || f.rank < prev.rank));
+        if (better) per.set(f.engine, { mentioned: f.mentioned, rank: f.rank });
+      }
+      for (const [engine, v] of per) prevBest.set(`${qid}|${engine}`, v);
     }
 
     const rows: MatrixRow[] = questions.map((q) => {
@@ -173,15 +192,21 @@ export class MonitorService {
             ((f.rank ?? null) === (prev.rank ?? null) && f.runId > (prev.runId ?? 0)));
         if (better) perEngine.set(f.engine, { mentioned: f.mentioned, rank: f.rank, runId: f.runId });
       }
-      const cells = [...perEngine.entries()].map(([e, v]) => ({
-        engine: e as EngineId,
-        surface: 'web' as const,
-        status: 'ok_with_answer' as const,
-        mentioned: v.mentioned,
-        rank: v.rank,
-        /** 最佳位次那次采集的 runId(点击单元格回溯 AI 原文快照) */
-        runId: v.runId ?? null,
-      }));
+      const cells = [...perEngine.entries()].map(([e, v]) => {
+        const pb = prevBest.get(`${q.id}|${e}`);
+        return {
+          engine: e as EngineId,
+          surface: 'web' as const,
+          status: 'ok_with_answer' as const,
+          mentioned: v.mentioned,
+          rank: v.rank,
+          /** 最佳位次那次采集的 runId(点击单元格回溯 AI 原文快照) */
+          runId: v.runId ?? null,
+          /** 上一窗口最好位次(环比 ▲▼ 标记;null=上期无数据) */
+          prevRank: pb ? pb.rank : null,
+          prevMentioned: pb ? pb.mentioned : null,
+        };
+      });
       const collected = cells.length;
       const normalized = cells.map((c) => (c.mentioned && c.rank !== null ? c.rank : collected + 1));
       const sorted = [...normalized].sort((a, b) => a - b);
@@ -193,9 +218,17 @@ export class MonitorService {
             ? sorted[mid]
             : Math.ceil((sorted[mid - 1]! + sorted[mid]!) / 2);
       const top3Engines = cells.filter((c) => c.mentioned && c.rank !== null && c.rank <= 3).length;
+      // 行级三率(与竞品全景矩阵同口径):分母 = 实际参采引擎数
+      const rates = {
+        mentionRate: collected > 0 ? Math.round((cells.filter((c) => c.mentioned).length / collected) * 1000) / 1000 : null,
+        top3Rate: collected > 0 ? Math.round((top3Engines / collected) * 1000) / 1000 : null,
+        top1Rate:
+          collected > 0 ? Math.round((cells.filter((c) => c.mentioned && c.rank === 1).length / collected) * 1000) / 1000 : null,
+      };
 
       return {
         questionId: q.id,
+        ...rates,
         questionText: q.text,
         cells,
         compositeRank,
