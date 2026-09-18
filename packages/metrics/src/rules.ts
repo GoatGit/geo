@@ -21,6 +21,10 @@ export interface RulesContext {
 const PRICE_SERVICE_TERMS = ['价格', '服务', '售后', '收费', '贵', '溢价', '成本'];
 const ENGINE_DIFF_PCT = 0.15; // docs/02 §6:某引擎三率显著低于均值(差 > 15pct)
 const CITATION_MIN = 3; // 防噪声:竞对被引至少 3 次才比对
+const CITATION_ITEMS_MAX = 2; // 引用缺口最多产出条数:平台过多会稀释优先级
+const COVERAGE_FLOOR = 0.5; // 提及率低于该线的整体声量问题比单点缺口更根本
+/** 未分类平台不进行动:字典未覆盖的类别没有可执行的投放含义 */
+const SKIP_CATEGORIES = new Set(['unknown', '其他']);
 
 /**
  * 行动清单(docs/02 §6,确定性规则引擎,替代竞品 AI Agent):
@@ -32,6 +36,17 @@ export function generateActionList(ctx: RulesContext): {
 } {
   const items: ActionItem[] = [];
 
+  // P0:整体声量不足(提及率 < 50% 时,覆盖问题优先于单点优化)
+  if (ctx.metrics && ctx.metrics.mentionRate < COVERAGE_FLOOR) {
+    items.push({
+      priority: 'P0',
+      ruleId: 'R-P0-COVERAGE',
+      action: '优先解决"AI 不提你":围绕品牌核心卖点在权威站点建立结构化内容(百科/垂媒词条、参数页、场景问答),把声量基本盘做起来',
+      dataBasis: `提及率 ${pct(ctx.metrics.mentionRate)} < ${COVERAGE_FLOOR * 100}%:过半查询未被 AI 提及`,
+      target: `提及率提升至 ≥ ${COVERAGE_FLOOR * 100}%`,
+    });
+  }
+
   // P0:存在 L4 问题
   const l4 = ctx.layers.filter((q) => q.layer === 'L4');
   if (l4.length > 0) {
@@ -39,7 +54,7 @@ export function generateActionList(ctx: RulesContext): {
       priority: 'P0',
       ruleId: 'R-P0-L4',
       action: `排查引用源覆盖;对 ${l4.length} 个全线缺席问题(如《${l4[0].text}》)补充结构化事实内容`,
-      dataBasis: `${l4.length} 个问题 0/${l4.length} 引擎进 Top3`,
+      dataBasis: `${l4.length} 个问题 0 引擎进 Top3`,
       target: '每个 L4 问题至少 1 个引擎进 Top3',
     });
   }
@@ -83,17 +98,32 @@ export function generateActionList(ctx: RulesContext): {
     }
   }
 
-  // P1:竞对在某平台类型被引 ≥ 3× 我方
-  for (const c of ctx.competitorCitations) {
-    if (c.competitorCount >= CITATION_MIN && c.competitorCount >= 3 * c.ownCount) {
-      items.push({
-        priority: 'P1',
-        ruleId: 'R-P1-CITATION-GAP',
-        action: `建议在「${c.platform}」类平台补充结构化内容`,
-        dataBasis: `该平台竞对被引 ${c.competitorCount} 次 vs 我方 ${c.ownCount} 次(≥3×)`,
-        target: `我方在该平台被引 ≥ ${Math.ceil(c.competitorCount / 3)} 次`,
-      });
-    }
+  // P1:竞对在某平台类型被引 ≥ 3× 我方(跳过未分类平台;按缺口取前 2,避免清单稀释)
+  const citationGaps = ctx.competitorCitations
+    .filter((c) => !SKIP_CATEGORIES.has(c.platform))
+    .filter((c) => c.competitorCount >= CITATION_MIN && c.competitorCount >= 3 * c.ownCount)
+    .sort((a, b) => b.competitorCount - 3 * b.ownCount - (a.competitorCount - 3 * a.ownCount))
+    .slice(0, CITATION_ITEMS_MAX);
+  for (const c of citationGaps) {
+    items.push({
+      priority: 'P1',
+      ruleId: 'R-P1-CITATION-GAP',
+      action: `建议在「${c.platform}」类平台补充结构化内容`,
+      dataBasis: `该平台竞对被引 ${c.competitorCount} 次 vs 我方 ${c.ownCount} 次(≥3×)`,
+      target: `我方在该平台被引 ≥ ${Math.ceil(c.competitorCount / 3)} 次`,
+    });
+  }
+
+  // P1:高频负面印象(单项出现 ≥ 3 次,即使整体情绪尚可也要定向修复)
+  const topNeg = ctx.negativeImpressions.filter((i) => i.count >= 3)[0];
+  if (topNeg && (ctx.sentimentScore === null || ctx.sentimentScore >= 60)) {
+    items.push({
+      priority: 'P1',
+      ruleId: 'R-P1-NEG-IMPRESSION',
+      action: `围绕「${topNeg.term}」产出澄清/证伪内容(官方数据、真实案例),压降该印象在回答中的出现`,
+      dataBasis: `负面印象「${topNeg.term}」出现 ${topNeg.count} 次(最高频)`,
+      target: `「${topNeg.term}」出现次数下降 50%`,
+    });
   }
 
   // P2:情绪得分 < 60

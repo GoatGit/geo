@@ -22,7 +22,7 @@ export const DEFAULT_HEALTH_THRESHOLDS: HealthThresholds = {
 };
 
 /** 行动清单规则集版本(docs/02 §6):版本号入库,报告可复现。 */
-export const RULESET_VERSION = '2026.09.1';
+export const RULESET_VERSION = '2026.09.2';
 
 /** 抽取器版本(docs/05 §1):解析升级后可对历史证据包全量重放。 */
 export const PARSER_VERSION = 'v1';

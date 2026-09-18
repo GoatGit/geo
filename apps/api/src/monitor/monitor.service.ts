@@ -13,6 +13,7 @@ import {
 import {
   DEFAULT_HEALTH_THRESHOLDS,
   THRESHOLD_CALIBRATION_GRACE_DAYS,
+  engineLabel,
   type EngineId,
   type FunnelStage,
   type MatrixRow,
@@ -109,12 +110,32 @@ export class MonitorService {
     const trend = await this.trend(input.brandId, 7); // 迷你趋势固定近 7 天,不受所选周期影响
 
     const calibrating = await this.inCalibrationWindow(input.brandId);
+    // 情绪/自有信源实时口径:体检卡两项此前未传恒为"暂无数据"(docs/02 §3 六项体检)
+    const rep = await this.reputation(input.brandId, input.days);
+    const citeAgg = (
+      await this.db
+        .select({
+          total: sql<number>`count(*)::int`,
+          owned: sql<number>`count(*) filter (where ${citationFacts.isOwned})::int`,
+        })
+        .from(citationFacts)
+        .where(
+          and(
+            eq(citationFacts.brandId, input.brandId),
+            gte(citationFacts.extractedAt, since),
+          ),
+        )
+    )[0];
+    const ownedShare = citeAgg && citeAgg.total > 0 ? citeAgg.owned / citeAgg.total : null;
     const health = evaluateHealth(
       {
         mentionRate: cards[0]!.value,
         top3Rate: cards[1]!.value,
         top1Rate: cards[2]!.value,
         avgRank: cards[3]!.value,
+        sentimentScore: rep.totals.hasData ? rep.totals.sentimentScore : null,
+        ownedCitationShare: ownedShare,
+        ownedCitationCount: citeAgg?.owned ?? null,
       },
       DEFAULT_HEALTH_THRESHOLDS,
       calibrating,
@@ -507,6 +528,8 @@ export class MonitorService {
 
     const platformAgg = new Map<string, { competitor: number; own: number }>();
     for (const c of cite.items) {
+      // 未分类平台不进比对:没有可执行的投放含义,还会把"unknown"泄漏进行动项文案
+      if (c.category === 'unknown' || c.category === '其他') continue;
       const agg = platformAgg.get(c.category) ?? { competitor: 0, own: 0 };
       if (c.isOwned) agg.own += 1;
       else agg.competitor += 1;
@@ -546,15 +569,38 @@ export class MonitorService {
       // 缓存不可用不致命,走规则
     }
 
-    const brand = (await this.db.select({ intro: brands.intro }).from(brands).where(eq(brands.id, brandId)).limit(1))[0];
+    const brand = (
+      await this.db
+        .select({ name: brands.name, intro: brands.intro, website: brands.website })
+        .from(brands)
+        .where(eq(brands.id, brandId))
+        .limit(1)
+    )[0];
+    // LLM 上下文:画像 + 检测事实(含问题文本/引擎分布/信源缺口),越具体处方越可执行
+    const weakQuestions = rows
+      .filter((r) => r.layer === 'L4' || r.layer === 'L3')
+      .slice(0, 4)
+      .map((r) => r.questionText);
+    const citationsByPlatform = [...platformAgg.entries()]
+      .sort((a, b) => b[1].competitor - a[1].competitor)
+      .slice(0, 6)
+      .map(([platform, v]) => ({ platform, 竞对被引: v.competitor, 我方被引: v.own }));
     void this.generateActionsInBackground(brandId, cacheKey, rules.items, {
-      name: brand?.intro ? '' : '',
+      name: brand?.name ?? '',
       intro: brand?.intro ?? '',
       facts: {
-        metrics: rules.items.map((i) => ({ priority: i.priority, ruleId: i.ruleId, dataBasis: i.dataBasis })),
-        citations: [...platformAgg.entries()].map(([platform, v]) => ({ platform, competitor: v.competitor, own: v.own })),
-        negativeImpressions: rep.weaknesses.map((w) => ({ term: w.term, count: w.runs })),
-        sentimentScore: rep.totals.sentimentScore,
+        检测事实: rules.items.map((i) => ({ priority: i.priority, ruleId: i.ruleId, dataBasis: i.dataBasis, target: i.target })),
+        弱势问题文本: weakQuestions,
+        引擎三率: eng.map((e) => ({
+          引擎: engineLabel(e.engine),
+          提及率: Math.round(e.mentionRate * 1000) / 1000,
+          Top3率: Math.round(e.top3Rate * 1000) / 1000,
+          首推率: Math.round(e.top1Rate * 1000) / 1000,
+        })),
+        各平台被引对比: citationsByPlatform,
+        负面印象: rep.weaknesses.slice(0, 5).map((w) => ({ term: w.term, 出现次数: w.runs })),
+        情绪得分: rep.totals.sentimentScore,
+        官网域名: brand?.website ?? null,
       },
     });
 
@@ -576,8 +622,8 @@ export class MonitorService {
         '你是 AI 搜索优化(GEO)增长顾问。只输出一个 JSON 数组,不要多余文字。' +
         '基于给定的规则检测事实与品牌画像,产出 3-5 条具体可执行的行动项。' +
         'schema: [{"priority":"P0|P1|P2","ruleId":"对应检测事实的 ruleId","action":"具体动作:写什么角度的内容、投到哪类平台、强调什么卖点(60字内,禁止空话)","dataBasis":"数据依据(≤40字)","target":"可验证的目标(≤30字)"}]。' +
-        'action 必须引用品牌画像里的具体卖点/产品线,平台用检测事实里出现的平台类别。';
-      const user = JSON.stringify({ 品牌画像: ctx.intro.slice(0, 800), 规则检测事实: ctx.facts }, null, 0);
+        'action 必须引用品牌画像里的具体卖点/产品线;平台只能用「各平台被引对比」里出现过的平台类别名,引擎只能用「引擎三率」里出现过的引擎名。';
+      const user = JSON.stringify({ 品牌名: ctx.name, 品牌画像: ctx.intro.slice(0, 800), 检测事实与上下文: ctx.facts }, null, 0);
       const raw = await chatCompletion(
         { protocol: cfg.protocol as 'openai' | 'anthropic', endpoint: cfg.endpoint, apiKey: cfg.apiKey, model: cfg.model, timeoutMs: 60_000 },
         { system, user, maxTokens: 2500 },

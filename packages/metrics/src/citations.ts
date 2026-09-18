@@ -42,23 +42,62 @@ export interface PlatformClassification {
 }
 
 export const DEFAULT_DOMAIN_DICT: Record<string, PlatformClassification> = {
+  // 门户/媒体(含 sina.cn 移动域家族——实测占 unknown 的大头)
   'sina.com.cn': { platform: '新浪', category: '门户/资讯' },
+  'sina.cn': { platform: '新浪', category: '门户/资讯' },
   'sina.com': { platform: '新浪', category: '门户/资讯' },
   'sohu.com': { platform: '搜狐', category: '门户/资讯' },
+  'sohu.cn': { platform: '搜狐', category: '门户/资讯' },
   '163.com': { platform: '网易', category: '门户/资讯' },
   'qq.com': { platform: '腾讯', category: '门户/资讯' },
+  'people.com.cn': { platform: '人民网', category: '门户/资讯' },
+  'xinhuanet.com': { platform: '新华网', category: '门户/资讯' },
+  'chinanews.com.cn': { platform: '中国新闻网', category: '门户/资讯' },
+  'china.com.cn': { platform: '中国网', category: '门户/资讯' },
+  'cctv.com': { platform: '央视网', category: '门户/资讯' },
+  'ifeng.com': { platform: '凤凰网', category: '门户/资讯' },
+  'ce.cn': { platform: '中国经济网', category: '门户/资讯' },
+  'cet.com.cn': { platform: '中国经济网', category: '门户/资讯' },
+  'youth.cn': { platform: '中国青年网', category: '门户/资讯' },
+  'eastday.com': { platform: '东方网', category: '门户/资讯' },
+  'eastmoney.com': { platform: '东方财富', category: '门户/财经' },
+  // 资讯/推荐流与科技媒体
   'toutiao.com': { platform: '今日头条', category: '资讯/推荐' },
+  '36kr.com': { platform: '36氪', category: '资讯/科技' },
+  'zol.com.cn': { platform: '中关村在线', category: '资讯/科技' },
+  'itbear.com.cn': { platform: 'ITBear', category: '资讯/科技' },
   'baidu.com': { platform: '百家号/百度', category: '资讯/百科' },
   'baijiahao.baidu.com': { platform: '百家号', category: '资讯' },
-  'zhihu.com': { platform: '知乎', category: 'UGC/问答' },
-  'douyin.com': { platform: '抖音', category: 'UGC/短视频' },
-  'bilibili.com': { platform: 'B站', category: 'UGC/视频' },
+  // 汽车垂媒
   'autohome.com.cn': { platform: '汽车之家', category: '垂媒' },
   'dongchedi.com': { platform: '懂车帝', category: '垂媒' },
   'yiche.com': { platform: '易车', category: '垂媒' },
+  'bitauto.com': { platform: '易车', category: '垂媒' },
+  'yoojia.com': { platform: '有驾', category: '垂媒' },
+  'pcauto.com.cn': { platform: '太平洋汽车', category: '垂媒' },
+  'xcar.com.cn': { platform: '爱卡汽车', category: '垂媒' },
+  'gasgoo.com': { platform: '盖世汽车', category: '垂媒' },
+  'cnautonews.com.cn': { platform: '中国汽车报', category: '垂媒' },
+  // UGC/社区/视频
+  'zhihu.com': { platform: '知乎', category: 'UGC/问答' },
+  'douyin.com': { platform: '抖音', category: 'UGC/短视频' },
+  'bilibili.com': { platform: 'B站', category: 'UGC/视频' },
+  'kuaishou.com': { platform: '快手', category: 'UGC/短视频' },
+  'weibo.com': { platform: '微博', category: 'UGC/社交' },
+  'tieba.baidu.com': { platform: '百度贴吧', category: 'UGC/社区' },
+  // 技术/知识
   'csdn.net': { platform: 'CSDN', category: '技术社区' },
+  'juejin.cn': { platform: '掘金', category: '技术社区' },
+  'wikipedia.org': { platform: '维基百科', category: '百科' },
+  // 厂商官网(仅作平台标注;是否自有独立判定,见 isOwnedDomain)
   'xiaomi.com': { platform: '小米', category: '官网' },
   'xiaomiev.com': { platform: '小米汽车', category: '官网' },
+  'lixiang.com': { platform: '理想汽车', category: '官网' },
+  'byd.com': { platform: '比亚迪', category: '官网' },
+  'bydauto.com.cn': { platform: '比亚迪', category: '官网' },
+  'nio.com': { platform: '蔚来', category: '官网' },
+  'tesla.cn': { platform: '特斯拉', category: '官网' },
+  'zeekrlife.com': { platform: '极氪', category: '官网' },
 };
 
 /**

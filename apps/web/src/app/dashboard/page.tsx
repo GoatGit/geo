@@ -57,6 +57,8 @@ export default function DashboardPage() {
     queryKey: ['actions', brandId],
     queryFn: () => api<ActionsDto>(`/monitor/actions?brand=${brandId}&days=7`),
     enabled: !!brandId,
+    // AI 处方在后台生成(数秒~数十秒):generating 期间轮询,拿到 source=ai 即停
+    refetchInterval: (q) => (q.state.data?.generating ? 5000 : false),
   });
   // 识别口径核对完成 = 所有条目(含 AI 建议竞品)均已确认
   // (hooks 必须在条件 return 之前调用)
@@ -268,7 +270,7 @@ export default function DashboardPage() {
                     <span className="font-medium text-slate-600">{HEALTH_LABELS[item.metric] ?? item.metric}</span>
                     <span className="flex items-center gap-2">
                       <span className="metric-num text-slate-700">
-                        {item.value == null ? '—' : item.metric === 'avgRank' ? item.value : pct(item.value)}
+                        {item.value == null ? '—' : item.metric === 'avgRank' || item.metric === 'sentimentScore' ? item.value : pct(item.value)}
                       </span>
                       <span
                         className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium ${
@@ -327,6 +329,11 @@ export default function DashboardPage() {
                     <span className="text-xs text-slate-400">{item.dataBasis}</span>
                   </div>
                   <p className="mt-1.5 text-[13px] leading-5 text-slate-700">{item.action}</p>
+                  {item.target && (
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      <span className="text-slate-300">目标</span> {item.target}
+                    </p>
+                  )}
                 </div>
               ))}
               {(actions.data?.items ?? []).length === 0 && (
