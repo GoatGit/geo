@@ -409,7 +409,13 @@ export class CollectProcessor {
     if (data.questionType === 'reputation' && ask.answerText) {
       await this.reputation.add(
         'extract',
-        { runId, brandId: data.brandId, answerText: ask.answerText, ranAt: ranAt.toISOString() },
+        {
+          runId,
+          brandId: data.brandId,
+          answerText: ask.answerText,
+          questionText: data.questionText,
+          ranAt: ranAt.toISOString(),
+        },
         { attempts: 3, removeOnComplete: 100 },
       );
     }

@@ -31,6 +31,25 @@ function ruleSentiment(
 }
 
 /**
+ * 证据摘要(docs/05 §3.2 页面"原文证据"):跳过回答开头的元信息行
+ * ("搜索 N 个关键词/已完成分析,共参考 N 篇")与问题回显(元宝回答容器含用户气泡),
+ * 取第一句真实内容;全被跳过时退回首条印象短语摘要。
+ */
+function pickExcerpt(answerText: string, questionText: string | undefined, terms: Array<{ excerpt: string }>): string | null {
+  const noise = /^搜索|^已搜索|^已完成分析|^共参考|篇资料[。]?$/;
+  const q = (questionText ?? '').replace(/\s+/g, '');
+  for (const raw of answerText.split(/[。;;\n!?]/)) {
+    const s = raw.trim();
+    if (s.length < 12) continue;
+    if (noise.test(s)) continue;
+    const norm = s.replace(/\s+/g, '');
+    if (q && (norm.includes(q) || (norm.length <= q.length + 4 && q.includes(norm)))) continue; // 问题回显
+    return s.slice(0, 120);
+  }
+  return terms[0]?.excerpt ?? null;
+}
+
+/**
  * 口碑批量抽取(docs/05 §3.2)的判定层 = Insight Agent(docs/09 §6):
  * mode=llm → LLM 判定(高置信 ≥0.9 写 auditState='auto' 免抽检,否则入池),失败自动回落词库规则;
  * mode=shadow → 口径仍走规则,LLM 判定写 query_runs.meta.insightShadow 对比;
@@ -92,7 +111,7 @@ export async function extractReputation(db: Db, job: ReputationJobData, redis?: 
     sentiment,
     confidence,
     impressionTerms: terms,
-    excerpt: job.answerText.split(/[。;;\n!?]/).map((s) => s.trim()).filter((s) => s.length > 4)[0] ?? null,
+    excerpt: pickExcerpt(job.answerText, job.questionText, terms),
     auditState,
     ranAt,
     parserVersion,

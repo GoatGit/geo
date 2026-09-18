@@ -477,13 +477,17 @@ export class MonitorService {
     };
   }
 
+  /** 口碑证据样本上限:口碑题数 × 引擎数(约 10×5),全量展示而非抽样(docs/01 §3.6)。 */
+  private static readonly REPUTATION_SAMPLE_LIMIT = 100;
+
   /** 口碑(docs/01 §3.6):仅口碑词;空态诚实(docs/research 03 A5 对策)。 */
   async reputation(brandId: number, days: number) {
     const since = new Date(Date.now() - days * 24 * 3600 * 1000);
     const rows = await this.db
       .select()
       .from(reputationFacts)
-      .where(and(eq(reputationFacts.brandId, brandId), gte(reputationFacts.ranAt, since)));
+      .where(and(eq(reputationFacts.brandId, brandId), gte(reputationFacts.ranAt, since)))
+      .orderBy(desc(reputationFacts.ranAt));
 
     const pos = rows.filter((r) => r.sentiment === 'pos').length;
     const neu = rows.filter((r) => r.sentiment === 'neu').length;
@@ -502,7 +506,7 @@ export class MonitorService {
     const sentimentScore = rows.length > 0 ? Math.round((pos / rows.length) * 100) : null;
 
     // 证据样本补充引擎信息(reputation_facts 不落引擎,从 query_runs 关联)
-    const sampleRunIds = [...new Set(rows.slice(0, 20).map((r) => r.runId))];
+    const sampleRunIds = [...new Set(rows.slice(0, MonitorService.REPUTATION_SAMPLE_LIMIT).map((r) => r.runId))];
     const runEngines = new Map(
       sampleRunIds.length > 0
         ? (
@@ -518,7 +522,7 @@ export class MonitorService {
       totals: { runs: rows.length, pos, neu, neg, sentimentScore, hasData: rows.length > 0 },
       strengths: all.filter((t) => t.polarity === 'pos').slice(0, 6),
       weaknesses: all.filter((t) => t.polarity === 'neg').slice(0, 6),
-      samples: rows.slice(0, 20).map((r) => ({
+      samples: rows.slice(0, MonitorService.REPUTATION_SAMPLE_LIMIT).map((r) => ({
         runId: r.runId,
         sentiment: r.sentiment,
         excerpt: r.excerpt,

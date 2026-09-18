@@ -27,6 +27,8 @@ export interface ReputationJobData {
   runId: number;
   brandId: number;
   answerText: string;
+  /** 提问原文:证据摘要需剔除"回答以问题回显开头"的句子(元宝实测) */
+  questionText?: string;
   ranAt: string;
 }
 
