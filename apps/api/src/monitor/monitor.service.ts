@@ -20,7 +20,11 @@ import {
   type MetricSource,
 } from '@geo/shared';
 import { evaluateHealth, generateActionList } from '@geo/metrics';
-import { DB } from '../common/infra.module';
+import Redis from 'ioredis';
+import { chatCompletion } from '@geo/insight-agent';
+import { loadPlatformSettings } from '@geo/db';
+import type { ActionItem } from '@geo/shared';
+import { DB, REDIS } from '../common/infra.module';
 
 /**
  * 指标服务唯一供数出口(docs/02 §8 制度保障):
@@ -29,7 +33,10 @@ import { DB } from '../common/infra.module';
  */
 @Injectable()
 export class MonitorService {
-  constructor(@Inject(DB) private readonly db: NodePgDatabase) {}
+  constructor(
+    @Inject(DB) private readonly db: NodePgDatabase,
+    @Inject(REDIS) private readonly redis: Redis,
+  ) {}
 
   /** 排名透视聚合 DTO(docs/01 §3.3):指标卡 + 矩阵 + 漏斗 + 引擎分化 + 健康。 */
   async rankings(input: { brandId: number; days: number; engine?: EngineId }) {
@@ -550,7 +557,7 @@ export class MonitorService {
     }
 
     const val = (m: string) => ranking.cards.find((c) => c.metric === m)?.value ?? 0;
-    return generateActionList({
+    const rules = generateActionList({
       layers: rows.map((r) => ({ questionId: r.questionId, text: r.questionText, layer: r.layer })),
       metrics: ranking.cards.every((c) => c.value !== null)
         ? { mentionRate: val('mentionRate'), top3Rate: val('top3Rate'), top1Rate: val('top1Rate') }
@@ -564,6 +571,70 @@ export class MonitorService {
       sentimentScore: rep.totals.sentimentScore,
       negativeImpressions: rep.weaknesses.map((w) => ({ term: w.term, count: w.runs })),
     });
+
+    // LLM 处方层(docs/09 同款三层模式):规则做检测器(可复现事实),LLM 把事实 + 品牌画像
+    // 转成具体行动项;按天缓存(Redis TTL 24h),失败回落规则文案。未命中时先返回规则项并
+    // 后台生成,前端提示"AI 行动项生成中"。
+    const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const cacheKey = `geo:actions:llm:${brandId}:${day}`;
+    try {
+      const cached = await this.redis.get(cacheKey);
+      if (cached) {
+        const items = JSON.parse(cached) as ActionItem[];
+        if (Array.isArray(items) && items.length > 0) {
+          return { rulesetVersion: rules.rulesetVersion, items, source: 'ai' as const };
+        }
+      }
+    } catch {
+      // 缓存不可用不致命,走规则
+    }
+
+    const brand = (await this.db.select({ intro: brands.intro }).from(brands).where(eq(brands.id, brandId)).limit(1))[0];
+    void this.generateActionsInBackground(brandId, cacheKey, rules.items, {
+      name: brand?.intro ? '' : '',
+      intro: brand?.intro ?? '',
+      facts: {
+        metrics: rules.items.map((i) => ({ priority: i.priority, ruleId: i.ruleId, dataBasis: i.dataBasis })),
+        citations: [...platformAgg.entries()].map(([platform, v]) => ({ platform, competitor: v.competitor, own: v.own })),
+        negativeImpressions: rep.weaknesses.map((w) => ({ term: w.term, count: w.runs })),
+        sentimentScore: rep.totals.sentimentScore,
+      },
+    });
+
+    return { rulesetVersion: rules.rulesetVersion, items: rules.items, source: 'rules' as const, generating: true };
+  }
+
+  /** 后台生成 AI 行动项并写天级缓存;失败只记日志(前端已拿到规则项)。 */
+  private async generateActionsInBackground(
+    brandId: number,
+    cacheKey: string,
+    ruleItems: ActionItem[],
+    ctx: { name: string; intro: string; facts: unknown },
+  ) {
+    try {
+      const settings = await loadPlatformSettings(this.db);
+      const cfg = settings.insightAgent;
+      if (!cfg.enabled || cfg.mode === 'rules' || !cfg.endpoint || !cfg.apiKey || !cfg.model) return;
+      const system =
+        '你是 AI 搜索优化(GEO)增长顾问。只输出一个 JSON 数组,不要多余文字。' +
+        '基于给定的规则检测事实与品牌画像,产出 3-5 条具体可执行的行动项。' +
+        'schema: [{"priority":"P0|P1|P2","ruleId":"对应检测事实的 ruleId","action":"具体动作:写什么角度的内容、投到哪类平台、强调什么卖点(60字内,禁止空话)","dataBasis":"数据依据(≤40字)","target":"可验证的目标(≤30字)"}]。' +
+        'action 必须引用品牌画像里的具体卖点/产品线,平台用检测事实里出现的平台类别。';
+      const user = JSON.stringify({ 品牌画像: ctx.intro.slice(0, 800), 规则检测事实: ctx.facts }, null, 0);
+      const raw = await chatCompletion(
+        { protocol: cfg.protocol as 'openai' | 'anthropic', endpoint: cfg.endpoint, apiKey: cfg.apiKey, model: cfg.model, timeoutMs: 60_000 },
+        { system, user, maxTokens: 900 },
+      );
+      const m = raw.text.match(/\[[\s\S]*\]/);
+      if (!m) return;
+      const items = (JSON.parse(m[0]) as ActionItem[]).filter(
+        (i) => ['P0', 'P1', 'P2'].includes(i.priority) && typeof i.action === 'string' && i.action.length >= 10,
+      );
+      if (items.length < 2) return;
+      await this.redis.set(cacheKey, JSON.stringify(items.slice(0, 6)), 'EX', 24 * 3600);
+    } catch (err) {
+      console.error(`[actions] llm 行动项生成失败 brand=${brandId}:`, (err as Error).message.slice(0, 120));
+    }
   }
 
   /** 日结(docs/05 §4):趋势线与报告只读日结层;worker 定时调用。 */

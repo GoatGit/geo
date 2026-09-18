@@ -34,6 +34,9 @@ interface StatusDto {
 interface ActionsDto {
   rulesetVersion: string;
   items: Array<{ priority: 'P0' | 'P1' | 'P2'; ruleId: string; action: string; dataBasis: string; target: string }>;
+  /** 'ai' = LLM 处方层产物(基于规则检测事实);'rules' = 词库/模板规则文案 */
+  source?: 'ai' | 'rules';
+  generating?: boolean;
 }
 
 /** 总览(docs/01 ①):驾驶舱——指标 + 体检 + 行动清单 + 采集动态;无数据时给引导清单。 */
@@ -206,7 +209,11 @@ export default function DashboardPage() {
           <div className="card rise-3 flex flex-col p-6">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="font-semibold text-slate-900">行动清单</h2>
-              <span className="text-[10px] text-slate-400">规则集 {actions.data?.rulesetVersion ?? '—'}</span>
+              {actions.data?.source === 'ai' ? (
+                <span className="rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-700">AI 生成 · 基于规则检测</span>
+              ) : (
+                <span className="text-[10px] text-slate-400">规则集 {actions.data?.rulesetVersion ?? '—'}</span>
+              )}
             </div>
             <div className="flex-1 space-y-2.5">
               {(actions.data?.items ?? []).slice(0, 4).map((item) => (
@@ -225,7 +232,11 @@ export default function DashboardPage() {
               )}
             </div>
             <p className="mt-3 text-[10px] text-slate-400">
-              由确定性规则引擎生成,规则版本入库可复现(docs/02 §6)。
+              {actions.data?.source === 'ai'
+                ? '由 AI 基于规则检测事实与品牌画像生成(每日更新);检测事实由规则引擎产出,可复现(docs/02 §6)。'
+                : actions.data?.generating
+                  ? '以上为规则基线建议;AI 正在结合品牌画像生成更具体的行动项,稍后刷新查看。'
+                  : '由确定性规则引擎生成,规则版本入库可复现(docs/02 §6)。'}
             </p>
           </div>
         </section>
