@@ -16,12 +16,12 @@ const pr = await pdb.query(
   [engine],
 );
 await pdb.end();
-const profile = pr.rows[0];
-console.log(`[probe] engine=${engine} profile=${profile.id}`);
+const profile = pr.rows[0] ?? { id: 0, cookies: null };
+console.log(`[probe] engine=${engine} profile=${profile.id} cookies=${profile.cookies?.length ?? 0}(0=游客态)`);
 
 const browser = await chromium.connectOverCDP(cdp);
 const ctx = browser.contexts()[0] || (await browser.newContext());
-await ctx.addCookies(profile.cookies);
+if (profile.cookies) await ctx.addCookies(profile.cookies);
 const page = ctx.pages()[0] || (await ctx.newPage());
 
 // 网络监听:记录 JSON 响应(文本型),存 URL+body 摘要
