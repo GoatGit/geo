@@ -24,7 +24,9 @@ TAG="${1:-}"
 if [ -z "$TAG" ]; then
   MAX=0
   for t in $(docker images --format '{{.Tag}}' "$REGISTRY" 2>/dev/null); do
-    case "$t" in v[0-9]*) n=${t#v}; [ "$n" -gt "$MAX" ] && MAX=$n ;; esac
+    # 只认纯数字版本(v12);带后缀的标签(v34-rk2)跳过,避免整数比较报错
+    case "$t" in v[0-9]) n=${t#v} ;; v[0-9][0-9]) n=${t#v} ;; *) continue ;; esac
+    [ "$n" -gt "$MAX" ] && MAX=$n
   done
   TAG="v$((MAX + 1))"
 fi
