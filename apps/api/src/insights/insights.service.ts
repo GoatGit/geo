@@ -96,7 +96,7 @@ export class InsightsService implements OnModuleDestroy {
   async listIndustryBrands(industryId: number) {
     const industry = (await this.db.select().from(insightIndustries).where(eq(insightIndustries.id, industryId)).limit(1))[0];
     if (!industry) throw new HttpException('行业不存在', HttpStatus.NOT_FOUND);
-    return this.db.execute(sql`
+    const res = await this.db.execute(sql`
       select b.id::bigint as id, b.name, b.status,
              (select count(*) from monitoring_questions q where q.brand_id = b.id and q.status = 'active')::int as questions,
              (select count(*) from query_runs r where r.brand_id = b.id
@@ -106,6 +106,8 @@ export class InsightsService implements OnModuleDestroy {
       where b.industry = ${industry.name} and b.status = 'active'
       order by b.id
     `);
+    // node-postgres Result 直接返回会整体序列化(command/fields 等元数据混入),取 rows
+    return (res as unknown as { rows: unknown[] }).rows;
   }
 
   /** AI 推荐行业监测品牌:LLM 产出 5-8 个头部品牌的建号描述(名称/官网/定位/竞品)。 */
@@ -143,7 +145,7 @@ export class InsightsService implements OnModuleDestroy {
   async listIndustryQuestions(industryId: number) {
     const industry = (await this.db.select().from(insightIndustries).where(eq(insightIndustries.id, industryId)).limit(1))[0];
     if (!industry) throw new HttpException('行业不存在', HttpStatus.NOT_FOUND);
-    return this.db.execute(sql`
+    const res = await this.db.execute(sql`
       select q.text_raw as text, max(q.type) as type,
              count(distinct q.brand_id)::int as brands,
              min(q.id)::bigint as first_id
@@ -153,6 +155,7 @@ export class InsightsService implements OnModuleDestroy {
       group by q.text_raw
       order by min(q.id)
     `);
+    return (res as unknown as { rows: unknown[] }).rows;
   }
 
   /** 手动新增行业问题:同时挂到该行业全部品牌(与 AI 下发一致)。 */
