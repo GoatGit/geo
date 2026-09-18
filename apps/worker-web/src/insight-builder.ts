@@ -628,8 +628,9 @@ function factsDigest(agg: IndustryAggregates, windowDays: number | null) {
       Top3率: pctText(rateOf(b.top3, b.valid)),
       首推率: pctText(rateOf(b.top1, b.valid)),
     })),
-    引用信源Top5: agg.citations.top.slice(0, 5).map((c) => ({ 平台: c.platform, 被引: c.count })),
-    口碑印象: agg.reputation.impressions.slice(0, 8).map((i) => ({ 词: i.term, polarity: i.polarity, 次数: i.count })),
+    引用信源Top5: agg.citations.top.slice(0, 5).map((c) => ({ 平台: c.platform, 域名: c.domain, 被引: c.hits })),
+    口碑正面: agg.reputation.posTerms.slice(0, 5).map((i) => ({ 词: i.term, 次数: i.count })),
+    口碑负面: agg.reputation.negTerms.slice(0, 5).map((i) => ({ 词: i.term, 次数: i.count })),
     趋势: agg.trend.slice(-7).map((t) => t.rate == null ? null : Math.round(t.rate * 100)),
   };
 }

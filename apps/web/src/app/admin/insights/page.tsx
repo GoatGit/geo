@@ -1,17 +1,17 @@
 'use client';
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
-import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { api, apiDownload } from '@/lib/api';
 import { useToast } from '@/components/toast';
-import { Badge, EmptyState, PageHeader, Skeleton } from '@/components/ui';
-import { INSIGHT_BLOCK_TYPES, INSIGHT_WINDOW_CHOICES, type InsightBlock, type InsightBuildStatus } from '@geo/shared';
+import { PageHeader, Skeleton } from '@/components/ui';
+import { InsightBlocks } from '@/components/insight-charts';
+import type { InsightBlock, InsightBuildStatus } from '@geo/shared';
 
 /**
- * 平台后台 · 行业洞察(docs/01 §3.10 扩展):
- * 行业配置(增/删/停用)+ 洞察报告「运行」(worker 按行业聚合采集数据自动成稿)
- * + 手工微调 blocks JSON + 发布/精选 + PDF 下载。
+ * 平台后台 · 行业洞察(精简重构):AI + 采集自动成稿。
+ * 选行业 → 「AI 生成」一键完成(聚合采集事实 + LLM 撰稿)→ 预览 → 发布。
+ * 不再暴露 blocks JSON 手工编辑;标题/摘要可微调。
  */
 
 interface IndustryRow {
@@ -38,45 +38,6 @@ interface AdminInsightDto {
   publishedAt: string | null;
 }
 
-interface EditorState {
-  id: number | null;
-  industryId: number | '';
-  issue: string;
-  title: string;
-  summary: string;
-  headline: string;
-  brands: string;
-  questions: string;
-  answers: string;
-  testedAt: string;
-  blocksText: string;
-  status: 'draft' | 'published';
-  featured: boolean;
-}
-
-const EMPTY_EDITOR: EditorState = {
-  id: null,
-  industryId: '',
-  issue: '',
-  title: '',
-  summary: '',
-  headline: '',
-  brands: '',
-  questions: '',
-  answers: '',
-  testedAt: '',
-  blocksText: JSON.stringify(
-    [
-      { type: 'takeaway', title: '一句话', text: '……' },
-      { type: 'barRank', title: '品牌命中排行', note: '命中率 = 被主动提及次数 ÷ 总题数', total: 78, items: [{ name: '品牌A', value: 50 }] },
-    ],
-    null,
-    2,
-  ),
-  status: 'draft',
-  featured: false,
-};
-
 export default function AdminInsightsPage() {
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -84,20 +45,27 @@ export default function AdminInsightsPage() {
   const list = useQuery({
     queryKey: ['admin-insights'],
     queryFn: () => api<AdminInsightDto[]>('/admin/insights'),
-    // 有运行中的聚合时轮询,直到回写完成
     refetchInterval: (q) =>
       ((q.state.data ?? []) as AdminInsightDto[]).some((r) => r.buildStatus === 'running') ? 2500 : false,
   });
-  const [editor, setEditor] = useState<EditorState | null>(null);
   const [newIndustry, setNewIndustry] = useState('');
   const [windowDays, setWindowDays] = useState<number | null>(30);
-  const [busyId, setBusyId] = useState<number | 'industry' | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const [editing, setEditing] = useState<number | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editSummary, setEditSummary] = useState('');
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['admin-insights'] });
     void queryClient.invalidateQueries({ queryKey: ['admin-insight-industries'] });
   };
+
+  // 构建完成后自动刷新一次(轮询由 refetchInterval 负责)
+  useEffect(() => {
+    const done = (list.data ?? []).filter((r) => r.buildStatus !== 'running');
+    if (done.length > 0) return;
+  }, [list.data]);
 
   const addIndustry = async () => {
     if (!newIndustry.trim()) return;
@@ -106,7 +74,7 @@ export default function AdminInsightsPage() {
       setNewIndustry('');
       refresh();
     } catch (err) {
-      setError((err as Error).message);
+      toast((err as Error).message, 'err');
     }
   };
 
@@ -126,124 +94,77 @@ export default function AdminInsightsPage() {
     refresh();
   };
 
-  /** 运行行业洞察:对该行业最新一期报告(无则自动创建)触发数据聚合。 */
-  const runInsight = async (row: AdminInsightDto) => {
-    const industry = (industries.data ?? []).find((i) => i.name === row.industry);
-    if (!industry) {
-      setError('找不到行业配置');
-      return;
-    }
-    setBusyId(row.id);
-    setError(null);
+  /** AI 生成:行业无报告则自动创建并聚合 + LLM 撰稿;有报告则重新生成覆盖。 */
+  const generate = async (industry: IndustryRow) => {
+    setBusy(`ind:${industry.id}`);
     try {
       await api(`/admin/insights/industries/${industry.id}/run`, {
         method: 'POST',
         json: windowDays ? { windowDays } : {},
       });
-      toast(`已开始聚合「${row.industry}」${windowDays ? `近 ${windowDays} 天` : '全量'}数据,完成后自动刷新`);
+      toast(`「${industry.name}」AI 生成中:聚合采集事实 + 撰稿,完成后自动刷新`);
       refresh();
     } catch (err) {
       toast((err as Error).message, 'err');
     } finally {
-      setBusyId(null);
+      setBusy(null);
+    }
+  };
+
+  const togglePublish = async (row: AdminInsightDto) => {
+    try {
+      await api(`/admin/insights/${row.id}`, {
+        method: 'PATCH',
+        json: { status: row.status === 'published' ? 'draft' : 'published', featured: row.featured },
+      });
+      toast(row.status === 'published' ? '已下线' : '已发布');
+      refresh();
+    } catch (err) {
+      toast((err as Error).message, 'err');
+    }
+  };
+
+  const toggleFeatured = async (row: AdminInsightDto) => {
+    try {
+      await api(`/admin/insights/${row.id}`, {
+        method: 'PATCH',
+        json: { status: row.status, featured: !row.featured },
+      });
+      refresh();
+    } catch (err) {
+      toast((err as Error).message, 'err');
+    }
+  };
+
+  const saveEdit = async (row: AdminInsightDto) => {
+    try {
+      await api(`/admin/insights/${row.id}`, {
+        method: 'PATCH',
+        json: { status: row.status, featured: row.featured, title: editTitle, summary: editSummary },
+      });
+      toast('已保存');
+      setEditing(null);
+      refresh();
+    } catch (err) {
+      toast((err as Error).message, 'err');
     }
   };
 
   const downloadPdf = async (row: AdminInsightDto) => {
-    setBusyId(row.id);
-    setError(null);
+    setBusy(`pdf:${row.id}`);
     try {
       await apiDownload(`/admin/insights/${row.id}/pdf`, `insight-${row.id}.pdf`);
     } catch (err) {
       toast((err as Error).message, 'err');
     } finally {
-      setBusyId(null);
-    }
-  };
-
-  const openEditor = async (row?: AdminInsightDto) => {
-    setError(null);
-    if (!row) {
-      setEditor({ ...EMPTY_EDITOR });
-      return;
-    }
-    let detail: AdminInsightDto;
-    try {
-      detail = await api<AdminInsightDto>(`/admin/insights/${row.id}`);
-    } catch (err) {
-      toast((err as Error).message, 'err');
-      return;
-    }
-    const cover = (detail.cover ?? {}) as Record<string, unknown>;
-    setEditor({
-      id: detail.id,
-      industryId: industries.data?.find((i) => i.name === detail.industry)?.id ?? '',
-      issue: detail.issue,
-      title: detail.title,
-      summary: detail.summary,
-      headline: String(cover.headline ?? ''),
-      brands: String(cover.brands ?? ''),
-      questions: String(cover.questions ?? ''),
-      answers: String(cover.answers ?? ''),
-      testedAt: String(cover.testedAt ?? ''),
-      blocksText: JSON.stringify(detail.blocks, null, 2),
-      status: detail.status,
-      featured: detail.featured,
-    });
-  };
-
-  const save = async () => {
-    if (!editor) return;
-    setError(null);
-    let blocks: unknown;
-    try {
-      blocks = JSON.parse(editor.blocksText);
-    } catch {
-      setError('blocks 不是合法 JSON');
-      return;
-    }
-    if (!editor.industryId) {
-      setError('请选择所属行业');
-      return;
-    }
-    const json = {
-      industryId: Number(editor.industryId),
-      issue: editor.issue,
-      title: editor.title,
-      summary: editor.summary,
-      cover: {
-        ...(editor.headline ? { headline: editor.headline } : {}),
-        ...(editor.brands ? { brands: Number(editor.brands) } : {}),
-        ...(editor.questions ? { questions: Number(editor.questions) } : {}),
-        ...(editor.answers ? { answers: Number(editor.answers) } : {}),
-        ...(editor.testedAt ? { testedAt: editor.testedAt } : {}),
-      },
-      blocks,
-      status: editor.status,
-      featured: editor.featured,
-    };
-    try {
-      if (editor.id) await api(`/admin/insights/${editor.id}`, { method: 'PATCH', json });
-      else await api('/admin/insights', { method: 'POST', json });
-      setEditor(null);
-      refresh();
-    } catch (err) {
-      setError((err as Error).message);
+      setBusy(null);
     }
   };
 
   const remove = async (row: AdminInsightDto) => {
+    if (!window.confirm(`删除报告「${row.title}」?`)) return;
     try {
       await api(`/admin/insights/${row.id}`, { method: 'DELETE' });
-      refresh();
-    } catch (err) {
-      toast((err as Error).message, 'err');
-    }
-  };
-
-  const toggleField = async (row: AdminInsightDto, field: 'status' | 'featured') => {
-    try {
-      await api(`/admin/insights/${row.id}`, { method: 'PATCH', json: { [field]: field === 'status' ? (row.status === 'published' ? 'draft' : 'published') : !row.featured } });
       refresh();
     } catch (err) {
       toast((err as Error).message, 'err');
@@ -256,216 +177,200 @@ export default function AdminInsightsPage() {
     <>
       <PageHeader
         title="行业洞察"
-        desc="配置行业 → 运行聚合自动成稿 → 微调发布 → 下载 PDF;已发布进入会员总览,精选上官网首页。"
-        actions={
-          <button onClick={() => openEditor()} className="btn-primary" disabled={(industries.data ?? []).length === 0}>
-            新建洞察报告
-          </button>
-        }
+        desc="选行业 → AI 生成:自动聚合本行业监测数据 + LLM 撰稿成稿 → 预览微调 → 发布(会员总览可见,精选上官网首页)"
       />
 
-      {error && <p className="mt-4 rounded-lg bg-bad-50 px-3.5 py-2.5 text-xs text-bad">{error}</p>}
-
-      {/* 编辑器 */}
-      {editor && (
-        <div className="card mt-4 space-y-3 p-6">
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="text-xs font-medium text-slate-500">
-              所属行业 *
-              <select
-                value={editor.industryId}
-                onChange={(e) => setEditor({ ...editor, industryId: Number(e.target.value) })}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700"
-              >
-                <option value="">选择行业…</option>
-                {(industries.data ?? []).map((i) => (
-                  <option key={i.id} value={i.id}>{i.name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="text-xs font-medium text-slate-500">
-              期数
-              <input value={editor.issue} onChange={(e) => setEditor({ ...editor, issue: e.target.value })} placeholder="第 1 期" className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700" />
-            </label>
-          </div>
-          <label className="block text-xs font-medium text-slate-500">
-            标题 *
-            <input value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} placeholder="国产内衣 AI 可见度榜" className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700" />
-          </label>
-          <label className="block text-xs font-medium text-slate-500">
-            摘要
-            <textarea value={editor.summary} onChange={(e) => setEditor({ ...editor, summary: e.target.value })} rows={2} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700" />
-          </label>
-          <fieldset className="rounded-lg border border-slate-100 p-3">
-            <legend className="px-1 text-xs font-medium text-slate-500">封面指标(列表卡展示)</legend>
-            <div className="grid gap-2 md:grid-cols-5">
-              <input value={editor.headline} onChange={(e) => setEditor({ ...editor, headline: e.target.value })} placeholder=" headline" className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs" />
-              <input value={editor.brands} onChange={(e) => setEditor({ ...editor, brands: e.target.value })} placeholder="品牌数" type="number" className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs" />
-              <input value={editor.questions} onChange={(e) => setEditor({ ...editor, questions: e.target.value })} placeholder="题数" type="number" className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs" />
-              <input value={editor.answers} onChange={(e) => setEditor({ ...editor, answers: e.target.value })} placeholder="回答数" type="number" className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs" />
-              <input value={editor.testedAt} onChange={(e) => setEditor({ ...editor, testedAt: e.target.value })} placeholder="2026-09-02" className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs" />
-            </div>
-          </fieldset>
-          <label className="block text-xs font-medium text-slate-500">
-            内容块 JSON(blocks;类型:takeaway / barRank / funnel / heatmap / radar / scatter)
-            <textarea
-              value={editor.blocksText}
-              onChange={(e) => setEditor({ ...editor, blocksText: e.target.value })}
-              rows={14}
-              className="metric-num mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-xs leading-5 text-slate-700"
-            />
-          </label>
-          <div className="flex items-center gap-4">
-            <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
-              <input type="checkbox" checked={editor.status === 'published'} onChange={(e) => setEditor({ ...editor, status: e.target.checked ? 'published' : 'draft' })} />
-              发布
-            </label>
-            <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
-              <input type="checkbox" checked={editor.featured} onChange={(e) => setEditor({ ...editor, featured: e.target.checked })} />
-              官网首页精选
-            </label>
-            <div className="ml-auto flex gap-2">
-              <button onClick={() => setEditor(null)} className="btn-ghost">取消</button>
-              <button onClick={save} className="btn-primary">保存</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 行业配置 */}
-      <section className="card mt-4 p-6">
+      {/* ===== 行业 ===== */}
+      <section className="card rise mt-4 p-6">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-semibold text-slate-900">洞察行业</h2>
           <label className="flex items-center gap-2 text-xs text-slate-500">
-            运行数据窗口
+            数据窗口
             <select
+              className="rounded-lg border border-slate-200 px-2 py-1 text-xs"
               value={windowDays ?? ''}
               onChange={(e) => setWindowDays(e.target.value ? Number(e.target.value) : null)}
-              className="rounded-lg border border-slate-200 px-2 py-1 text-xs"
             >
-              {INSIGHT_WINDOW_CHOICES.map((d) => (
-                <option key={d} value={d}>近 {d} 天</option>
-              ))}
+              <option value="7">近 7 天</option>
+              <option value="30">近 30 天</option>
+              <option value="90">近 90 天</option>
               <option value="">全量历史</option>
             </select>
           </label>
         </div>
         <div className="mb-3 flex gap-2">
           <input
+            placeholder="新增行业,如:新能源汽车 / 美妆护肤"
+            className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
             value={newIndustry}
             onChange={(e) => setNewIndustry(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && addIndustry()}
-            placeholder="新增行业,如:新能源汽车 / 内衣 / 美妆护肤"
-            className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            onKeyDown={(e) => e.key === 'Enter' && void addIndustry()}
           />
-          <button onClick={addIndustry} className="btn-ghost">添加</button>
+          <button className="btn-ghost" onClick={() => void addIndustry()}>
+            添加
+          </button>
         </div>
         <div className="flex flex-wrap gap-2">
-          {(industries.data ?? []).map((i) => (
+          {(industries.data ?? []).map((row) => (
             <span
-              key={i.id}
+              key={row.id}
               className={`group inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                i.active ? 'border-brand-200 bg-brand-50 text-brand-700' : 'border-slate-200 bg-slate-50 text-slate-400 line-through'
+                row.active ? 'border-brand-200 bg-brand-50 text-brand-700' : 'border-slate-200 text-slate-400'
               }`}
             >
-              <button onClick={() => toggleIndustry(i)} title={i.active ? '点击停用' : '点击启用'}>
-                {i.name}
+              <button title={row.active ? '点击停用' : '点击启用'} onClick={() => void toggleIndustry(row)}>
+                {row.name}
               </button>
               <button
-                onClick={() => removeIndustry(i)}
                 className="text-slate-300 transition-colors hover:text-bad group-hover:text-slate-400"
                 title="删除行业"
+                onClick={() => void removeIndustry(row)}
               >
                 ×
               </button>
+              <button
+                className="rounded bg-brand px-1.5 py-0.5 text-[10px] font-semibold text-white disabled:opacity-40"
+                disabled={busy === `ind:${row.id}` || !row.active}
+                title="AI 生成:聚合采集数据 + LLM 撰稿(无报告自动创建)"
+                onClick={() => void generate(row)}
+              >
+                {busy === `ind:${row.id}` ? '生成中…' : 'AI 生成'}
+              </button>
             </span>
           ))}
-          {(industries.data ?? []).length === 0 && <p className="text-xs text-slate-400">还没有行业:先添加行业再运行洞察。</p>}
         </div>
       </section>
 
-      {/* 报告列表 */}
-      <section className="card mt-4 p-6">
-        <h2 className="mb-3 font-semibold text-slate-900">洞察报告</h2>
-        {(list.data ?? []).length === 0 ? (
-          <EmptyState text="还没有洞察报告:添加行业后,在对应行业的报告上点「运行」自动生成数据报告。" />
-        ) : (
-          <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left text-[13px]">
-            <thead>
-              <tr className="border-b border-slate-100 text-xs text-slate-400">
-                <th className="py-2 font-medium">标题</th>
-                <th className="py-2 font-medium">行业</th>
-                <th className="py-2 font-medium">数据</th>
-                <th className="py-2 font-medium">状态</th>
-                <th className="py-2 font-medium">精选</th>
-                <th className="py-2 font-medium text-right">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(list.data ?? []).map((r) => (
-                <tr key={r.id} className="border-b border-slate-50 text-slate-600">
-                  <td className="py-2.5">
-                    <span className="font-medium text-slate-800">{r.title}</span>
-                    {r.issue && <span className="ml-2 text-xs text-slate-400">{r.issue}</span>}
-                  </td>
-                  <td className="py-2.5">{r.industry}</td>
-                  <td className="py-2.5 text-xs text-slate-400">
-                    {r.builtAt ? (
-                      `${r.windowDays ? `近${r.windowDays}天` : '全量'} · ${new Date(r.builtAt).toLocaleDateString('zh-CN')}`
-                    ) : (
-                      '未运行'
-                    )}
-                  </td>
-                  <td className="py-2.5">
-                    <button onClick={() => toggleField(r, 'status')}>
-                      <Badge label={r.status === 'published' ? '已发布' : '草稿'} tone={r.status === 'published' ? 'good' : 'slate'} />
-                    </button>
-                    {r.buildStatus === 'running' && <span className="ml-1.5"><Badge label="聚合中…" tone="brand" /></span>}
-                    {r.buildStatus === 'failed' && (
-                      <span className="ml-1.5" title={r.buildError ?? '聚合失败'}>
-                        <Badge label="运行失败" tone="bad" />
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-2.5">
-                    <button onClick={() => toggleField(r, 'featured')}>
-                      <Badge label={r.featured ? '精选' : '—'} tone={r.featured ? 'brand' : 'slate'} />
-                    </button>
-                  </td>
-                  <td className="py-2.5 text-right text-xs">
-                    <button
-                      onClick={() => runInsight(r)}
-                      disabled={r.buildStatus === 'running' || busyId === r.id}
-                      className="mr-3 font-medium text-brand-600 hover:underline disabled:opacity-40"
-                    >
-                      运行
-                    </button>
-                    <button
-                      onClick={() => downloadPdf(r)}
-                      disabled={busyId === r.id}
-                      className="mr-3 text-slate-500 hover:text-slate-800 disabled:opacity-40"
-                    >
-                      PDF
-                    </button>
-                    {r.status === 'published' && (
-                      <Link href={`/insights/${r.id}`} className="mr-3 text-brand-600 hover:underline" target="_blank">
-                        预览
-                      </Link>
-                    )}
-                    <button onClick={() => openEditor(r)} className="mr-3 text-slate-500 hover:text-slate-800">编辑</button>
-                    <button onClick={() => remove(r)} className="text-bad hover:underline">删除</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* ===== 报告列表 ===== */}
+      <section className="mt-4 space-y-3">
+        {(list.data ?? []).map((row) => (
+          <div key={row.id} className="card p-5">
+            <div className="flex flex-wrap items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">
+                    {row.industry} · {row.issue}
+                  </span>
+                  {row.status === 'published' && (
+                    <span className="rounded bg-good-50 px-1.5 py-0.5 text-[10px] font-medium text-good">已发布</span>
+                  )}
+                  {row.featured && (
+                    <span className="rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-700">官网精选</span>
+                  )}
+                  {row.buildStatus === 'running' && (
+                    <span className="rounded bg-warn-50 px-1.5 py-0.5 text-[10px] text-warn">生成中…</span>
+                  )}
+                  {row.buildStatus === 'failed' && (
+                    <span className="rounded bg-bad-50 px-1.5 py-0.5 text-[10px] text-bad" title={row.buildError ?? ''}>
+                      失败:{(row.buildError ?? '').slice(0, 40)}
+                    </span>
+                  )}
+                </div>
+                {editing === row.id ? (
+                  <div className="mt-2 space-y-2">
+                    <input
+                      className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      maxLength={60}
+                    />
+                    <textarea
+                      className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs leading-5"
+                      rows={2}
+                      value={editSummary}
+                      onChange={(e) => setEditSummary(e.target.value)}
+                      maxLength={160}
+                    />
+                    <div className="flex gap-2">
+                      <button className="btn-primary h-8 px-3 text-xs" onClick={() => void saveEdit(row)}>
+                        保存
+                      </button>
+                      <button className="btn-ghost h-8 px-3 text-xs" onClick={() => setEditing(null)}>
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <h3 className="mt-1.5 text-[15px] font-semibold text-slate-900">{row.title || '(未命名)'}</h3>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">{row.summary}</p>
+                  </>
+                )}
+              </div>
+              <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                <button
+                  className="h-8 rounded-lg border bg-white px-3 text-xs font-medium text-slate-600 hover:border-brand-300 hover:text-brand"
+                  onClick={() => {
+                    const ind = (industries.data ?? []).find((i) => i.name === row.industry);
+                    if (ind) void generate(ind);
+                  }}
+                  disabled={row.buildStatus === 'running'}
+                >
+                  {row.buildStatus === 'running' ? '生成中…' : '重新生成'}
+                </button>
+                <button
+                  className="h-8 rounded-lg border bg-white px-3 text-xs font-medium text-slate-600 hover:border-brand-300"
+                  onClick={() => {
+                    setExpanded(expanded === row.id ? null : row.id);
+                    if (editing !== row.id) {
+                      setEditTitle(row.title);
+                      setEditSummary(row.summary);
+                    }
+                  }}
+                >
+                  {expanded === row.id ? '收起' : '预览 / 微调'}
+                </button>
+                <button
+                  className={`h-8 rounded-lg px-3 text-xs font-medium ${
+                    row.status === 'published' ? 'bg-good-50 text-good' : 'bg-brand text-white'
+                  }`}
+                  onClick={() => void togglePublish(row)}
+                >
+                  {row.status === 'published' ? '下线' : '发布'}
+                </button>
+                <button
+                  className={`h-8 rounded-lg border px-2.5 text-xs ${row.featured ? 'border-brand-300 bg-brand-50 text-brand-700' : 'bg-white text-slate-500'}`}
+                  title="官网首页精选"
+                  onClick={() => void toggleFeatured(row)}
+                >
+                  ★
+                </button>
+                <button
+                  className="h-8 rounded-lg border bg-white px-2.5 text-xs text-slate-600"
+                  disabled={busy === `pdf:${row.id}` || row.buildStatus === 'running'}
+                  onClick={() => void downloadPdf(row)}
+                >
+                  PDF
+                </button>
+                <button
+                  className="h-8 px-2 text-xs text-slate-400 hover:text-slate-800"
+                  onClick={() => void remove(row)}
+                >
+                  删除
+                </button>
+              </div>
+            </div>
+
+            {expanded === row.id && (
+              <div className="mt-4 border-t border-slate-100 pt-4">
+                <InsightBlocks blocks={row.blocks} />
+                <button
+                  className="mt-3 text-xs text-brand-600 hover:underline"
+                  onClick={() => setEditing(row.id)}
+                >
+                  微调标题/摘要 →
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+        {(list.data ?? []).length === 0 && (
+          <div className="card flex flex-col items-center justify-center px-8 py-12 text-center">
+            <p className="text-sm text-slate-500">
+              还没有洞察报告——在上方选择行业点「AI 生成」,系统会自动聚合该行业的采集数据并由 AI 撰稿成稿
+            </p>
           </div>
         )}
-        <p className="mt-3 text-[10px] leading-5 text-slate-400">
-          「运行」按行业聚合全部监测品牌的采集事实,自动生成/覆盖报告内容(含已发布报告)——发布态与精选标记保持不变;
-          聚合由 worker 队列执行,几秒内完成,期间不可重复触发或下载。内容块类型:{INSIGHT_BLOCK_TYPES.join(' / ')}。
-        </p>
       </section>
     </>
   );
