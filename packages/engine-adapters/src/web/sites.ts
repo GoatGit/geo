@@ -157,7 +157,9 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     // 实测(2026-09,登录态):回答被拆成数十个 markdown 小块,须取整轮对话容器
     answerSelectors: ['div[class*="agent-dialogue"]', 'div[class*="agent-chat"]', 'div[class*="markdown"]'],
     stopSelectors: ['button:has-text("停止")'],
-    answerNoisePatterns: [],
+    // 实测:搜索阶段的状态行("正在搜索资料")会与问题回显粘在同一容器,
+    // 不过滤会绕过回声判定被当成回答收录
+    answerNoisePatterns: ['^正在搜索.*$', '^已搜索.*$', '^搜索中.*$', '^思考中.*$', '^正在思考.*$'],
     completionStableMs: BASE_COMPLETION_STABLE_MS,
     navigationTimeoutMs: BASE_NAV_TIMEOUT_MS,
   },
