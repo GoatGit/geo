@@ -138,6 +138,9 @@ export class DomWebAdapter implements EngineAdapter {
           .catch(() => false);
         if (ready) break;
       }
+      // 流式嗅探(豆包实测:SSE 带心跳长连接,响应级 body() 要等流关闭才落地,
+      // 常规收割窗口等不到;页面内包裹 fetch 增量读取并暂存 window 变量, ask 结束直接取)
+      await this.installNetSniffer(page);
 
       const login = await checkLogin(page, this.site);
       // 未登录:有正式登录态要求的站点直接失败(账号置 login_required);
@@ -230,13 +233,18 @@ export class DomWebAdapter implements EngineAdapter {
         .catch(() => null);
 
       const domCitations = await this.extractCitations(page, main);
-      // 网络收割收尾:轮询等待来源落地(豆包 SSE 带心跳,流关闭可能晚于答案稳定;
-      // 元宝 detail 接口也在答案后 ~1-2s 才到)。拿到≥3条早退,最长 NET_CITATION_MAX_WAIT。
+      // 网络收割收尾:轮询等待来源落地(元宝 detail 接口在答案后 ~1-2s 才到;
+      // 豆包来源经流式嗅探在搜索阶段就已进 __citeSniff)。拿到≥3条早退。
       if (this.site.netCitationAllow?.length) {
         const deadline = Date.now() + NET_CITATION_MAX_WAIT;
         while (Date.now() < deadline && netHarvest.citations.length < 3) {
           await page.waitForTimeout(1_000);
         }
+        // 流式嗅探缓冲:不依赖流关闭,直接读 window 暂存
+        const sniff = await page
+          .evaluate(() => (globalThis as { __citeSniff?: string }).__citeSniff ?? '')
+          .catch(() => '');
+        if (sniff) netHarvest.harvest(sniff.slice(-MAX_SNIFF_BYTES));
       }
       const netCitations = netHarvest.citations;
       const merged: RawCitation[] = [];
@@ -313,6 +321,54 @@ export class DomWebAdapter implements EngineAdapter {
     } catch {
       await input.fill(text, { timeout: 3_000 }).catch(() => undefined);
     }
+  }
+
+  /** 页面内 fetch 包裹:命中 netCitationAllow 的响应用 ReadableStream reader 增量读取,
+   *  暂存到 window.__citeSniff,ask 收尾时直接 evaluate 取回(幂等,重复安装只清缓冲)。 */
+  private async installNetSniffer(page: Page): Promise<void> {
+    const patterns = this.site.netCitationAllow ?? [];
+    if (patterns.length === 0) return;
+    await page
+      .evaluate((pats) => {
+        const w = globalThis as unknown as {
+          __citeSniff?: string;
+          __citeSniffInstalled?: boolean;
+          fetch: (input: unknown, init?: unknown) => Promise<Response>;
+        };
+        if (w.__citeSniffInstalled) {
+          w.__citeSniff = '';
+          return;
+        }
+        w.__citeSniffInstalled = true;
+        w.__citeSniff = '';
+        const regexps = pats.map((p) => new RegExp(p));
+        const orig = w.fetch.bind(w);
+        w.fetch = async (input: unknown, init?: unknown) => {
+          const resp = await orig(input, init);
+          try {
+            const url = typeof input === 'string' ? input : ((input as Request)?.url ?? '');
+            if (regexps.some((re) => re.test(url)) && resp.body) {
+              const reader = resp.clone().body!.getReader();
+              const dec = new TextDecoder();
+              void (async () => {
+                try {
+                  for (;;) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    w.__citeSniff = ((w.__citeSniff ?? '') + dec.decode(value, { stream: true })).slice(-2_000_000);
+                  }
+                } catch {
+                  // 流被取消(页面跳转)属正常
+                }
+              })();
+            }
+          } catch {
+            // 包裹失败不影响页面本身
+          }
+          return resp;
+        };
+      }, patterns)
+      .catch(() => undefined);
   }
 
   /**
@@ -578,6 +634,8 @@ function mojibakeToUtf8(s: string): string | null {
 interface NetCitationHarvester {
   citations: RawCitation[];
   detach(): void;
+  /** 嗅探文本(页面内 fetch 包裹暂存的 SSE 增量)进同一条收割管线。 */
+  harvest(text: string): void;
 }
 
 /** 在 ask 期间挂 response 监听,从 JSON/SSE 载荷提取引用来源;ask 结束必须 detach()。
@@ -587,7 +645,7 @@ function attachNetCitationHarvester(page: Page, engine: EngineId): NetCitationHa
   const seen = new Set<string>();
   const allow = (ENGINE_SITES[engine]?.netCitationAllow ?? []).map((p) => new RegExp(p));
   const chatHost = safeHost(ENGINE_SITES[engine]?.chatUrl ?? '') ?? '';
-  if (allow.length === 0) return { citations, detach: () => {} };
+  if (allow.length === 0) return { citations, detach: () => {}, harvest: () => {} };
   const onResponse = (resp: { url(): string; headers(): Record<string, string>; body(): Promise<Buffer> }) => {
     try {
       const url = resp.url();
@@ -615,6 +673,7 @@ function attachNetCitationHarvester(page: Page, engine: EngineId): NetCitationHa
         // 页面已关闭场景
       }
     },
+    harvest: (text: string) => harvestCitationsFromPayload(text, citations, seen, chatHost),
   };
 }
 
