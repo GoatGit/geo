@@ -39,12 +39,6 @@ interface MaterialRow {
   createdAt: string;
 }
 
-interface DigResult {
-  intro: string;
-  material: MaterialRow;
-  competitors: Array<{ name: string; aliases: string[] }>;
-}
-
 const KIND_LABEL: Record<MaterialRow['kind'], string> = { text: '📝 文本', url: '🔗 链接' };
 
 export default function BrandAssetPage() {
@@ -72,41 +66,6 @@ export default function BrandAssetPage() {
       });
     }
   }, [brand?.id, brand?.name, brand?.intro, brand?.industry, brand?.website]);
-
-  // ===== AI 品牌挖掘 =====
-  const [digResult, setDigResult] = useState<DigResult | null>(null);
-  const dig = useMutation({
-    mutationFn: () => api<DigResult>(`/brands/${brandId}/dig`, { method: 'POST' }),
-    onSuccess: (r) => {
-      setDigResult(r);
-      setForm((f) => (f ? { ...f, intro: r.intro } : f));
-      setEditing(false);
-      void queryClient.invalidateQueries({ queryKey: ['brand-materials'] });
-      void queryClient.invalidateQueries({ queryKey: ['brands'] });
-      toast('AI 品牌挖掘完成:画像已写入描述,竞品建议在下方确认');
-    },
-    onError: (e) => toast((e as Error).message, 'err'),
-  });
-
-  // ===== 保存资料 =====
-  const saveProfile = async () => {
-    if (!brand || !form) return;
-    if (!form.name.trim()) {
-      toast('品牌名不能为空', 'err');
-      return;
-    }
-    setSaving(true);
-    try {
-      await api(`/brands/${brand.id}`, { method: 'PATCH', json: form });
-      refreshAll();
-      setEditing(false);
-      toast('品牌资料已保存');
-    } catch (e) {
-      toast((e as Error).message, 'err');
-    } finally {
-      setSaving(false);
-    }
-  };
 
   // ===== 资料库 =====
   const materials = useQuery({
@@ -140,6 +99,65 @@ export default function BrandAssetPage() {
     () => (materials.data ?? []).filter((m) => matFilter === 'all' || m.kind === matFilter),
     [materials.data, matFilter],
   );
+
+  // ===== AI 品牌挖掘(后台执行 + 轮询:LLM 生成 20-40s,同步请求会被网关超时切断) =====
+  const [digging, setDigging] = useState(false);
+  const knownDigIds = useMemo(() => new Set((materials.data ?? []).filter((m) => m.source === 'dig').map((m) => m.id)), [materials.data]);
+  const dig = useMutation({
+    mutationFn: async () => {
+      await api(`/brands/${brandId}/dig`, { method: 'POST' });
+      // 轮询:挖掘完成后 brand-materials 会多出一条 dig 资料
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        try {
+          const st = await api<{ running: boolean }>(`/brands/${brandId}/dig/status`);
+          if (!st.running) break;
+        } catch {
+          break;
+        }
+      }
+      await queryClient.invalidateQueries({ queryKey: ['brand-materials'] });
+      await queryClient.invalidateQueries({ queryKey: ['brands'] });
+    },
+    onSuccess: () => {
+      setDigging(false);
+      const fresh = (queryClient.getQueryData<MaterialRow[]>(['brand-materials']) ?? []).filter(
+        (m) => m.source === 'dig' && !knownDigIds.has(m.id),
+      );
+      if (fresh.length > 0) {
+        toast('AI 品牌挖掘完成:画像已写入描述,竞品建议在下方确认');
+        void queryClient.refetchQueries({ queryKey: ['brand-materials'] });
+        void queryClient.refetchQueries({ queryKey: ['brands'] });
+      } else {
+        toast('本轮挖掘未产出,请稍后重试', 'err');
+      }
+    },
+    onError: (e) => {
+      setDigging(false);
+      toast((e as Error).message, 'err');
+    },
+  });
+  const digPending = digging || dig.isPending;
+
+  // ===== 保存资料 =====
+  const saveProfile = async () => {
+    if (!brand || !form) return;
+    if (!form.name.trim()) {
+      toast('品牌名不能为空', 'err');
+      return;
+    }
+    setSaving(true);
+    try {
+      await api(`/brands/${brand.id}`, { method: 'PATCH', json: form });
+      refreshAll();
+      setEditing(false);
+      toast('品牌资料已保存');
+    } catch (e) {
+      toast((e as Error).message, 'err');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   // ===== 识别口径 =====
   const [entryName, setEntryName] = useState('');
@@ -248,11 +266,11 @@ export default function BrandAssetPage() {
           <div className="flex shrink-0 flex-wrap gap-2 sm:ml-auto">
             <button
               className="btn-primary disabled:opacity-50"
-              disabled={dig.isPending}
+              disabled={digPending}
               onClick={() => dig.mutate()}
               title="基于品牌名/行业/官网/描述,LLM 生成结构化品牌画像与竞品建议"
             >
-              {dig.isPending ? '挖掘中…(约 30s)' : '✦ AI 品牌挖掘'}
+              {digPending ? "挖掘中…(约 30-60s)" : "✦ AI 品牌挖掘"}
             </button>
             <button
               className="rounded-lg border bg-white px-3.5 py-1.5 text-[12.5px] font-semibold text-slate-700 transition-colors hover:border-brand/40 hover:text-brand"
@@ -269,22 +287,10 @@ export default function BrandAssetPage() {
             </button>
           </div>
         </div>
-        {dig.isPending && (
+        {digPending && (
           <p className="mt-3 rounded bg-white/70 px-3 py-1.5 text-xs text-slate-500">
             正在基于品牌名/行业/官网/现有描述生成结构化画像与竞品建议……
           </p>
-        )}
-        {digResult && (digResult.competitors?.length ?? 0) > 0 && (
-          <div className="mt-3 rounded-lg bg-white/80 p-3 text-xs text-slate-600">
-            <b className="text-slate-700">AI 建议竞品:</b>
-            {digResult.competitors.map((c) => (
-              <span key={c.name} className="mr-2 inline-block rounded-full bg-brand-50 px-2 py-0.5 text-brand-700">
-                {c.name}
-                {c.aliases.length > 0 && <span className="ml-1 text-[10px] text-slate-400">({c.aliases.join('/')})</span>}
-              </span>
-            ))}
-            <span className="ml-1 text-slate-400">→ 在下方「新增 / 更新口径」确认后参与识别</span>
-          </div>
         )}
       </section>
 

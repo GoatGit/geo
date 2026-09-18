@@ -18,6 +18,13 @@ import { DB } from '../common/infra.module';
 
 @Injectable()
 export class BrandsService {
+  /** 进行中的挖掘任务(进程内去重;API 单实例部署,无需跨进程锁) */
+  private readonly digging = new Set<number>();
+
+  isDigging(brandId: number): boolean {
+    return this.digging.has(brandId);
+  }
+
   constructor(
     @Inject(DB) private readonly db: NodePgDatabase,
     private readonly billing: BillingService,
@@ -263,6 +270,16 @@ export class BrandsService {
    * 产物写入 intro + 自动归档一条"品牌挖掘"文本资料;竞品建议由调用方走既有待确认机制。
    */
   async digProfile(accountId: number, brandId: number) {
+    if (this.digging.has(brandId)) return { started: true, running: true };
+    this.digging.add(brandId);
+    try {
+      return await this.digProfileInner(accountId, brandId);
+    } finally {
+      this.digging.delete(brandId);
+    }
+  }
+
+  private async digProfileInner(accountId: number, brandId: number) {
     const brand = await this.getOwned(accountId, brandId);
     const settings = await loadPlatformSettings(this.db);
     const cfg = settings.insightAgent;
@@ -317,10 +334,27 @@ export class BrandsService {
       'dig',
     );
 
-    const competitors = (parsed.competitors ?? [])
+    // 竞品建议直接进「待确认」清单(确认后才参与识别,docs/01 A1 对策)
+    const existing = await this.db
+      .select({ name: recognitionEntries.name })
+      .from(recognitionEntries)
+      .where(and(eq(recognitionEntries.brandId, brandId), eq(recognitionEntries.kind, 'competitor')));
+    const known = new Set(existing.map((e) => e.name));
+    const suggested = (parsed.competitors ?? [])
       .map((c) => ({ name: String(c.name ?? '').trim(), aliases: (c.aliases ?? []).map((a) => String(a).trim()).filter(Boolean) }))
-      .filter((c) => c.name.length >= 2 && c.name !== brand.name);
+      .filter((c) => c.name.length >= 2 && c.name !== brand.name && !known.has(c.name));
+    for (const c of suggested) {
+      await this.db.insert(recognitionEntries).values({
+        brandId,
+        kind: 'competitor',
+        name: c.name,
+        aliases: c.aliases,
+        note: 'AI 品牌挖掘建议',
+        source: 'dig',
+        confirmed: false,
+      });
+    }
 
-    return { intro, material, competitors };
+    return { intro, material, competitors: suggested };
   }
 }
