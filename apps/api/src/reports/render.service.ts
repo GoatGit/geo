@@ -67,6 +67,85 @@ export class ReportRenderService {
     return Object.values(REPORT_TEMPLATES);
   }
 
+  /**
+   * 模板预览用样例数据(不落库、与任何品牌无关):覆盖全部分节的代表性内容,
+   * 让用户在生成前看到真实版式。行业示例与产品定位一致(新能源车)。
+   */
+  samplePayload(type: ReportType): ReportPayload {
+    return {
+      reportType: type,
+      period: '样例',
+      generatedAt: new Date().toISOString(),
+      brand: { name: '示例品牌(模板样例)', industry: '汽车', website: 'https://example.com' },
+      overview: {
+        valid: 120,
+        mentionRate: 0.68,
+        top3Rate: 0.45,
+        top1Rate: 0.18,
+        avgRank: 3.2,
+        excluded: { failed: 2, quotaBlocked: 1 },
+      },
+      questionLayers: [
+        { text: '20万左右值得买的纯电轿车有哪些?', type: 'ranking', layer: 'L1' },
+        { text: '家里第一辆车买纯电还是混动?', type: 'ranking', layer: 'L2' },
+        { text: '哪些新能源车售后服务口碑好?', type: 'reputation', layer: 'L3' },
+        { text: '预算25万买SUV,有什么推荐?', type: 'ranking', layer: null },
+      ],
+      competitors: [
+        { name: '竞品A', mentions: 42, mentionRate: 0.82, top3Rate: 0.6 },
+        { name: '竞品B', mentions: 31, mentionRate: 0.64, top3Rate: 0.38 },
+        { name: '竞品C', mentions: 18, mentionRate: 0.4, top3Rate: 0.15 },
+        { name: '竞品D', mentions: 9, mentionRate: 0.22, top3Rate: 0.05 },
+      ],
+      reputation: {
+        runs: 18,
+        sentimentScore: 72,
+        weaknesses: [
+          { term: '售后响应慢', runs: 5 },
+          { term: '价格波动', runs: 3 },
+        ],
+      },
+      citations: {
+        total: 86,
+        owned: 9,
+        ownedShare: 0.105,
+        top: [
+          { domain: 'autohome.com.cn', hits: 14 },
+          { domain: 'dongchedi.com', hits: 11 },
+          { domain: 'zhihu.com', hits: 8 },
+        ],
+      },
+      actions: [
+        {
+          priority: 'P0',
+          ruleId: 'R-L4',
+          action: '存在全线缺席问题:补齐该问题的结构化事实内容并核查引用源覆盖',
+          dataBasis: '问题分层 L4',
+          target: '内容团队',
+        },
+        {
+          priority: 'P1',
+          ruleId: 'R-CITE',
+          action: '高频信源集中度过高:拓展第三方评测与垂直媒体引用覆盖',
+          dataBasis: '引用源 Top3 占比 61%',
+          target: '公关/内容',
+        },
+        {
+          priority: 'P2',
+          ruleId: 'R-REP',
+          action: '跟踪负面印象词条的处置与话术更新',
+          dataBasis: '口碑负面印象 Top2',
+          target: '客服/公关',
+        },
+      ],
+      appendix: {
+        methodology:
+          '样例数据仅用于展示模板版式。口径:提及率分母=有效 QueryRun;Top3/首推率分母=有效且有名次;综合名次=未上榜记 N+1 取中位数。',
+        rulesetVersion: '2026.09.1',
+      },
+    };
+  }
+
   render(payload: ReportPayload, type: ReportType): string {
     const tpl = REPORT_TEMPLATES[type] ?? REPORT_TEMPLATES.weekly;
     const sections = tpl.sections

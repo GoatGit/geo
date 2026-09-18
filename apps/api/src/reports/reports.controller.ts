@@ -77,6 +77,16 @@ export class ReportsController implements OnModuleDestroy {
     return this.renderer.templates();
   }
 
+  /** 模板预览:样例数据渲染真实版式,生成前即可查看(不落库、与品牌无关)。 */
+  @Get('templates/:type/preview')
+  templatePreview(@Param('type') type: string) {
+    if (!REPORT_TYPES.includes(type as ReportType)) {
+      throw new HttpException(`unknown report type: ${type}`, HttpStatus.BAD_REQUEST);
+    }
+    const html = this.renderer.render(this.renderer.samplePayload(type as ReportType), type as ReportType);
+    return { type, html };
+  }
+
   /** 手动触发生成(docs/05 §6);周/月报另由 worker cron 自动生成。套餐门控 + 当日频控。 */
   @Post('generate')
   async generate(@Req() req: Request, @Body() dto: GenerateReportDto) {

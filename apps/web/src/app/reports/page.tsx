@@ -55,14 +55,26 @@ export default function ReportsPage() {
     onError: (e) => toast((e as Error).message, 'err'),
   });
 
-  const [preview, setPreview] = useState<{ id: number; html: string } | null>(null);
-  const [previewBusy, setPreviewBusy] = useState<number | null>(null);
+  const [preview, setPreview] = useState<{ id: number | null; title: string; html: string } | null>(null);
+  const [previewBusy, setPreviewBusy] = useState<string | null>(null);
 
   const openPreview = async (id: number) => {
-    setPreviewBusy(id);
+    setPreviewBusy(`r${id}`);
     try {
       const r = await api<{ html: string }>(`/reports/${id}/preview`);
-      setPreview({ id, html: r.html });
+      setPreview({ id, title: `报告预览 #${id}`, html: r.html });
+    } catch (e) {
+      toast((e as Error).message, 'err');
+    } finally {
+      setPreviewBusy(null);
+    }
+  };
+
+  const openTemplatePreview = async (type: string, name: string) => {
+    setPreviewBusy(`t${type}`);
+    try {
+      const r = await api<{ html: string }>(`/reports/templates/${type}/preview`);
+      setPreview({ id: null, title: `模板预览 · ${name}(样例数据)`, html: r.html });
     } catch (e) {
       toast((e as Error).message, 'err');
     } finally {
@@ -114,6 +126,13 @@ export default function ReportsPage() {
               </span>
             </div>
             <p className="mt-2 text-xs leading-5 text-slate-500">{t.desc}</p>
+            <button
+              className="mt-3 rounded border border-slate-200 px-2.5 py-1 text-xs transition-colors hover:border-brand-300 hover:text-brand-700"
+              disabled={previewBusy === `t${t.type}`}
+              onClick={() => void openTemplatePreview(t.type, t.name)}
+            >
+              {previewBusy === `t${t.type}` ? '加载中…' : '预览模板'}
+            </button>
           </div>
         ))}
         {templates.isLoading && <div className="h-20 animate-pulse rounded-xl bg-slate-100" />}
@@ -148,10 +167,10 @@ export default function ReportsPage() {
                       {canUse && (
                         <button
                           className="rounded border border-slate-200 px-2.5 py-1 transition-colors hover:border-brand-300 hover:text-brand-700"
-                          disabled={previewBusy === r.id}
-                          onClick={() => openPreview(r.id)}
+                          disabled={previewBusy === `r${r.id}`}
+                          onClick={() => void openPreview(r.id)}
                         >
-                          {previewBusy === r.id ? '加载中…' : '预览'}
+                          {previewBusy === `r${r.id}` ? '加载中…' : '预览'}
                         </button>
                       )}
                       {canUse && (
@@ -196,21 +215,23 @@ export default function ReportsPage() {
           >
             <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
               <span className="text-sm font-semibold text-slate-800">
-                报告预览 #{preview.id}
+                {preview.title}
                 <span className="ml-2 text-xs font-normal text-slate-400">
-                  打印时选择「另存为 PDF」即可获得 PDF 版本
+                  {preview.id ? '打印时选择「另存为 PDF」即可获得 PDF 版本' : '样例数据,仅供查看版式'}
                 </span>
               </span>
               <div className="flex items-center gap-2">
-                <button className="btn-ghost" onClick={() => download(preview.id)}>
-                  下载
-                </button>
+                {preview.id && (
+                  <button className="btn-ghost" onClick={() => download(preview.id!)}>
+                    下载
+                  </button>
+                )}
                 <button className="btn-primary" onClick={() => setPreview(null)}>
                   关闭
                 </button>
               </div>
             </div>
-            <iframe title={`报告 ${preview.id}`} srcDoc={preview.html} sandbox="allow-popups allow-modals" className="h-full w-full flex-1 bg-slate-100" />
+            <iframe title={preview.title} srcDoc={preview.html} sandbox="allow-popups allow-modals" className="h-full w-full flex-1 bg-slate-100" />
           </div>
         </div>
       )}
