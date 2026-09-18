@@ -524,6 +524,8 @@ function isEngineHost(host: string): boolean {
 // 页面 DOM 全程无 <a href>。收割器与站点解耦:对载荷做扁平 JSON 对象正则,
 // 不绑定具体接口路径/结构,引擎改版只要字段名不换就持续有效。
 
+// 收割宽限:等待网络引用收尾的余量(预留调参,暂未接线)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const NET_CITATION_GRACE_MS = 2_500;
 const NET_CITATION_MAX_WAIT = 12_000;
 const MAX_CITATIONS = 10;

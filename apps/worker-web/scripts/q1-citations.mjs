@@ -1,5 +1,5 @@
 import pg from 'pg';
-const c = new pg.Client({ connectionString: 'postgres://geo:bekvom-weBvyx-6nogri@geopub.pg.rds.aliyuncs.com:15432/geo', ssl: false });
+const c = new pg.Client({ connectionString: (process.env.DATABASE_URL || 'postgres://localhost/geo'), ssl: false });
 await c.connect();
 
 let r = await c.query(`

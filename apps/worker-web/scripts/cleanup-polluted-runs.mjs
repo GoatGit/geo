@@ -16,7 +16,7 @@ const s3 = new S3Client({
   forcePathStyle: false,
 });
 
-const c = new pg.Client({ connectionString: 'postgres://geo:bekvom-weBvyx-6nogri@geopub.pg.rds.aliyuncs.com:15432/geo', ssl: false });
+const c = new pg.Client({ connectionString: (process.env.DATABASE_URL ?? 'postgres://localhost/geo'), ssl: false });
 await c.connect();
 const runs = await c.query(
   "SELECT id, engine FROM query_runs WHERE status='ok_with_answer' AND brand_id IN (9,12) ORDER BY id",

@@ -12,7 +12,7 @@ const question = process.argv[5] || '2026年20万预算买什么新能源SUV好?
 const CHAT_URLS = { doubao: 'https://www.doubao.com/chat/', yuanbao: 'https://yuanbao.tencent.com/chat', qwen: 'https://www.qianwen.com/' };
 
 (async () => {
-  const pdb = new pg.Client({ connectionString: 'postgres://geo:bekvom-weBvyx-6nogri@geopub.pg.rds.aliyuncs.com:15432/geo', ssl: false });
+  const pdb = new pg.Client({ connectionString: (process.env.DATABASE_URL || 'postgres://localhost/geo'), ssl: false });
   await pdb.connect();
   const pr = await pdb.query(
     "SELECT id, cookies FROM account_profiles WHERE engine=$1 AND status='available' AND cookies IS NOT NULL ORDER BY id LIMIT 1",
