@@ -33,7 +33,8 @@ async function qgGet(url: string): Promise<{ ok: boolean; body: string }> {
 }
 
 export class QgProxyPool {
-  private lease: QgProxyLease | null = null;
+  /** 存活租约表(key = server,即 ip:port):多通道并存,档案按绑定亲和取用。 */
+  private leases = new Map<string, QgProxyLease>();
   private whitelistedEgress: string | null = null;
   private lastChannelWarn = 0;
 
@@ -48,39 +49,83 @@ export class QgProxyPool {
     const next = key ?? '';
     if (next === this.key) return;
     this.key = next;
-    this.lease = null;
+    this.leases.clear();
     this.whitelistedEgress = null;
     console.log(`[proxy-pool] Key 已更新(管理后台),租约重置`);
   }
 
-  /** 当前租约(内存缓存;进程重启后重新提取同一静态 IP 或新 IP 均可接受)。 */
+  /** 当前任一存活租约(兼容旧调用方;进程重启后经 adopt 认领同一静态 IP)。 */
   current(): QgProxyLease | null {
-    return this.lease;
+    return this.liveLeases()[0] ?? null;
   }
 
-  /** 取代理(无则提取);通道不足时返回 null 由调用方直连降级。 */
+  /** deadline 非空的以本地时间近似判定,余量 10 分钟;无 deadline 视为存活。 */
+  private isLive(l: QgProxyLease): boolean {
+    if (!l.deadline) return true;
+    const dl = new Date(l.deadline.replace(' ', 'T') + '+08:00').getTime();
+    return !(Number.isFinite(dl) && dl < Date.now() + 10 * 60_000);
+  }
+
+  private liveLeases(): QgProxyLease[] {
+    return [...this.leases.values()].filter((l) => this.isLive(l));
+  }
+
+  /**
+   * 按档案取租约(IP 亲和,采集事故复盘):同一档案的登录与采集必须同一出口 IP——
+   * 引擎风控把 Cookie 绑定到登录时的出口,跨 IP 会话被判 needs_login。
+   * bindingServer = 档案上次的租约 server(account_profiles.proxy_server):
+   * - 命中且存活 → 原样返回(rotated=false);
+   * - 有绑定但该租约已消失/到期 → 分配现有或新租约并标 rotated=true,调用方必须按
+   *   "出口已切换"语义处理(重绑 + 短冷却,不得计入 2-strike 清 Cookie);
+   * - 无绑定(首次)→ 优先复用存活租约(粘性共享,不占新通道),没有才提取。
+   */
+  async acquireForProfile(bindingServer: string | null): Promise<{ lease: QgProxyLease | null; rotated: boolean }> {
+    if (!this.enabled) return { lease: null, rotated: false };
+    if (this.liveLeases().length === 0) await this.adoptAllFromInUse();
+    let live = this.liveLeases();
+
+    if (bindingServer) {
+      const bound = this.leases.get(bindingServer);
+      if (bound && this.isLive(bound)) return { lease: bound, rotated: false };
+      // 绑定的租约可能刚续期:再同步一次在用列表后仍无,才判定切换
+      if (!live.some((l) => l.server === bindingServer)) await this.adoptAllFromInUse();
+      live = this.liveLeases();
+      const rebound = bindingServer ? this.leases.get(bindingServer) : undefined;
+      if (rebound && this.isLive(rebound)) return { lease: rebound, rotated: false };
+      const lease = live[0] ?? (await this.extractNew());
+      if (!lease) return { lease: null, rotated: false };
+      return { lease, rotated: lease.server !== bindingServer };
+    }
+
+    const lease = live[0] ?? (await this.extractNew());
+    return { lease: lease ?? null, rotated: false };
+  }
+
+  /** 兼容旧调用方:取任一存活租约(无则提取)。 */
   async acquire(): Promise<QgProxyLease | null> {
-    if (!this.enabled) return null;
-    if (this.lease) return this.lease;
+    const { lease } = await this.acquireForProfile(null);
+    return lease;
+  }
+
+  /** 提取新通道(/get);NO_AVAILABLE_CHANNEL 时自动认领在用租约。 */
+  private async extractNew(): Promise<QgProxyLease | null> {
+    const adopted = await this.adoptAllFromInUse();
+    if (adopted > 0) return this.liveLeases()[0] ?? null;
     const r = await qgGet(`${LONGTERM}/get?key=${this.key}&num=1&format=json`);
     try {
       const j = JSON.parse(r.body) as QgGetResponse;
       const ip = j.data?.ips?.[0];
       if (j.code === 'SUCCESS' && ip?.server) {
-        this.lease = {
+        const lease = {
           server: ip.server,
           egressIp: ip.proxy_ip,
           area: ip.area,
           isp: ip.isp,
           deadline: ip.deadline,
         };
-        console.log(`[proxy-pool] 青果代理租约 ${ip.server}(出口 ${ip.proxy_ip},${ip.area ?? ''}${ip.isp ?? ''},到期 ${ip.deadline ?? '?'})`);
-        return this.lease;
-      }
-      // 通道被占(如进程重启前已提取):从在用列表认领既有租约
-      if (j.code === 'NO_AVAILABLE_CHANNEL') {
-        const adopted = await this.adoptFromInUse();
-        if (adopted) return adopted;
+        this.leases.set(lease.server, lease);
+        console.log(`[proxy-pool] 青果代理租约 ${lease.server}(出口 ${lease.egressIp},${lease.area ?? ''}${lease.isp ?? ''},到期 ${lease.deadline ?? '?'})`);
+        return lease;
       }
       if (Date.now() - this.lastChannelWarn > 10 * 60_000) {
         console.warn(`[proxy-pool] 提取失败(${j.code}:${j.message ?? r.body.slice(0, 80)}),本轮直连降级`);
@@ -93,47 +138,48 @@ export class QgProxyPool {
     }
   }
 
-  /** 从"查询在用IP"(/query)认领租约:通道被既有提取占用时复用(静态 IP 长效)。 */
-  private async adoptFromInUse(): Promise<QgProxyLease | null> {
-    const r = await qgGet(`${LONGTERM}/query?key=${this.key}&format=json`);
+  /** 解析 /query 的两种实测形态:data 直接为租约数组,或 {tasks:{...}} 包一层。 */
+  private parseInUse(body: string): Array<{ proxy_ip: string; server: string; area?: string; isp?: string; deadline?: string }> {
     try {
       type QgLease = { proxy_ip: string; server: string; area?: string; isp?: string; deadline?: string };
-      const j = JSON.parse(r.body) as {
+      const j = JSON.parse(body) as {
         code: string;
-        // 实测两种形态:data 直接为租约数组,或 {tasks: {...}} 包一层
         data?: QgLease[] | { tasks?: Record<string, { ips?: QgLease[] }> | Array<{ ips?: QgLease[] }> };
       };
-      const ips: QgLease[] = Array.isArray(j.data)
-        ? j.data
-        : Object.values((j.data as { tasks?: object } | undefined)?.tasks ?? {}).flatMap((t) =>
+      const raw = j.data;
+      const ips: QgLease[] = Array.isArray(raw)
+        ? raw
+        : Object.values((raw as { tasks?: object } | undefined)?.tasks ?? {}).flatMap((t) =>
             Array.isArray(t)
               ? ((t as Array<{ ips?: QgLease[] }>)[0]?.ips ?? [])
               : ((t as { ips?: QgLease[] }).ips ?? []),
           );
-      const live = ips.find((ip) => {
-        if (!ip.server) return false;
-        // 过期租约不认领(deadline 为本地时间近似比较)
-        if (ip.deadline) {
-          const dl = new Date(ip.deadline.replace(' ', 'T') + '+08:00').getTime();
-          if (Number.isFinite(dl) && dl < Date.now() + 10 * 60_000) return false;
-        }
-        return true;
-      });
-      if (j.code === 'SUCCESS' && live) {
-        this.lease = {
-          server: live.server,
-          egressIp: live.proxy_ip,
-          area: live.area,
-          isp: live.isp,
-          deadline: live.deadline,
-        };
-        console.log(`[proxy-pool] 认领在用租约 ${live.server}(出口 ${live.proxy_ip},到期 ${live.deadline ?? '?'})`);
-        return this.lease;
-      }
-      return null;
+      return ips.filter((ip): ip is QgLease => Boolean(ip && ip.server && ip.proxy_ip));
     } catch {
-      return null;
+      return [];
     }
+  }
+
+  /** 同步在用租约到 map(幂等):返回本次新认领的数量。 */
+  private async adoptAllFromInUse(): Promise<number> {
+    const r = await qgGet(`${LONGTERM}/query?key=${this.key}&format=json`);
+    const ips = this.parseInUse(r.body);
+    let adopted = 0;
+    for (const ip of ips) {
+      if (this.leases.has(ip.server)) continue;
+      const lease = {
+        server: ip.server,
+        egressIp: ip.proxy_ip,
+        area: ip.area,
+        isp: ip.isp,
+        deadline: ip.deadline,
+      };
+      if (!this.isLive(lease)) continue; // 过期租约不认领
+      this.leases.set(lease.server, lease);
+      adopted += 1;
+      console.log(`[proxy-pool] 认领在用租约 ${lease.server}(出口 ${lease.egressIp},到期 ${lease.deadline ?? '?'})`);
+    }
+    return adopted;
   }
 
   /** 通道与白名单自检(启动时调用一次,结果只打日志)。 */
@@ -147,7 +193,7 @@ export class QgProxyPool {
       await this.acquire(); // 提取;通道被占则自动认领在用租约
     } catch (err) {
       console.warn(`[proxy-pool] bootstrap 自检失败,降级直连(下次任务重试提取):${(err as Error).message}`);
-      this.lease = null;
+      this.leases.clear();
     }
   }
 
@@ -170,9 +216,9 @@ export class QgProxyPool {
 
   /** 代理失效(连接拒绝/过期)时清空租约,下次 acquire 重提。 */
   invalidate(): void {
-    if (this.lease) {
-      console.warn(`[proxy-pool] 租约 ${this.lease.server} 失效,清空待重提`);
-      this.lease = null;
+    if (this.leases.size > 0) {
+      console.warn(`[proxy-pool] 租约失效,清空 ${this.leases.size} 条待重提`);
+      this.leases.clear();
     }
   }
 }
@@ -221,6 +267,13 @@ export class ProxyPoolManager {
 
   async acquire(): Promise<QgProxyLease | null> {
     return this.pool.acquire();
+  }
+
+  /** 按档案取租约(IP 亲和):binding = account_profiles.proxy_server。 */
+  async acquireForProfile(
+    bindingServer: string | null,
+  ): Promise<{ lease: QgProxyLease | null; rotated: boolean }> {
+    return this.pool.acquireForProfile(bindingServer);
   }
 
   current(): QgProxyLease | null {

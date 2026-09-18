@@ -277,6 +277,8 @@ export const accountProfiles = pgTable('account_profiles', {
   surface: text('surface').notNull().default('web'),
   fingerprint: jsonb('fingerprint').$type<Record<string, unknown>>().notNull(),
   proxyHint: text('proxy_hint'),
+  /** 出口租约绑定(IP 亲和):同一档案的登录与采集必须同一出口,引擎风控绑定 Cookie 与 IP */
+  proxyServer: text('proxy_server'),
   contextRef: text('context_ref'),
   /** 登录成功导出的引擎 Cookie(采集会话注入;docs/04 §3.1) */
   cookies: jsonb('cookies').$type<unknown[]>(),

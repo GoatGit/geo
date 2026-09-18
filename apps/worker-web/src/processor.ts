@@ -59,12 +59,14 @@ export class CollectProcessor {
     private readonly db: Db,
     redis: Redis,
     private readonly broker: SessionBroker = createBrokerFromEnv(),
+    proxyPool?: ProxyPoolManager,
   ) {
     this.breaker = new EngineBreaker(redis);
     this.pool = new AccountPoolService(db);
+    // 代理池全进程单例(main 注入):登录与采集共用同一租约表,IP 亲和才能成立
+    this.proxyPool = proxyPool ?? new ProxyPoolManager(db, process.env.QG_PROXY_KEY ?? '');
     // 适配器按 BROWSER_MODE 装配:mock=回放(dev/CI);agentbay/local=真实 DOM 采集(docs/04 §2.1)
     this.realBrowser = browserModeFromEnv() !== 'mock';
-    this.proxyPool = new ProxyPoolManager(db, process.env.QG_PROXY_KEY ?? '');
     for (const engine of WEB_ENGINES) {
       this.registry.register(
         this.realBrowser ? new DomWebAdapter(engine) : MockEngineAdapter.withDefaultFixtures(engine),
@@ -154,6 +156,8 @@ export class CollectProcessor {
     // 首发领取账号;重试强制换号(docs/04 §5),池耗尽则整单延迟重排
     const triedProfileIds = new Set<number>();
     let ask = this.failedAsk(new Date(), 'account pool exhausted');
+    let leaseServer: string | null = null;
+    let rotated = false;
     let profile = await this.pool.acquire(engine);
     if (!profile) {
       // 账号池耗尽(docs/04 §3.2):延迟重排,扩容与冗余由运营策略解决
@@ -163,28 +167,36 @@ export class CollectProcessor {
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       triedProfileIds.add(profile.id);
-      ask = await this.askWithTimeout(engine, profile, data.questionText);
+      ({ ask, leaseServer, rotated } = await this.askWithTimeout(engine, profile, data.questionText));
       await this.breaker.record(engine, ask.status !== 'failed');
       if (needsLoginOf(ask)) {
         if (profile.cookies?.length) {
-          // 有持久化 Cookie 仍被判未登录:代理出口一致时多为 Cookie 已被引擎判死。
-          // 首次短冷却重试;连续 2 次仍失败 → Cookie 确认失效,清空转人工重登
-          // (避免旧 Cookie 无限冷却循环占用采集窗口)
-          const misses = (this.cookieMisses.get(profile.id) ?? 0) + 1;
-          this.cookieMisses.set(profile.id, misses);
-          if (misses >= 2) {
+          if (rotated && leaseServer) {
+            // 出口租约已切换:Cookie 是绑旧 IP 的,被判未登录不代表死——重绑新出口 + 短冷却,
+            // 不计入 2-strike(不 experge Cookie);引擎若仍拒绝,冷却后自然再试
             this.cookieMisses.delete(profile.id);
-            await this.pool.expireCookies(profile.id);
+            await this.pool.bindProxy(profile.id, leaseServer);
+            await this.pool.markTransientLoginMiss(profile.id);
             console.error(
-              `[collect] engine=${engine} profile=${profile.id} Cookie 连续 ${misses} 次被拒,已清空并转人工重登`,
+              `[collect] engine=${engine} profile=${profile.id} 出口租约切换为 ${leaseServer},Cookie 保留短冷却重试(不计 2-strike)`,
             );
           } else {
-          await this.pool.markTransientLoginMiss(profile.id);
-          console.error(
-            `[collect] engine=${engine} profile=${profile.id} 有 ${profile.cookies.length} 条 Cookie 仍 needs_login` +
-              `(hint=${String(ask.engineMeta?.hint ?? '?')},cookies=${String(ask.engineMeta?.cookies ?? '?')})` +
-              `——冷却 10 分钟自动重试(${misses}/2)`,
-          );
+            const misses = (this.cookieMisses.get(profile.id) ?? 0) + 1;
+            this.cookieMisses.set(profile.id, misses);
+            if (misses >= 2) {
+              this.cookieMisses.delete(profile.id);
+              await this.pool.expireCookies(profile.id);
+              console.error(
+                `[collect] engine=${engine} profile=${profile.id} Cookie 连续 ${misses} 次被拒,已清空并转人工重登`,
+              );
+            } else {
+              await this.pool.markTransientLoginMiss(profile.id);
+              console.error(
+                `[collect] engine=${engine} profile=${profile.id} 有 ${profile.cookies.length} 条 Cookie 仍 needs_login` +
+                  `(hint=${String(ask.engineMeta?.hint ?? '?')},cookies=${String(ask.engineMeta?.cookies ?? '?')})` +
+                  `——冷却 10 分钟自动重试(${misses}/2)`,
+              );
+            }
           }
         } else {
           this.cookieMisses.delete(profile.id);
@@ -195,6 +207,11 @@ export class CollectProcessor {
           );
         }
       } else {
+        // 成功(或非登录失败但拿到租约):绑定档案与出口,后续采集/重登都走同一 IP
+        if (ask.status !== 'failed' && leaseServer && leaseServer !== profile.proxyServer) {
+          await this.pool.bindProxy(profile.id, leaseServer).catch(() => undefined);
+        }
+        if (ask.status !== 'failed') this.cookieMisses.delete(profile.id);
         await this.pool.report(engine, profile.id, ask.status !== 'failed');
       }
       if (ask.status !== 'failed') break;
@@ -310,8 +327,14 @@ export class CollectProcessor {
     return { status: ask.status };
   }
 
-  /** 单次 ask,带超时护栏:超时按 failed 处理并释放会话,不占用并发槽。 */
-  private async askWithTimeout(engine: string, profile: AcquiredProfile, questionText: string): Promise<AskResult> {
+  /** 单次 ask,带超时护栏:超时按 failed 处理并释放会话,不占用并发槽。
+   *  代理按档案绑定取用(IP 亲和,采集事故复盘):返回本次实际使用的租约 server 与
+   *  是否发生了出口切换(rotated),供调用方区分"Cookie 真死"与"换 IP 误杀"。 */
+  private async askWithTimeout(
+    engine: string,
+    profile: AcquiredProfile,
+    questionText: string,
+  ): Promise<{ ask: AskResult; leaseServer: string | null; rotated: boolean }> {
     const queuedAt = new Date();
     let cdpBrowser: Browser | null = null;
     try {
@@ -325,23 +348,26 @@ export class CollectProcessor {
       try {
         // 本地代理直接注入 Page;远程代理(AgentBay)经 CDP 连接拿页面
         let page = session.page as Page | undefined;
+        let lease: import('./qg-proxy').QgProxyLease | null = null;
+        let rotated = false;
         if (!page && /^wss?:\/\//.test(session.cdpUrl)) {
           cdpBrowser = await chromium.connectOverCDP(session.cdpUrl);
           // 代理出口(docs/07 §13 闸门 #2):AgentBay BrowserOption.proxy 被静默忽略,
-          // 改用 Playwright context 级代理——全部引擎共用一个稳定长效 IP,
-          // 登录 Cookie 与出口 IP 绑定一致,根治跨 IP 会话被引擎拒绝
+          // 改用 Playwright context 级代理。按档案绑定取同一出口——登录 Cookie 与
+          // 出口 IP 绑定一致;租约消失时代理池会分配新出口并标 rotated
           let context: import('playwright-core').BrowserContext;
-          const lease = await this.proxyPool.acquire();
+          ({ lease, rotated } = await this.proxyPool.acquireForProfile(profile.proxyServer ?? null));
           if (lease) {
             context = await cdpBrowser.newContext({ proxy: { server: `http://${lease.server}` } });
           } else {
+            // 无租约直连降级:此时 rotated=false 且 leaseServer=null,不触碰档案绑定
             context = cdpBrowser.contexts()[0] ?? (await cdpBrowser.newContext());
           }
           // 注入持久化 Cookie(docs/04 §3.1):登录导出的引擎会话态先于导航生效
           if (profile.cookies?.length) {
             try {
               await context.addCookies(profile.cookies as never[]);
-              console.log(`[collect] engine=${engine} profile=${profile.id} 注入 Cookie ${profile.cookies.length} 条${lease ? ` + 代理出口 ${lease.egressIp}` : '(直连)'}`);
+              console.log(`[collect] engine=${engine} profile=${profile.id} 注入 Cookie ${profile.cookies.length} 条${lease ? ` + 代理出口 ${lease.egressIp}${rotated ? '(已切换)' : ''}` : '(直连)'}`);
             } catch (err) {
               console.error(`[collect] engine=${engine} profile=${profile.id} Cookie 注入失败:`, (err as Error).message);
             }
@@ -349,7 +375,7 @@ export class CollectProcessor {
           page = context.pages()[0] ?? (await context.newPage());
         }
         const adapter = this.registry.get(engine as never, 'web');
-        return await adapter.ask(
+        const ask = await adapter.ask(
           {
             mode: this.realBrowser ? 'browser' : 'mock',
             page,
@@ -360,13 +386,14 @@ export class CollectProcessor {
           questionText,
           { timeoutMs: ASK_TIMEOUT_MS },
         );
+        return { ask, leaseServer: lease?.server ?? null, rotated };
       } finally {
         await session.release();
         if (cdpBrowser) await cdpBrowser.close().catch(() => undefined); // CDP 连接的 close 只断连,不关远端浏览器
       }
     } catch (err) {
       // 超时/会话异常/无适配器统一按 failed 定格(docs/04 §7 失败模式手册)
-      return this.failedAsk(queuedAt, (err as Error).message);
+      return { ask: this.failedAsk(queuedAt, (err as Error).message), leaseServer: null, rotated: false };
     }
   }
 

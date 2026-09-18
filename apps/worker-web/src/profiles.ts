@@ -9,6 +9,8 @@ export interface AcquiredProfile {
   profileKey: string;
   fingerprint: Record<string, unknown>;
   proxyHint: string | null;
+  /** 出口租约绑定(IP 亲和):档案上次成功登录/采集所用的代理 server,采集时按此复用同一出口 */
+  proxyServer: string | null;
   contextRef: string | null;
   /** 登录成功导出的 Cookie(采集会话注入,登录态留存不依赖平台 Context 能力) */
   cookies: Array<Record<string, unknown>> | null;
@@ -53,6 +55,7 @@ export class AccountPoolService {
       id: number;
       fingerprint: Record<string, unknown>;
       proxy_hint: string | null;
+      proxy_server: string | null;
       context_ref: string | null;
       cookies: Array<Record<string, unknown>> | null;
     }>(
@@ -71,7 +74,7 @@ export class AccountPoolService {
            daily_date = current_date
        from picked
        where ap.id = picked.id
-       returning ap.id, ap.fingerprint, ap.proxy_hint, ap.context_ref, ap.cookies`,
+       returning ap.id, ap.fingerprint, ap.proxy_hint, ap.proxy_server, ap.context_ref, ap.cookies`,
       [engine, excludeIds.size > 0 ? [...excludeIds] : [-1]],
     );
     const row = res.rows[0];
@@ -81,9 +84,18 @@ export class AccountPoolService {
       profileKey: `profile:${row.id}`,
       fingerprint: row.fingerprint,
       proxyHint: row.proxy_hint,
+      proxyServer: row.proxy_server,
       contextRef: row.context_ref,
       cookies: row.cookies,
     };
+  }
+
+  /** 绑定档案与出口租约(IP 亲和):登录成功/采集成功后调用,后续采集复用同一出口。 */
+  async bindProxy(profileId: number, server: string): Promise<void> {
+    await this.db
+      .update(accountProfiles)
+      .set({ proxyServer: server })
+      .where(eq(accountProfiles.id, profileId));
   }
 
   /** Cookie 判死:清空持久化 Cookie 并转人工重登(连续 miss 后由 processor 调用)。 */

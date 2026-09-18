@@ -47,8 +47,11 @@ export class LoginManager {
     private readonly db: Db,
     private readonly redis: Redis,
     private readonly broker: SessionBroker,
+    proxyPool?: ProxyPoolManager,
   ) {
-    this.proxyPool = new ProxyPoolManager(db, process.env.QG_PROXY_KEY ?? '');}
+    // 代理池全进程单例(main 注入):登录与采集共用同一租约表,登录出口才能与采集出口对上
+    this.proxyPool = proxyPool ?? new ProxyPoolManager(db, process.env.QG_PROXY_KEY ?? '');
+  }
 
   start(): void {
     void this.loop();
@@ -119,6 +122,16 @@ export class LoginManager {
     });
 
     let cdpBrowser: import('playwright-core').Browser | null = null;
+    // IP 亲和(采集事故复盘):重登时优先复用档案绑定的出口租约——同 IP 重新登录的
+    // 通过率远高于换 IP;登录成功后把本次租约 server 写回档案,采集随之同源
+    const profRow = (
+      await this.db
+        .select({ proxyServer: accountProfiles.proxyServer })
+        .from(accountProfiles)
+        .where(eq(accountProfiles.id, req.profileId))
+        .limit(1)
+    )[0];
+    let loginLease: import('./qg-proxy').QgProxyLease | null = null;
     const session = await this.broker.acquire({
       profileKey: req.profileKey,
       contextRef: req.contextRef ?? undefined,
@@ -132,7 +145,8 @@ export class LoginManager {
         cdpBrowser = await chromium.connectOverCDP(session.cdpUrl);
         // 登录会话走代理出口(与采集一致):Cookie 与出口 IP 绑定,
         // 之后采集经同一代理注入 Cookie,引擎才会认(docs/07 §13 闸门 #2)
-        const lease = await this.proxyPool.acquire();
+        const { lease } = await this.proxyPool.acquireForProfile(profRow?.proxyServer ?? null);
+        loginLease = lease;
         const context = lease
           ? await cdpBrowser.newContext({ proxy: { server: `http://${lease.server}` } })
           : cdpBrowser.contexts()[0] ?? (await cdpBrowser.newContext());
@@ -244,7 +258,8 @@ export class LoginManager {
         const success = !cancelled && confirmStreak >= 2;
         if (success) {
           // Cookie 持久化(docs/04 §3.1):Context 同步不可靠(AccessDenied/延迟),
-          // 登录成功即导出 Cookie 落库,采集会话注入——登录态留存不再依赖平台能力
+          // 登录成功即导出 Cookie 落库,采集会话注入——登录态留存不再依赖平台能力。
+          // 同时落出口绑定(IP 亲和):后续采集按本次租约复用同一出口
           const exported = await page.context().cookies().catch(() => []);
           await this.db
             .update(accountProfiles)
@@ -252,9 +267,10 @@ export class LoginManager {
               status: 'available',
               contextRef: session.contextId ?? `local:${req.profileKey}`,
               cookies: exported,
+              ...(loginLease ? { proxyServer: loginLease.server } : {}),
             })
             .where(eq(accountProfiles.id, req.profileId));
-          console.log(`[login] session=${req.sessionId} engine=${req.engine} 登录成功,档案 ${req.profileId} 置 available(cookies=${exported.length})`);
+          console.log(`[login] session=${req.sessionId} engine=${req.engine} 登录成功,档案 ${req.profileId} 置 available(cookies=${exported.length}${loginLease ? `,出口=${loginLease.server}` : ''})`);
         } else if (!cancelled) {
           // 超时诊断:页面 URL + 当前 Cookie 名(校准各站登录 Cookie 标记)
           const cookieNames = await page

@@ -40,11 +40,11 @@ async function bootstrap() {
   const proxyPool = new ProxyPoolManager(db, process.env.QG_PROXY_KEY ?? '');
   await proxyPool.bootstrap();
   proxyPool.start();
-  const collect = new CollectProcessor(db, new Redis(bullConnection().url, { maxRetriesPerRequest: 3 }), broker);
+  const collect = new CollectProcessor(db, new Redis(bullConnection().url, { maxRetriesPerRequest: 3 }), broker, proxyPool);
   const collectWorker = collect.start(concurrency);
 
   const loginRedis = new Redis(bullConnection().url, { maxRetriesPerRequest: null });
-  const loginManager = new LoginManager(db, loginRedis, broker);
+  const loginManager = new LoginManager(db, loginRedis, broker, proxyPool);
   loginManager.start();
 
   const reputationWorker = startReputationWorker(
