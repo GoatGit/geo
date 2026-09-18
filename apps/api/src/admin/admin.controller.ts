@@ -69,7 +69,7 @@ export function resolveInsightAgentPatch(
   }
   if (typeof incoming.model === 'string') merged.model = incoming.model.trim();
   if (typeof incoming.timeoutMs === 'number' && Number.isFinite(incoming.timeoutMs)) {
-    merged.timeoutMs = Math.min(Math.max(Math.floor(incoming.timeoutMs), 2_000), 30_000);
+    merged.timeoutMs = Math.min(Math.max(Math.floor(incoming.timeoutMs), 2_000), 60_000);
   }
   if (typeof incoming.apiKey === 'string') {
     const key = incoming.apiKey.trim();

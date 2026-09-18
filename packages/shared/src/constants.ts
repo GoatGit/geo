@@ -254,7 +254,7 @@ export function mergePlatformSettings(stored: Partial<Record<string, unknown>> |
         endpoint,
         apiKey: typeof r.apiKey === 'string' ? r.apiKey : '',
         model: typeof r.model === 'string' ? r.model.trim() : '',
-        timeoutMs: Math.min(Math.max(timeout, 2_000), 30_000),
+        timeoutMs: Math.min(Math.max(timeout, 2_000), 60_000),
       };
     })(),
   };

@@ -117,11 +117,13 @@ export default function AdminSettingsPage() {
           engineDailyCaps: Object.fromEntries(
             WEB_ENGINES.map((e) => [e, Math.max(0, Math.floor(Number(form.engineDailyCaps[e]) || 0))]),
           ),
+          // 代理池必须随保存提交,否则青果 Key 的修改会被静默丢弃(实测教训)
+          proxyPool: { enabled: form.proxyPool.enabled, key: form.proxyPool.key.trim() },
           insightAgent: {
             ...form.insightAgent,
             // 空 / '***' 掩码形态 = 保留原值;仅用户真正输入过新 key 才传新值
             apiKey: insightKeyDirty ? form.insightAgent.apiKey : '',
-            timeoutMs: Math.min(Math.max(Math.floor(Number(form.insightAgent.timeoutMs) || 0), 2000), 30000),
+            timeoutMs: Math.min(Math.max(Math.floor(Number(form.insightAgent.timeoutMs) || 0), 2000), 60000),
           },
         },
       });
