@@ -117,7 +117,9 @@ export class InsightAgent {
       endpoint: s.endpoint,
       apiKey: s.apiKey,
       model: s.model,
-      timeoutMs: Math.min(timeoutMs ?? s.timeoutMs, 30_000),
+      // 上限 60s:GLM 对长回答的真实延迟 10-40s,旧 30s 钳制让配置的超时形同虚设
+      // (mention/reputation 全量超时降级,实测教训);防呆上限只防配置写错量级
+      timeoutMs: Math.min(timeoutMs ?? s.timeoutMs, 60_000),
     };
   }
 
