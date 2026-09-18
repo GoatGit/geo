@@ -139,9 +139,16 @@ export class QgProxyPool {
   /** 通道与白名单自检(启动时调用一次,结果只打日志)。 */
   async bootstrap(): Promise<void> {
     if (!this.enabled) return;
-    const ch = await qgGet(`${LONGTERM}/channels?key=${this.key}&format=json`);
-    console.log(`[proxy-pool] 通道状态:${ch.body.slice(0, 80)}`);
-    await this.acquire(); // 提取;通道被占则自动认领在用租约
+    // 自检失败不得阻断启动(代理 API 抖动/超时曾致 worker CrashLoopBackOff):
+    // 降级直连,后续 acquire 每次任务都会重试提取
+    try {
+      const ch = await qgGet(`${LONGTERM}/channels?key=${this.key}&format=json`);
+      console.log(`[proxy-pool] 通道状态:${ch.body.slice(0, 80)}`);
+      await this.acquire(); // 提取;通道被占则自动认领在用租约
+    } catch (err) {
+      console.warn(`[proxy-pool] bootstrap 自检失败,降级直连(下次任务重试提取):${(err as Error).message}`);
+      this.lease = null;
+    }
   }
 
   /** 由外部(真实会话内)上报沙箱出口 IP 并确保在白名单里(代理按客户端 IP 鉴权)。 */

@@ -12,6 +12,7 @@ COPY packages/metrics/package.json packages/metrics/
 COPY packages/engine-adapters/package.json packages/engine-adapters/
 COPY packages/browser-session/package.json packages/browser-session/
 COPY packages/evidence/package.json packages/evidence/
+COPY packages/insight-agent/package.json packages/insight-agent/
 COPY apps/api/package.json apps/api/
 COPY apps/worker-web/package.json apps/worker-web/
 COPY apps/web/package.json apps/web/
@@ -41,6 +42,7 @@ COPY packages/metrics/package.json packages/metrics/
 COPY packages/engine-adapters/package.json packages/engine-adapters/
 COPY packages/browser-session/package.json packages/browser-session/
 COPY packages/evidence/package.json packages/evidence/
+COPY packages/insight-agent/package.json packages/insight-agent/
 COPY apps/api/package.json apps/api/
 COPY apps/worker-web/package.json apps/worker-web/
 COPY apps/web/package.json apps/web/
@@ -53,6 +55,8 @@ COPY --from=build /app/packages/metrics/dist packages/metrics/dist/
 COPY --from=build /app/packages/engine-adapters/dist packages/engine-adapters/dist/
 COPY --from=build /app/packages/browser-session/dist packages/browser-session/dist/
 COPY --from=build /app/packages/evidence/dist packages/evidence/dist/
+# insight-agent 必须随镜像(漏拷导致运行时 MODULE_NOT_FOUND,worker CrashLoopBackOff 实测)
+COPY --from=build /app/packages/insight-agent/dist packages/insight-agent/dist/
 COPY --from=build /app/apps/api/dist apps/api/dist/
 # insight-pdf.ts 运行时按 __dirname 向上两级读取字体(apps/api/assets/fonts),必须随镜像
 COPY --from=build /app/apps/api/assets apps/api/assets/
