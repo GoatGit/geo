@@ -77,6 +77,7 @@ export default function BrandAssetPage() {
   const [matKind, setMatKind] = useState<'text' | 'url'>('text');
   const [matTitle, setMatTitle] = useState('');
   const [matContent, setMatContent] = useState('');
+  const [matAdding, setMatAdding] = useState(false);
   const [matFilter, setMatFilter] = useState<'all' | 'text' | 'url'>('all');
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
   const addMaterial = useMutation({
@@ -84,6 +85,7 @@ export default function BrandAssetPage() {
       api(`/brands/${brandId}/materials`, { method: 'POST', json: { kind: matKind, title: matTitle, content: matContent } }),
     onSuccess: () => {
       toast('资料已添加');
+      setMatAdding(false);
       setMatTitle('');
       setMatContent('');
       void queryClient.invalidateQueries({ queryKey: ['brand-materials'] });
@@ -423,49 +425,66 @@ export default function BrandAssetPage() {
             <h2 className="text-sm font-medium text-slate-900">品牌资料库</h2>
             <p className="mt-1 text-xs text-slate-400">品牌档案与参考资料 · 后续写稿、问答、洞察分析时 AI 自动调用</p>
           </div>
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <div className="flex overflow-hidden rounded-lg border border-slate-200">
-            {(['text', 'url'] as const).map((k) => (
-              <button
-                key={k}
-                className={`px-3 py-1.5 text-xs font-medium ${matKind === k ? 'bg-brand-50 text-brand-700' : 'bg-white text-slate-500'}`}
-                onClick={() => setMatKind(k)}
-              >
-                {KIND_LABEL[k]}
-              </button>
-            ))}
-          </div>
-          <input
-            className="w-48 rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
-            placeholder="资料标题"
-            value={matTitle}
-            onChange={(e) => setMatTitle(e.target.value)}
-          />
-          {matKind === 'url' ? (
-            <input
-              className="w-72 rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
-              placeholder="https://…(链接地址)"
-              value={matContent}
-              onChange={(e) => setMatContent(e.target.value)}
-            />
-          ) : (
-            <input
-              className="w-72 rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
-              placeholder="粘贴文本内容(品牌口碑、卖点、测评……)"
-              value={matContent}
-              onChange={(e) => setMatContent(e.target.value)}
-            />
-          )}
           <button
-            className="rounded-lg bg-brand px-3.5 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
-            disabled={addMaterial.isPending || matTitle.trim().length < 2 || matContent.trim().length < 1}
-            onClick={() => addMaterial.mutate()}
+            className="rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+            disabled={matAdding}
+            onClick={() => {
+              setMatAdding(true);
+              setMatTitle('');
+              setMatContent('');
+            }}
           >
-            添加资料
+            + 添加资料
           </button>
         </div>
+
+        {matAdding && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-brand/20 bg-brand-50/50 p-2.5">
+            <div className="flex overflow-hidden rounded-lg border border-slate-200">
+              {(['text', 'url'] as const).map((k) => (
+                <button
+                  key={k}
+                  className={`px-3 py-1.5 text-xs font-medium ${matKind === k ? 'bg-brand-50 text-brand-700' : 'bg-white text-slate-500'}`}
+                  onClick={() => setMatKind(k)}
+                >
+                  {KIND_LABEL[k]}
+                </button>
+              ))}
+            </div>
+            <input
+              autoFocus
+              className="w-48 rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
+              placeholder="资料标题"
+              value={matTitle}
+              onChange={(e) => setMatTitle(e.target.value)}
+            />
+            {matKind === 'url' ? (
+              <input
+                className="w-72 rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
+                placeholder="https://…(链接地址)"
+                value={matContent}
+                onChange={(e) => setMatContent(e.target.value)}
+              />
+            ) : (
+              <input
+                className="w-72 rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
+                placeholder="粘贴文本内容(品牌口碑、卖点、测评……)"
+                value={matContent}
+                onChange={(e) => setMatContent(e.target.value)}
+              />
+            )}
+            <button
+              className="rounded-lg bg-brand px-3.5 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+              disabled={addMaterial.isPending || matTitle.trim().length < 2 || matContent.trim().length < 1}
+              onClick={() => addMaterial.mutate()}
+            >
+              添加
+            </button>
+            <button className="h-7 px-2 text-xs text-slate-500 hover:text-slate-800" onClick={() => setMatAdding(false)}>
+              取消
+            </button>
+          </div>
+        )}
 
         <div className="mt-4 flex items-center gap-1.5">
           {(
