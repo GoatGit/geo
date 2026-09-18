@@ -358,7 +358,7 @@ export class BrandsService {
         name: c.name,
         aliases: c.aliases,
         note: 'AI 品牌挖掘建议',
-        source: 'dig',
+        source: 'ai',
         confirmed: false,
       });
     }
