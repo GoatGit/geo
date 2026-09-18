@@ -88,7 +88,7 @@ export default function LoginPage() {
 
         <div className="relative flex h-full flex-col justify-between p-12">
           <Link href="/" className="rise flex items-center gap-2.5">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-glow">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-600 text-white shadow-glow">
               <IconLogo width={20} height={20} />
             </span>
             <span>
@@ -134,7 +134,7 @@ export default function LoginPage() {
       <div className="flex items-center justify-center bg-white px-6">
         <div className="rise w-full max-w-sm">
           <div className="lg:hidden">
-            <span className="mb-6 flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-700 text-white">
+            <span className="mb-6 flex h-10 w-10 items-center justify-center rounded-xl bg-brand-600 text-white">
               <IconLogo width={20} height={20} />
             </span>
           </div>

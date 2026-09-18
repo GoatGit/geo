@@ -96,7 +96,7 @@ export default function LandingPage() {
       <header className="sticky top-0 z-20 border-b border-white/10 bg-ink-950/80 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
           <Link href="/" className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-400 to-brand-700 text-white">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white">
               <IconLogo width={18} height={18} />
             </span>
             <span>
@@ -388,7 +388,7 @@ export default function LandingPage() {
       <footer className="border-t border-slate-200 bg-white py-10">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-6 text-xs text-slate-400">
           <div className="flex items-center gap-2">
-            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-brand-400 to-brand-700 text-white">
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-brand-600 text-white">
               <IconLogo width={13} height={13} />
             </span>
             <span>© 2026 青柠GEO · AI 搜索品牌可见性监测</span>

@@ -2,7 +2,8 @@ import { HttpException, HttpStatus, Inject, Injectable, OnModuleDestroy } from '
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Queue } from 'bullmq';
-import { industryInsights, insightIndustries } from '@geo/db';
+import { industryInsights, insightIndustries, brands, monitoringQuestions, loadPlatformSettings } from '@geo/db';
+import { chatCompletion } from '@geo/insight-agent';
 import { INSIGHTS_QUEUE, type InsightBuildStatus } from '@geo/shared';
 import type { InsightBlock, InsightCover } from '@geo/shared';
 import { INSIGHT_BLOCK_TYPES } from '@geo/shared';
@@ -87,6 +88,57 @@ export class InsightsService implements OnModuleDestroy {
     const rows = await this.db.delete(insightIndustries).where(eq(insightIndustries.id, id)).returning({ id: insightIndustries.id });
     if (rows.length === 0) throw new HttpException('行业不存在', HttpStatus.NOT_FOUND);
     return { deleted: true };
+  }
+
+  /**
+   * 行业级监测问题生成器(市场化的关键一步):LLM 按行业生成"能产出多品牌声场"的
+   * 行业问题(格局/品类对比/口碑),一键下发到该行业全部品牌。apply=false 只返回建议。
+   */
+  async suggestIndustryQuestions(industryId: number, apply: boolean) {
+    const industry = (await this.db.select().from(insightIndustries).where(eq(insightIndustries.id, industryId)).limit(1))[0];
+    if (!industry) throw new HttpException('行业不存在', HttpStatus.NOT_FOUND);
+    const cfg = (await loadPlatformSettings(this.db)).insightAgent;
+    if (!cfg.enabled || cfg.mode === 'rules' || !cfg.endpoint || !cfg.apiKey || !cfg.model) {
+      throw new HttpException('需先在「全局配置 → Insight Agent」启用 LLM', HttpStatus.BAD_REQUEST);
+    }
+    const brandRows = await this.db.select({ name: brands.name }).from(brands).where(and(eq(brands.industry, industry.name), eq(brands.status, 'active')));
+    if (brandRows.length === 0) throw new HttpException('该行业还没有监测品牌,请先创建', HttpStatus.BAD_REQUEST);
+
+    const system =
+      '你是市场调研专家,为"AI 搜索品牌可见度监测"设计行业级监控问题。只输出一个 JSON 对象。' +
+      'schema: {"questions":[{"type":"ranking|reputation","text":"问题(15-35字,自然口语,像真实用户问 AI)"}]}。' +
+      '要求:8 个问题,覆盖 ①行业格局(如「XX行业品牌排行榜前十」) ②品类选购对比 ③头部品牌对比 ④口碑与投诉;ranking 与 reputation 约各半;' +
+      '问题必须是"行业视角"而非单一品牌视角——答案里自然出现多个品牌,才能聚合出行业声场。';
+    const raw = await chatCompletion(
+      { protocol: cfg.protocol as 'openai' | 'anthropic', endpoint: cfg.endpoint, apiKey: cfg.apiKey, model: cfg.model, timeoutMs: 60_000 },
+      { system, user: JSON.stringify({ 行业: industry.name, 已监测品牌: brandRows.map((b) => b.name) }), maxTokens: 900 },
+    );
+    const m = raw.text.match(/\{[\s\S]*\}/);
+    if (!m) throw new HttpException('AI 返回格式异常,请重试', HttpStatus.BAD_GATEWAY);
+    const parsed = JSON.parse(m[0]) as { questions?: Array<{ type?: string; text?: string }> };
+    const questions = (parsed.questions ?? [])
+      .map((q) => ({ type: q.type === 'reputation' ? ('reputation' as const) : ('ranking' as const), text: String(q.text ?? '').trim() }))
+      .filter((q) => q.text.length >= 8 && q.text.length <= 60)
+      .slice(0, 8);
+    if (questions.length < 3) throw new HttpException('AI 生成的问题过少,请重试', HttpStatus.BAD_GATEWAY);
+
+    let inserted = 0;
+    if (apply) {
+      const targets = await this.db.select({ id: brands.id }).from(brands).where(and(eq(brands.industry, industry.name), eq(brands.status, 'active')));
+      for (const b of targets) {
+        for (const q of questions) {
+          await this.db.insert(monitoringQuestions).values({
+            brandId: b.id,
+            textRaw: q.text,
+            textExpanded: q.text,
+            type: q.type,
+            status: 'active',
+          });
+          inserted++;
+        }
+      }
+    }
+    return { industry: industry.name, questions, applied: apply, inserted };
   }
 
   /** 「运行」:对该行业最新一期报告(无则创建)入队数据聚合;聚合中拒绝重复触发。 */

@@ -376,9 +376,25 @@ export async function renderInsightPdf(detail: PdfInsight): Promise<Buffer> {
     }
   }
 
-  // ===== 页眉 =====
-  doc.roundedRect(PAGE.left, PAGE.top, 4, 14, 2).fill(BRAND);
-  doc.fillColor(BRAND).fontSize(10).text('青柠GEO · AI 搜索品牌可见性监测', PAGE.left + 10, PAGE.top - 1, { lineBreak: false });
+  // ===== 页眉(品牌标记「光圈青柠」:圆盘 + 三道楔形切口) =====
+  const mcx = PAGE.left + 8;
+  const mcy = PAGE.top + 8;
+  const mr = 8;
+  doc.circle(mcx, mcy, mr).fill(BRAND);
+  doc.fillColor('#ffffff');
+  for (const baseDeg of [-90, 30, 150]) {
+    const rad = (deg: number) => (deg * Math.PI) / 180;
+    const r1 = mr * 0.3;
+    const r2 = mr * 0.99;
+    const pts: Array<[number, number]> = [
+      [mcx + r1 * Math.cos(rad(baseDeg - 13)), mcy + r1 * Math.sin(rad(baseDeg - 13))],
+      [mcx + r2 * Math.cos(rad(baseDeg - 13)), mcy + r2 * Math.sin(rad(baseDeg - 13))],
+      [mcx + r2 * Math.cos(rad(baseDeg + 13)), mcy + r2 * Math.sin(rad(baseDeg + 13))],
+      [mcx + r1 * Math.cos(rad(baseDeg + 13)), mcy + r1 * Math.sin(rad(baseDeg + 13))],
+    ];
+    doc.moveTo(pts[0]![0], pts[0]![1]).lineTo(pts[1]![0], pts[1]![1]).lineTo(pts[2]![0], pts[2]![1]).lineTo(pts[3]![0], pts[3]![1]).closePath().fill('#ffffff');
+  }
+  doc.fillColor(BRAND).fontSize(10).text('青柠GEO · AI 搜索品牌可见性监测', PAGE.left + 22, PAGE.top - 1, { lineBreak: false });
   y = PAGE.top + 24;
   text(detail.title, 20, INK, { lineGap: 2 });
   const windowText = detail.windowDays ? `近 ${detail.windowDays} 天` : '全量历史';

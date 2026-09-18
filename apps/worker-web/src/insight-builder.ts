@@ -376,6 +376,9 @@ export async function collectIndustryAggregates(
     limit 10
   `);
 
+  // 信源噪声过滤:电商商品页/搜索页与低质聚合站不是"内容阵地",混进 Top 榜
+  // 会稀释报告专业性(world/bk.taobao.com 实测混入)——按域名后缀整段排除
+  const citeNoise = /(^|\\.)(taobao|tmall|jd|pinduoduo|yangkeduo|1688|alibaba|amazon|smzdm|csai|fenbi)\\.com$|^(www\\.)?(google|baidu|bing)\\./i;
   const cites = await db.execute(sql`
     select cf.domain,
            max(cf.platform_category)                    as platform_category,
@@ -385,7 +388,7 @@ export async function collectIndustryAggregates(
     where cf.brand_id in (${idList})${winCf}
     group by cf.domain
     order by hits desc
-    limit 8
+    limit 30
   `);
   const citeTotals = await db.execute(sql`
     select count(*)                          as total,
@@ -485,7 +488,10 @@ export async function collectIndustryAggregates(
     total: num(ct?.total),
     owned: num(ct?.owned),
     ownedShare: num(ct?.total) > 0 ? num(ct?.owned) / num(ct?.total) : null,
-    top: rowsOf<{ domain: string; platform_category: string; hits: string; owned_hits: string }>(cites).map((r) => ({
+    top: rowsOf<{ domain: string; platform_category: string; hits: string; owned_hits: string }>(cites)
+      .filter((r) => !citeNoise.test(r.domain))
+      .slice(0, 8)
+      .map((r) => ({
       domain: r.domain,
       platform: r.platform_category,
       category: r.platform_category,

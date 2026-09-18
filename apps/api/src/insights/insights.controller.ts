@@ -177,6 +177,12 @@ export class AdminInsightsController {
     return this.insights.deleteIndustry(id);
   }
 
+  /** 行业级监测问题生成器:LLM 生成行业视角问题(格局/对比/口碑),apply=下发到行业全部品牌。 */
+  @Post('industries/:id/questions')
+  suggestQuestions(@Param('id', ParseIntPipe) id: number, @Body() dto: { apply?: boolean }) {
+    return this.insights.suggestIndustryQuestions(id, Boolean(dto?.apply));
+  }
+
   /** 运行行业洞察:数据聚合在 worker 队列执行,前端轮询 buildStatus。 */
   @Post('industries/:id/run')
   runIndustry(@Param('id', ParseIntPipe) id: number, @Body() dto: RunInsightDto) {

@@ -13,13 +13,17 @@ const base = (p: SVGProps<SVGSVGElement>) => ({
   ...p,
 });
 
+/** 青柠GEO 品牌标记「光圈青柠」:扁平圆盘 × 三道楔形切口。
+ *  意象三读:青柠切片 / 相机光圈(看见) / 份额饼图(提及率)。
+ *  evenodd 单色几何跟随 currentColor,任意底色可用。 */
 export const IconLogo = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...base(p)} strokeWidth={2}>
-    <path d="M8 3H5a2 2 0 0 0-2 2v3" />
-    <path d="M16 3h3a2 2 0 0 1 2 2v3" />
-    <path d="M3 16v3a2 2 0 0 0 2 2h3" />
-    <path d="M21 16v3a2 2 0 0 1-2 2h-3" />
-    <circle cx="12" cy="12" r="3.5" />
+  <svg viewBox="0 0 24 24" fill="none" {...p}>
+    <path
+      fill="currentColor"
+      fillRule="evenodd"
+      clipRule="evenodd"
+      d="M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0ZM11.28 8.88 L9.8 2.45 A9.8 9.8 0 0 1 14.2 2.45 L12.72 8.88 ZM15.06 12.94 L21.37 14.87 A9.8 9.8 0 0 1 19.17 18.68 L14.34 14.18 ZM9.66 14.18 L4.83 18.68 A9.8 9.8 0 0 1 2.63 14.87 L8.94 12.94 Z"
+    />
   </svg>
 );
 

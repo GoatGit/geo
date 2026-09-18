@@ -171,7 +171,7 @@ function ConsoleShell({ pathname, children }: { pathname: string; children: Reac
 function NoBrandGuide() {
   return (
     <div className="card rise mx-auto mt-10 max-w-xl p-10 text-center">
-      <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-glow">
+      <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-600 text-white shadow-glow">
         <IconLogo width={26} height={26} />
       </div>
       <h2 className="text-lg font-semibold text-slate-900">创建你的第一个品牌</h2>
@@ -221,7 +221,7 @@ function Sidebar({ pathname }: { pathname: string }) {
       >
         <div className={`flex items-center gap-2.5 pb-2 pt-6 ${rail ? 'flex-col px-2' : 'px-5'}`}>
           <Link href="/dashboard" className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-glow">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-white shadow-glow">
               <IconLogo width={18} height={18} />
             </span>
             {!rail && (
@@ -411,7 +411,7 @@ function MobileNav({ pathname, open, onClose }: { pathname: string; open: boolea
       <aside className="absolute left-0 top-0 flex h-full w-[272px] flex-col bg-ink-950 text-slate-300 shadow-2xl">
         <div className="flex items-center gap-2.5 px-5 pb-2 pt-6">
           <Link href="/dashboard" className="flex items-center gap-2.5" onClick={onClose}>
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-glow">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white shadow-glow">
               <IconLogo width={18} height={18} />
             </span>
             <span className="block text-[15px] font-semibold tracking-wide text-white">青柠GEO</span>
