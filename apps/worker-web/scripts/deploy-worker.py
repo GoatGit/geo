@@ -3,7 +3,7 @@
 import json, subprocess, sys
 
 R = "cn-hangzhou"
-APP = "ffd157f3-36b3-4e7c-b998-af2fa9049a27"  # geo-worker
+APP = sys.argv[2] if len(sys.argv) > 2 else "ffd157f3-36b3-4e7c-b998-af2fa9049a27"  # geo-worker / geo-api
 ACR = "crpi-fgbi72bokijrd5cd.cn-hangzhou.personal.cr.aliyuncs.com"
 IMAGE = f"{ACR}/gemux/geo:{sys.argv[1] if len(sys.argv) > 1 else 'v39-cite'}"
 

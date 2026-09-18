@@ -77,6 +77,7 @@ const ADMIN_NAV: NavGroup = {
     { href: '/admin/accounts', label: '账号池', icon: <IconShield /> },
     { href: '/admin/settings', label: '全局配置', icon: <IconConfig /> },
     { href: '/admin/rounds', label: '采集轮次', icon: <IconList /> },
+    { href: '/admin/insights', label: '行业洞察', icon: <IconLogo width={15} height={15} /> },
   ],
 };
 

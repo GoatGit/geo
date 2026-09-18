@@ -240,10 +240,12 @@ export class RoundScheduler {
   }
 
   private async todayRunCounts(): Promise<Map<string, number>> {
+    // 每日预算只统计真实执行过的采集:quota_blocked 从未执行,
+    // 计入会让"失败风暴 → 收口行"反过来烧光当日预算(死亡螺旋)
     const res = await this.db.execute(sql`
       select engine, count(*)::int as count
       from query_runs
-      where ran_at >= date_trunc('day', now())
+      where ran_at >= date_trunc('day', now()) and status <> 'quota_blocked'
       group by engine
     `);
     const rows = (res as unknown as { rows: Array<{ engine: string; count: number }> }).rows;
@@ -262,9 +264,11 @@ export class RoundScheduler {
       await this.db.select().from(subscriptions).where(eq(subscriptions.brandId, brandId)).limit(1)
     )[0];
     // 过期/停用订阅不派发(按原计划付费口径,docs/01 §3.10)。订阅行没有自动到期降档任务,
-    // status 会一直停在 active——必须同时校验 periodEnd,否则过期套餐仍按付费档消耗采集配额
+    // status 会一直停在 active——到期校验必须看 periodEnd;但 periodEnd 为 NULL 是历史数据
+    // 的"未设置/不限期"语义(存量品牌普遍如此),不得视为过期
     if (!sub || sub.accountId == null) return true;
-    if ((sub.status && sub.status !== 'active') || !sub.periodEnd || sub.periodEnd.getTime() <= Date.now()) {
+    const expired = sub.periodEnd !== null && sub.periodEnd.getTime() <= Date.now();
+    if ((sub.status && sub.status !== 'active') || expired) {
       return true;
     }
     const accountId = sub.accountId;

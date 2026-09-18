@@ -70,7 +70,7 @@ async function bootstrap() {
         where cp.active
           and s.status = 'active'
           and s.account_id is not null
-          and s.period_end > now()
+          and (s.period_end is null or s.period_end > now())
           and not exists (
             select 1 from reports r
             where r.brand_id = cp.brand_id and r.type = 'weekly'

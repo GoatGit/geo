@@ -40,8 +40,9 @@ export class QuestionsService {
       throw new HttpException('品牌不存在或未订阅', HttpStatus.NOT_FOUND);
     }
     // 到期校验:订阅行没有自动到期降档任务,status 会一直停在 active——
-    // 权益执行点必须自己看 periodEnd,否则过期套餐仍按付费档接受新增问题
-    const expired = !sub.periodEnd || sub.periodEnd.getTime() <= Date.now();
+    // 权益执行点必须自己看 periodEnd,否则过期套餐仍按付费档接受新增问题。
+    // periodEnd 为 NULL 是存量数据的"未设置/不限期"语义,不视为过期
+    const expired = sub.periodEnd !== null && sub.periodEnd.getTime() <= Date.now();
     const plan: PlanTier = expired ? 'free' : (sub.plan as PlanTier);
     const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS.free;
     return {
