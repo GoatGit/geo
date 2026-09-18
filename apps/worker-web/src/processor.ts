@@ -115,6 +115,20 @@ export class CollectProcessor {
     const startedAt = Date.now();
     const deferredCount = data.deferredCount ?? 0;
 
+    // 僵尸任务防线(docs/04 §5 事故复盘):延迟重排任务在其所属轮次已收口后仍会按
+    // 120s 节奏到期自我再生,数千僵尸把新轮次饿死在 FIFO 队列里。拾起时发现轮次
+    // 已完结(或不存在)直接丢弃——不产 run、不动计数、不再生成延迟任务
+    const roundRow = (
+      await this.db
+        .select({ finishedAt: collectionRounds.finishedAt })
+        .from(collectionRounds)
+        .where(eq(collectionRounds.id, data.roundId))
+        .limit(1)
+    )[0];
+    if (!roundRow || roundRow.finishedAt) {
+      return { status: 'deferred' };
+    }
+
     // 延迟重排上限:熔断/账号池长时间不恢复时,任务不能无限自我复制(docs/02 §1.1:
     // 配额拦截必须可见)——落 quota_blocked 四态收口,轮次进度同步走完
     if (deferredCount >= MAX_DEFERRED) {
