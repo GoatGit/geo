@@ -334,13 +334,12 @@ export class BrandsService {
     const intro = summary ? `${summary}\n${narrative}`.slice(0, 2000) : narrative.slice(0, 2000);
     await this.db.update(brands).set({ intro }).where(eq(brands.id, brandId));
 
-    const material = await this.addMaterial(
-      brandId,
-      'text',
-      `品牌画像与市场处境(品牌挖掘)`,
-      narrative,
-      'dig',
-    );
+    // 替换语义:同品牌的旧"品牌挖掘"画像资料删旧插新,资料库保持最新一份而非堆积
+    await this.db
+      .delete(brandMaterials)
+      .where(and(eq(brandMaterials.brandId, brandId), eq(brandMaterials.source, 'dig')));
+    const stamped = `品牌画像与市场处境(品牌挖掘 · ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })})`;
+    const material = await this.addMaterial(brandId, 'text', stamped, narrative, 'dig');
 
     // 竞品建议直接进「待确认」清单(确认后才参与识别,docs/01 A1 对策)
     const existing = await this.db

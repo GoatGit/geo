@@ -77,6 +77,7 @@ export default function BrandAssetPage() {
   const [matTitle, setMatTitle] = useState('');
   const [matContent, setMatContent] = useState('');
   const [matFilter, setMatFilter] = useState<'all' | 'text' | 'url'>('all');
+  const [expanded, setExpanded] = useState<Record<number, boolean>>({});
   const addMaterial = useMutation({
     mutationFn: () =>
       api(`/brands/${brandId}/materials`, { method: 'POST', json: { kind: matKind, title: matTitle, content: matContent } }),
@@ -426,21 +427,51 @@ export default function BrandAssetPage() {
 
         <ul className="mt-3 space-y-2">
           {shownMaterials.map((m) => (
-            <li key={m.id} className="flex items-center gap-3 rounded-lg border border-slate-100 px-3 py-2 text-sm">
-              <span className="font-medium text-slate-800">{m.title}</span>
-              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">
-                {m.source === 'dig' ? '品牌挖掘' : '手动'}
-              </span>
-              <span className="text-xs text-slate-400">{KIND_LABEL[m.kind]}</span>
-              <span className="ml-auto metric-num text-xs text-slate-400">
-                {m.kind === 'text' ? `${m.byteLen} 字` : ''}
-              </span>
+            <li key={m.id} className="rounded-lg border border-slate-100 px-3 py-2 text-sm">
               <button
-                className="h-7 px-2 text-xs text-slate-400 hover:text-slate-800"
-                onClick={() => removeMaterial.mutate(m.id)}
+                className="flex w-full items-center gap-3 text-left"
+                onClick={() => setExpanded((prev) => ({ ...prev, [m.id]: !prev[m.id] }))}
+                title="点击查看内容"
               >
-                删除
+                <span className={`text-[10px] text-slate-400 ${expanded[m.id] ? 'rotate-90' : ''} transition-transform`}>▶</span>
+                <span className="font-medium text-slate-800">{m.title}</span>
+                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">
+                  {m.source === 'dig' ? '品牌挖掘' : '手动'}
+                </span>
+                <span className="text-xs text-slate-400">{KIND_LABEL[m.kind]}</span>
+                <span className="ml-auto metric-num text-xs text-slate-400">
+                  {m.kind === 'text' ? `${m.byteLen} 字` : ''}
+                </span>
+                <span
+                  className="h-7 px-2 text-xs text-slate-400 hover:text-slate-800"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeMaterial.mutate(m.id);
+                  }}
+                >
+                  删除
+                </span>
               </button>
+              {m.kind === 'url' ? (
+                <a
+                  href={m.content}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 block truncate text-xs text-brand hover:underline"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {m.content}
+                </a>
+              ) : (
+                <p className="mt-1 truncate text-xs text-slate-500">
+                  {expanded[m.id] ? '' : `${m.content.slice(0, 90)}…`}
+                </p>
+              )}
+              {expanded[m.id] && m.kind === 'text' && (
+                <p className="mt-2 whitespace-pre-wrap rounded bg-slate-50 p-3 text-xs leading-6 text-slate-700">
+                  {m.content}
+                </p>
+              )}
             </li>
           ))}
           {shownMaterials.length === 0 && (
