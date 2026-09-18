@@ -150,8 +150,10 @@ function ConsoleShell({ pathname, children }: { pathname: string; children: Reac
 
   return (
     <div className="flex min-h-screen bg-slate-50">
-      {/* 桌面侧栏;窄屏隐藏,由顶栏汉堡唤起抽屉 */}
-      <div className="hidden md:block">
+      {/* 桌面侧栏;窄屏隐藏,由顶栏汉堡唤起抽屉。
+          md:flex 让下面的宽度层作为 flex item stretch 到整页高度 ——
+          aside 的 sticky 包含块必须是整页高,否则行程为零、侧栏跟着页面滚走 */}
+      <div className="hidden md:flex">
         <Sidebar pathname={pathname} />
       </div>
       <MobileNav pathname={pathname} open={navOpen} onClose={() => setNavOpen(false)} />
