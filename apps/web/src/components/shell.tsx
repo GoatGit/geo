@@ -50,9 +50,9 @@ const NAV: NavGroup[] = [
       { href: '/monitor/rankings', label: '排名透视', icon: <IconRank /> },
       { href: '/monitor/competitors', label: '竞品透视', icon: <IconSwords /> },
       { href: '/monitor/citations', label: '引用源分析', icon: <IconCite /> },
+      { href: '/reputation', label: '口碑分析', icon: <IconVoice /> },
     ],
   },
-  { kind: 'item', item: { href: '/reputation', label: '口碑分析', icon: <IconVoice /> } },
   { kind: 'item', item: { href: '/reports', label: '报告中心', icon: <IconReport /> } },
   { kind: 'item', item: { href: '/billing', label: '套餐与账单', icon: <IconWallet /> } },
   {
