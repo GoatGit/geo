@@ -78,6 +78,9 @@ export async function chatCompletion(
           temperature: 0,
           max_tokens: maxTokens,
           response_format: { type: 'json_object' },
+          // 推理型模型(glm-5.x)默认先产 reasoning_content:JSON 判定任务不需要思考,
+          // 关闭后延迟减半且不会再因思考吃满 max_tokens 导致正文 0 字符(finish=length,实测)
+          thinking: { type: 'disabled' },
           messages: [
             { role: 'system', content: req.system },
             { role: 'user', content: req.user },
