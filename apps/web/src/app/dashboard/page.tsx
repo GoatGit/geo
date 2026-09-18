@@ -3,8 +3,8 @@
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { MetricCardView } from '@/components/metric-card';
-import { Badge, EmptyState, PageHeader, Skeleton, pct } from '@/components/ui';
-import { IconArrowRight, IconCheck, IconList, IconLogo, IconPulse, IconShield } from '@/components/icons';
+import { Badge, EmptyState, Skeleton, pct } from '@/components/ui';
+import { IconArrowRight, IconCheck, IconList, IconLogo, IconPulse, IconRank, IconReport, IconShield, IconVoice } from '@/components/icons';
 import { api, useBrandId, useRankings } from '@/lib/queries';
 import type { InsightSummaryDto } from '@geo/shared';
 
@@ -62,7 +62,19 @@ export default function DashboardPage() {
   // (hooks 必须在条件 return 之前调用)
   const recognition = useQuery({
     queryKey: ['recognition-dash', brandId],
-    queryFn: () => api<{ id: number; confirmed: boolean }[]>(`/brands/${brandId}/recognition`),
+    queryFn: () => api<{ id: number; kind: string; confirmed: boolean }[]>(`/brands/${brandId}/recognition`),
+    enabled: !!brandId,
+  });
+  // 品牌档案 + 报告(英雄卡信息源)
+  const { data: brands } = useQuery({
+    queryKey: ['brands'],
+    queryFn: () => api<Array<{ id: number; name: string; industry: string | null; website: string | null }>>('/brands'),
+    enabled: !!brandId,
+  });
+  const brand = (brands ?? []).find((b) => b.id === brandId);
+  const reports = useQuery({
+    queryKey: ['reports-dash'],
+    queryFn: () => api<Array<{ id: number; brandId: number; status: string; createdAt: string }>>('/reports'),
     enabled: !!brandId,
   });
 
@@ -79,22 +91,112 @@ export default function DashboardPage() {
   const recognitionConfirmed =
     (recognition.data?.length ?? 0) > 0 && (recognition.data ?? []).every((r) => r.confirmed);
 
+  // ===== 英雄卡事实条(竞品格局对齐:身份/当日事实/更新时间一屏可读) =====
+  const quotaUsed = (quota.data?.ranking.used ?? 0) + (quota.data?.reputation.used ?? 0);
+  const competitorCount = (recognition.data ?? []).filter((r) => r.kind === 'competitor').length;
+  const todayKey = new Date().toDateString();
+  const todayRounds = (status.data?.rounds ?? []).filter((r) => new Date(r.startedAt).toDateString() === todayKey);
+  const todayDone = todayRounds.reduce((a, r) => a + (r.totals?.done ?? 0), 0);
+  const runningNow = (status.data?.rounds ?? []).some((r) => !r.finishedAt && (r.totals?.total ?? 0) > 0);
+  const latestRunAt = (status.data?.rounds ?? [])
+    .map((r) => r.startedAt)
+    .sort()
+    .at(-1);
+  const latestRunLabel = latestRunAt
+    ? new Date(latestRunAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : null;
+  const reportsOfBrand = (reports.data ?? []).filter((r) => r.brandId === brandId);
+
+  const QUICK_ACTIONS = [
+    { href: '/config/questions', icon: <IconList width={16} height={16} />, title: '监控问题', desc: '排名词/口碑词 · 分池配额' },
+    { href: '/config/collection', icon: <IconPulse width={16} height={16} />, title: '采集状态', desc: '轮次进度 · 引擎健康' },
+    { href: '/monitor/rankings', icon: <IconRank width={16} height={16} />, title: '排名透视', desc: '三率漏斗 · 竞品矩阵' },
+    { href: '/reputation', icon: <IconVoice width={16} height={16} />, title: '口碑分析', desc: '印象词 · 情绪得分' },
+    { href: '/reports', icon: <IconReport width={16} height={16} />, title: '报告中心', desc: '周报月报 · 证据归档' },
+  ];
+
   return (
     <div className="space-y-6">
-      <PageHeader
-        title={
-          <>
-            总览
-            <Badge label={data.source === 'realtime' ? '实时' : '日结'} tone="brand" />
-          </>
-        }
-        actions={
-          <Link href="/monitor/rankings" className="btn-ghost">
-            查看排名透视
-            <IconArrowRight width={14} height={14} />
+      {/* ===== 品牌英雄卡:身份 + 采集状态 + 当日事实条 ===== */}
+      <section className="card rise relative overflow-hidden p-6">
+        <div className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-brand-400 to-sand-400" />
+        <div className="flex items-start gap-4">
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-brand to-[#b8a9ff] text-2xl font-extrabold text-white shadow-lg">
+            {(brand?.name ?? '?').slice(0, 1)}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xl font-extrabold tracking-wide text-slate-900">{brand?.name ?? '…'}</span>
+              <Badge label={data.source === 'realtime' ? '实时' : '日结'} tone="brand" />
+              {runningNow && (
+                <span className="flex items-center gap-1.5 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700">
+                  <i className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-brand-500" />
+                  采集进行中
+                </span>
+              )}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {brand?.industry && (
+                <span className="rounded-full border border-brand/15 bg-white/80 px-2.5 py-0.5 text-[11px] text-slate-700">{brand.industry}</span>
+              )}
+              {brand?.website && (
+                <span className="rounded-full border border-brand/15 bg-white/80 px-2.5 py-0.5 text-[11px] text-slate-700">
+                  {brand.website.replace(/^https?:\/\//, '')}
+                </span>
+              )}
+            </div>
+          </div>
+          <Link
+            href="/config/brand"
+            className="flex shrink-0 items-center gap-1 rounded-lg border bg-white px-3 py-1.5 text-[12px] font-semibold text-slate-600 transition-colors hover:border-brand/40 hover:text-brand"
+          >
+            品牌档案
+            <IconArrowRight width={13} height={13} />
           </Link>
-        }
-      />
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-x-8 gap-y-3 border-t border-slate-100 pt-4">
+          <div className="flex items-baseline gap-2">
+            <b className="metric-num text-2xl font-bold text-slate-900">{todayDone}</b>
+            <span className="text-xs text-slate-500">当日采集查询</span>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <b className="metric-num text-2xl font-bold text-slate-900">{quotaUsed}</b>
+            <span className="text-xs text-slate-500">监控问题</span>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <b className="metric-num text-2xl font-bold text-slate-900">{competitorCount}</b>
+            <span className="text-xs text-slate-500">竞品</span>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <b className="metric-num text-2xl font-bold text-slate-900">{reportsOfBrand.length}</b>
+            <span className="text-xs text-slate-500">报告</span>
+          </div>
+          <span className="ml-auto text-[11px] text-slate-400">
+            {latestRunLabel ? `最近采集 ${latestRunLabel}` : '尚未开始采集'}
+          </span>
+        </div>
+      </section>
+
+      {/* ===== 快捷动作磁贴 ===== */}
+      <section>
+        <div className="mb-2 text-xs font-medium text-slate-400">快捷动作</div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          {QUICK_ACTIONS.map((t, i) => (
+            <Link
+              key={t.href}
+              href={t.href}
+              className={`card group flex items-center gap-3 p-4 transition-all hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-card-hover rise-${(i % 4) + 1}`}
+            >
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600">{t.icon}</span>
+              <span className="min-w-0 flex-1">
+                <b className="block text-[13px] font-semibold text-slate-800">{t.title}</b>
+                <span className="block truncate text-[11px] text-slate-400">{t.desc}</span>
+              </span>
+              <IconArrowRight width={14} height={14} className="shrink-0 text-slate-300 transition-colors group-hover:text-brand" />
+            </Link>
+          ))}
+        </div>
+      </section>
 
       {/* 引导清单(无数据时) */}
       {!hasData && (
@@ -122,7 +224,7 @@ export default function DashboardPage() {
               done={recognitionConfirmed}
               label="核对本品识别口径"
               desc="登记产品线别名,避免自家产品被误判为竞品"
-              href="/config/recognition"
+              href="/config/brand"
               icon={<IconShield width={15} height={15} />}
             />
           </div>

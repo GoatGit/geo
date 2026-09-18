@@ -1,6 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import type { Db } from '@geo/db';
-import { insightIndustries, industryInsights } from '@geo/db';
+import { insightIndustries, industryInsights, loadPlatformSettings } from '@geo/db';
+import { chatCompletion } from '@geo/insight-agent';
 import type {
   BarRankBlock,
   FunnelBlock,
@@ -575,7 +576,13 @@ export async function runInsightBuild(db: Db, job: InsightBuildJob): Promise<voi
 
   try {
     const agg = await collectIndustryAggregates(db, industry?.name ?? '', job.windowDays);
-    const composed = composeIndustryInsight(agg);
+    let composed = composeIndustryInsight(agg);
+    // LLM 撰稿层:标题/摘要/核心洞察由 GLM 基于聚合事实撰写;失败保留模板稿(降级可复现)
+    try {
+      composed = await polishWithLlm(db, industry?.name ?? '', job.windowDays, agg, composed);
+    } catch (err) {
+      console.error(`[insights] LLM 撰稿失败,使用模板稿 insight=${job.insightId}:`, (err as Error).message.slice(0, 120));
+    }
 
     // 期数:同行业已有报告数 + 1(每次运行产生新一期)
     const priorCount = await db.execute(sql`
@@ -606,4 +613,71 @@ export async function runInsightBuild(db: Db, job: InsightBuildJob): Promise<voi
       .where(eq(industryInsights.id, job.insightId));
     throw err;
   }
+}
+
+/** 行业事实摘要(供 LLM 撰稿;紧凑 JSON,控制输入规模)。 */
+function factsDigest(agg: IndustryAggregates, windowDays: number | null) {
+  const sorted = [...agg.brands].sort((a, b) => rateOf(b.mentioned, b.valid) - rateOf(a.mentioned, a.valid));
+  return {
+    行业: '',
+    窗口: windowDays ? `近${windowDays}天` : '全量历史',
+    品牌提及率: sorted.map((b) => ({
+      品牌: b.name,
+      提及率: pctText(rateOf(b.mentioned, b.valid)),
+      有效回答: b.valid,
+      Top3率: pctText(rateOf(b.top3, b.valid)),
+      首推率: pctText(rateOf(b.top1, b.valid)),
+    })),
+    引用信源Top5: agg.citations.top.slice(0, 5).map((c) => ({ 平台: c.platform, 被引: c.count })),
+    口碑印象: agg.reputation.impressions.slice(0, 8).map((i) => ({ 词: i.term, polarity: i.polarity, 次数: i.count })),
+    趋势: agg.trend.slice(-7).map((t) => t.rate == null ? null : Math.round(t.rate * 100)),
+  };
+}
+
+/**
+ * LLM 撰稿(docs/01 IA ⑤ 精简重构):标题/摘要/核心洞察由 GLM 基于聚合事实生成,
+ * 数据块保持确定性聚合产物。thinking 已在客户端关闭(JSON 任务不需要)。
+ */
+async function polishWithLlm(
+  db: Db,
+  industryName: string,
+  windowDays: number | null,
+  agg: IndustryAggregates,
+  composed: ComposedInsight,
+): Promise<ComposedInsight> {
+  const settings = await loadPlatformSettings(db);
+  const cfg = settings.insightAgent;
+  if (!cfg.enabled || cfg.mode === 'rules' || !cfg.endpoint || !cfg.apiKey || !cfg.model) return composed;
+
+  const digest = { ...factsDigest(agg, windowDays), 行业: industryName };
+  const system =
+    '你是行业分析主编。基于给定的行业 AI 可见度监测聚合事实,只输出一个 JSON 对象。' +
+    'schema: {"title":"报告标题(≤24字,点明行业与AI可见度,可带锐评)","summary":"摘要(≤90字,给出最有信息量的结论,禁止空话)","takeaways":["核心洞察1(≤50字,必须引用具体品牌名与数据)","核心洞察2(≤50字)","核心洞察3(≤50字)"]}。' +
+    '洞察必须基于事实(提及率排名/信源被引/口碑词),禁止编造数据。';
+  const raw = await chatCompletion(
+    { protocol: cfg.protocol as 'openai' | 'anthropic', endpoint: cfg.endpoint, apiKey: cfg.apiKey, model: cfg.model, timeoutMs: 60_000 },
+    { system, user: JSON.stringify(digest), maxTokens: 1200 },
+  );
+  const m = raw.text.match(/\{[\s\S]*\}/);
+  if (!m) return composed;
+  const parsed = JSON.parse(m[0]) as { title?: string; summary?: string; takeaways?: string[] };
+  const takeaways = (parsed.takeaways ?? []).filter((t) => typeof t === 'string' && t.length >= 8).slice(0, 3);
+  if (!parsed.title || !parsed.summary || takeaways.length === 0) return composed;
+
+  const blocks = [...composed.blocks];
+  const idx = blocks.findIndex((b) => b.type === 'takeaway');
+  if (idx >= 0) {
+    blocks[idx] = {
+      type: 'takeaway',
+      title: 'AI 主编洞察',
+      text: takeaways.join('  '),
+      tone: 'brand',
+    };
+  }
+  return {
+    title: parsed.title.slice(0, 60),
+    summary: parsed.summary.slice(0, 160),
+    cover: composed.cover,
+    blocks,
+  };
 }
