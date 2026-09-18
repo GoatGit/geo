@@ -299,9 +299,9 @@ export class BrandsService {
     }
 
     const system =
-      '你是品牌战略分析师。基于给定的品牌档案信息,输出一个 JSON 对象(不要多余文字)。' +
-      'schema: {"summary":"品牌一句话定位(≤60字)","narrative":"结构化品牌画像,含:品牌定位与产品线、核心优势与差异化、主要竞品及竞争关系、目标客群画像(800字内,信息密集的事实陈述,不要营销腔)","competitors":[{"name":"竞品名","aliases":["常见叫法"]}]}。' +
-      'competitors 3-6 个,必须是同品类直接竞争的品牌(不是车型/产品名);aliases 收录常见简称/俗称。';
+      '你是品牌战略分析师。只输出一个 JSON 对象。' +
+      'schema: {"summary":"一句话定位(≤50字)","narrative":"品牌画像:定位与产品线、核心优势、主要竞品、目标客群(300字内,事实陈述)","competitors":[{"name":"竞品名","aliases":["简称"]}]}。' +
+      'competitors 3-6 个同品类品牌(不是车型名)。';
     const user = [
       `品牌名: ${brand.name}`,
       brand.industry ? `行业: ${brand.industry}` : '',
@@ -313,7 +313,7 @@ export class BrandsService {
 
     const raw = await chatCompletion(
       { protocol: cfg.protocol as 'openai' | 'anthropic', endpoint: cfg.endpoint, apiKey: cfg.apiKey, model: cfg.model, timeoutMs: 60_000 },
-      { system, user, maxTokens: 2000 },
+      { system, user, maxTokens: 800 },
     );
     const m = raw.text.match(/\{[\s\S]*\}/);
     if (!m) throw new HttpException('AI 返回格式异常,请重试', HttpStatus.BAD_GATEWAY);
@@ -329,7 +329,7 @@ export class BrandsService {
     }
 
     const narrative = String(parsed.narrative ?? '').trim();
-    if (narrative.length < 50) throw new HttpException('AI 返回内容过少,请重试', HttpStatus.BAD_GATEWAY);
+    if (narrative.length < 30) throw new HttpException('AI 返回内容过少,请重试', HttpStatus.BAD_GATEWAY);
     const summary = String(parsed.summary ?? '').trim();
     const intro = summary ? `${summary}\n${narrative}`.slice(0, 2000) : narrative.slice(0, 2000);
     await this.db.update(brands).set({ intro }).where(eq(brands.id, brandId));
