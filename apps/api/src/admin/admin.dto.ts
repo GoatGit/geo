@@ -26,3 +26,10 @@ export class UpdateSettingsDto {
   @IsObject()
   insightAgent?: Partial<InsightAgentSettings>;
 }
+
+/** POST /admin/insight-agent/test:可选传当前表单值(不落库,仅用于连通性测试)。 */
+export class TestInsightAgentDto {
+  @IsOptional()
+  @IsObject()
+  insightAgent?: Partial<InsightAgentSettings>;
+}

@@ -14,7 +14,7 @@ interface SettingsDto {
   insightAgent: InsightAgentSettings;
 }
 
-/** POST /admin/insight-agent/test 响应:用已保存配置发一次最小调用 */
+/** POST /admin/insight-agent/test 响应:用当前表单配置(不落库)发一次最小调用 */
 interface InsightTestResult {
   ok: boolean;
   latencyMs: number;
@@ -85,7 +85,19 @@ export default function AdminSettingsPage() {
     setTesting(true);
     setTestResult(null);
     try {
-      setTestResult(await api<InsightTestResult>('/admin/insight-agent/test', { method: 'POST' }));
+      // 用当前表单值测试(不落库):apiKey 语义与保存一致——空 = 用已存 key
+      setTestResult(
+        await api<InsightTestResult>('/admin/insight-agent/test', {
+          method: 'POST',
+          json: {
+            insightAgent: {
+              ...form.insightAgent,
+              apiKey: insightKeyDirty ? form.insightAgent.apiKey : '',
+              timeoutMs: Math.min(Math.max(Math.floor(Number(form.insightAgent.timeoutMs) || 0), 2000), 30000),
+            },
+          },
+        }),
+      );
     } catch (e) {
       setTestResult({ ok: false, latencyMs: 0, model: '', error: (e as Error).message });
     } finally {
@@ -393,7 +405,7 @@ export default function AdminSettingsPage() {
           </p>
         )}
 
-        {/* 连通性测试(服务端用已保存配置,无需传参) */}
+        {/* 连通性测试(用当前表单值,不落库) */}
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button className="btn-soft h-9 px-4 text-xs disabled:opacity-50" disabled={testing} onClick={() => void testInsight()}>
             {testing ? '测试中…' : '测试连接'}
@@ -406,7 +418,7 @@ export default function AdminSettingsPage() {
             ) : (
               <span className="text-xs text-bad">失败:{testResult.error ?? '未知错误'}</span>
             ))}
-          <span className="text-[10px] text-slate-400">使用已保存的配置测试;未保存的改动需先保存</span>
+          <span className="text-[10px] text-slate-400">用当前表单配置测试(不会保存);API Key 留空 = 用已保存的 key</span>
         </div>
       </section>
 

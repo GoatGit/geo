@@ -35,7 +35,7 @@ import { currentAccount } from '../common/auth';
 import { DB, REDIS } from '../common/infra.module';
 import { loadEnv } from '../config/env';
 import { AdminGuard } from './admin.guard';
-import { UpdateSettingsDto } from './admin.dto';
+import { TestInsightAgentDto, UpdateSettingsDto } from './admin.dto';
 
 /** db.execute(QueryResult) 取行:drizzle 未知行类型的统一收口。 */
 function rowsOf<T>(res: unknown): T[] {
@@ -314,11 +314,14 @@ export class AdminController implements OnModuleDestroy {
     return { settings: { ...settings, insightAgent: maskInsightAgent(settings.insightAgent) } };
   }
 
-  /** Insight Agent 连通性测试(docs/09 §4.3):用已保存配置发一次最小补全,不入库。 */
+  /** Insight Agent 连通性测试(docs/09 §4.3):最小补全往返,不入库。
+   *  传 body.insightAgent 时用当前表单值(合并语义同保存:apiKey 空/掩码 = 用已存 key);
+   *  不传则测已保存配置。测试一律忽略 enabled 开关——连通性只取决于连接三项。 */
   @Post('insight-agent/test')
-  async testInsightAgent() {
-    const settings = (await loadPlatformSettings(this.db)).insightAgent;
-    return await testConnection(settings);
+  async testInsightAgent(@Body() dto: TestInsightAgentDto) {
+    const saved = (await loadPlatformSettings(this.db)).insightAgent;
+    const merged = dto?.insightAgent ? resolveInsightAgentPatch(saved, dto.insightAgent) : saved;
+    return await testConnection({ ...merged, enabled: true });
   }
 
   /** 代理池实时状态:配置 + 通道/在用租约/白名单(直连青果接口;Key 未配置时仅返回配置)。 */

@@ -71,58 +71,69 @@ export async function chatCompletion(
   const maxTokens = req.maxTokens ?? 2_000;
   let url: string;
   let headers: Record<string, string>;
-  let body: Record<string, unknown>;
-  if (cfg.protocol === 'openai') {
-    url = joinUrl(cfg.endpoint, '/chat/completions');
-    headers = { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` };
-    body = {
-      model: cfg.model,
-      temperature: 0,
-      max_tokens: maxTokens,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: req.system },
-        { role: 'user', content: req.user },
-      ],
-    };
-  } else {
+  const body: Record<string, unknown> =
+    cfg.protocol === 'openai'
+      ? {
+          model: cfg.model,
+          temperature: 0,
+          max_tokens: maxTokens,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: req.system },
+            { role: 'user', content: req.user },
+          ],
+        }
+      : {
+          model: cfg.model,
+          max_tokens: maxTokens,
+          temperature: 0,
+          system: req.system,
+          messages: [{ role: 'user', content: req.user }],
+        };
+  if (cfg.protocol === 'anthropic') {
     url = joinUrl(cfg.endpoint, '/v1/messages');
     headers = { 'content-type': 'application/json', 'x-api-key': cfg.apiKey, 'anthropic-version': '2023-06-01' };
-    body = {
-      model: cfg.model,
-      max_tokens: maxTokens,
-      temperature: 0,
-      system: req.system,
-      messages: [{ role: 'user', content: req.user }],
-    };
+  } else {
+    url = joinUrl(cfg.endpoint, '/chat/completions');
+    headers = { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` };
   }
 
-  let res: Awaited<ReturnType<typeof fetch>>;
-  try {
-    res = await fetchImpl(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(cfg.timeoutMs),
-    });
-  } catch (err) {
-    if (err instanceof Error && err.name === 'TimeoutError') throw new ChatError('timeout', `llm timeout after ${cfg.timeoutMs}ms`);
-    throw new ChatError('network', `llm network error: ${err instanceof Error ? err.message : String(err)}`);
-  }
+  // 部分网关不支持 response_format(json_object):400 时去掉该参数降级重试一次(提示词已约束只输出 JSON)
+  for (let attempt = 0; ; attempt++) {
+    let res: Awaited<ReturnType<typeof fetch>>;
+    try {
+      res = await fetchImpl(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(cfg.timeoutMs),
+      });
+    } catch (err) {
+      if (err instanceof Error && err.name === 'TimeoutError') {
+        throw new ChatError('timeout', `llm timeout after ${cfg.timeoutMs}ms`);
+      }
+      throw new ChatError('network', `llm network error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (!res.ok) {
+      const bodyText = (await res.text().catch(() => '')).slice(0, 300);
+      if (res.status === 400 && attempt === 0 && body.response_format) {
+        delete body.response_format;
+        continue;
+      }
+      throw new ChatError('http', `llm http ${res.status}: ${bodyText}`, res.status);
+    }
 
-  if (!res.ok) {
-    const bodyText = (await res.text().catch(() => '')).slice(0, 300);
-    throw new ChatError('http', `llm http ${res.status}: ${bodyText}`, res.status);
+    const payload = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+    const text =
+      cfg.protocol === 'openai'
+        ? (payload as { choices?: Array<{ message?: { content?: string } }> })?.choices?.[0]?.message?.content
+        : (payload as { content?: Array<{ type?: string; text?: string }> })?.content?.find((c) => c.type === 'text')
+            ?.text;
+    if (typeof text !== 'string' || !text.trim()) {
+      throw new ChatError('empty', 'llm response has no text content');
+    }
+    return { text, latencyMs: Date.now() - startedAt };
   }
-
-  const payload = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-  const text = payload && cfg.protocol === 'openai'
-    ? (payload as { choices?: Array<{ message?: { content?: string } }> }).choices?.[0]?.message?.content
-    : (payload as { content?: Array<{ type?: string; text?: string }> })?.content?.find((c) => c.type === 'text')?.text;
-  if (typeof text !== 'string' || !text.trim()) {
-    throw new ChatError('empty', 'llm response has no text content');
-  }
-  return { text, latencyMs: Date.now() - startedAt };
 }
 
 /** apiKey 掩码:admin 读取侧统一出口,完整 key 永不回传前端。 */
