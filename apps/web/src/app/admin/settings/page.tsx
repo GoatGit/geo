@@ -257,21 +257,37 @@ export default function AdminSettingsPage() {
           {poolStatus.isLoading ? (
             <p className="text-slate-400">加载中…</p>
           ) : poolStatus.data?.live ? (
-            <div className="grid gap-1.5">
-              <span>
-                通道:{poolStatus.data.live.channels?.data?.total ?? '?'} 个(空闲 {poolStatus.data.live.channels?.data?.idle ?? '?'})
-              </span>
-              {(poolStatus.data.live.inUse?.data ?? []).length > 0 ? (
-                poolStatus.data.live.inUse!.data!.map((l) => (
-                  <span key={l.server}>
-                    当前租约:<b className="metric-num">{l.server}</b>(出口 {l.proxy_ip} · {l.area ?? ''} · 到期 {l.deadline ?? '?'})
+            (() => {
+              // 青果接口返回业务错误(如 Key 过期)时显式告警,而不是渲染成"?"空值
+              const live = poolStatus.data.live;
+              const err = [live.channels, live.inUse, live.whitelist].find(
+                (x) => x && typeof x === 'object' && 'code' in x && x.code !== 'SUCCESS',
+              ) as { code?: string; message?: string } | undefined;
+              if (err) {
+                return (
+                  <p className="rounded bg-bad-50 px-2 py-1.5 text-bad">
+                    青果接口报错:{err.code}(「{err.message ?? '未知'}」)——请到青果控制台确认通道有效期/续费,更新 Key 后 1 分钟内自动生效。
+                  </p>
+                );
+              }
+              return (
+                <div className="grid gap-1.5">
+                  <span>
+                    通道:{live.channels?.data?.total ?? '?'} 个(空闲 {live.channels?.data?.idle ?? '?'})
                   </span>
-                ))
-              ) : (
-                <span>暂无在用租约(下次采集时自动提取/认领)</span>
-              )}
-              <span>白名单:{(poolStatus.data.live.whitelist?.Data ?? []).join('、') || '(空)'}</span>
-            </div>
+                  {(live.inUse?.data ?? []).length > 0 ? (
+                    live.inUse!.data!.map((l) => (
+                      <span key={l.server}>
+                        当前租约:<b className="metric-num">{l.server}</b>(出口 {l.proxy_ip} · {l.area ?? ''} · 到期 {l.deadline ?? '?'})
+                      </span>
+                    ))
+                  ) : (
+                    <span>暂无在用租约(下次采集时自动提取/认领)</span>
+                  )}
+                  <span>白名单:{(live.whitelist?.Data ?? []).join('、') || '(空)'}</span>
+                </div>
+              );
+            })()
           ) : (
             <p className="text-slate-400">{poolStatus.data?.note ?? '未启用'}</p>
           )}
