@@ -37,20 +37,28 @@ export class LocalSessionBroker implements SessionBroker {
   constructor(private readonly config: LocalBrokerConfig) {}
 
   async acquire(profile: SessionProfile): Promise<SessionHandle> {
+    const purpose = profile.purpose ?? 'collect';
+    const inUse = this.contexts.get(profile.profileKey);
+    if (inUse?.refCount && (purpose === 'login' || inUse.purpose === 'login')) {
+      throw new BrokerError('local profile busy: 请等待当前会话结束后重试登录', 409);
+    }
     if (this.contexts.size >= this.config.maxConcurrent && !this.contexts.has(profile.profileKey)) {
       throw new BrokerError(`local broker: concurrent limit ${this.config.maxConcurrent} reached`, 429);
     }
     const context = await this.contextFor(profile);
-    const existing = context.pages()[0];
-    const page: Page = existing ?? (await context.newPage());
     const key = profile.profileKey;
     const entry = this.contexts.get(key)!;
+    if (entry.refCount && (purpose === 'login' || entry.purpose === 'login')) {
+      throw new BrokerError('local profile busy: 请等待当前会话结束后重试登录', 409);
+    }
     entry.refCount += 1;
-    entry.purpose = profile.purpose ?? 'collect';
+    entry.purpose = purpose;
     if (entry.idleTimer) {
       clearTimeout(entry.idleTimer);
       entry.idleTimer = undefined;
     }
+    const existing = context.pages()[0];
+    const page: Page = existing ?? (await context.newPage());
     const sessionId = `local-${Buffer.from(key).toString('base64url')}`;
     return {
       sessionId,
@@ -95,20 +103,27 @@ export class LocalSessionBroker implements SessionBroker {
 
   private async launch(profile: SessionProfile): Promise<BrowserContext> {
     const existing = this.contexts.get(profile.profileKey);
-    if (existing) return existing.context;
+    if (existing) {
+      if (existing.purpose === (profile.purpose ?? 'collect')) return existing.context;
+      if (existing.refCount > 0) throw new BrokerError('local profile busy', 409);
+      await this.closeProfile(profile.profileKey);
+    }
     const userDataDir = join(this.config.profileRoot, sanitize(profile.profileKey));
     try {
       const context = await chromium.launchPersistentContext(userDataDir, {
         channel: this.config.channel,
         // viewer 登录模式:登录会话也无头(操作者经后台 viewer 操控,生产与 agentbay 同构)
-        headless: profile.purpose === 'login' && this.config.viewerLogin ? true : this.config.headless,
+        headless: profile.purpose === 'login' ? Boolean(this.config.viewerLogin) : this.config.headless,
         viewport: readViewport(profile.fingerprint) ?? { width: 1366, height: 850 },
         locale: 'zh-CN',
         args: ['--disable-blink-features=automation-controlled'],
       });
       context.on('close', () => {
-        this.contexts.delete(profile.profileKey);
-        void this.killProfileProcesses(profile.profileKey); // 操作者关窗:立即回收进程,释放 profile 目录锁
+        // closeProfile owns cleanup during an intentional restart. Never let an
+        // old context's close event kill a newly opened login browser.
+        if (this.contexts.get(profile.profileKey)?.context === context) {
+          this.contexts.delete(profile.profileKey);
+        }
       });
       this.contexts.set(profile.profileKey, { context, refCount: 0, purpose: profile.purpose ?? 'collect' });
       return context;

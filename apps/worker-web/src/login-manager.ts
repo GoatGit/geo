@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { Page } from 'playwright-core';
 import { chromium } from 'playwright-core';
 import type { Db } from '@geo/db';
@@ -12,6 +12,7 @@ import {
   loginCancelKey,
   loginCmdKey,
   loginFrameKey,
+  loginProfileKey,
   loginStatusKey,
   type LoginInputCommand,
   type LoginRequest,
@@ -42,6 +43,9 @@ const LOGIN_CONCURRENCY = envInt('LOGIN_CONCURRENCY', 3, 1, 10);
 export class LoginManager {
   private readonly proxyPool: ProxyPoolManager;
   private stopped = false;
+  private consumerRedis?: Redis;
+  private loopTask?: Promise<void>;
+  private readonly active = new Set<Promise<void>>();
 
   constructor(
     private readonly db: Db,
@@ -54,12 +58,18 @@ export class LoginManager {
   }
 
   start(): void {
-    void this.loop();
+    if (this.loopTask) return;
+    // BLPOP must never block the connection used for frames, commands and status.
+    this.consumerRedis = this.redis.duplicate();
+    this.loopTask = this.loop();
     console.log(`[login] manager started: concurrency=${LOGIN_CONCURRENCY}, waiting for login requests`);
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
+    this.consumerRedis?.disconnect();
+    await this.loopTask;
+    await Promise.allSettled(this.active);
   }
 
   /**
@@ -67,22 +77,34 @@ export class LoginManager {
    * 并行不互扰);达到上限时轮询等待,任一登录结束即释放槽位。
    */
   private async loop(): Promise<void> {
-    const active = new Set<Promise<void>>();
+    const active = this.active;
     while (!this.stopped) {
       if (active.size >= LOGIN_CONCURRENCY) {
         await Promise.race(active);
         continue;
       }
       try {
-        const raw = await this.redis.blpop(LOGIN_REQ_QUEUE, 2);
+        const raw = await this.consumerRedis!.blpop(LOGIN_REQ_QUEUE, 2);
         if (!raw) continue;
         const req = JSON.parse(raw[1]!) as LoginRequest;
+        if (await this.redis.get(loginProfileKey(req.profileId)) !== req.sessionId) continue;
         const task = this.run(req)
           .catch(async (err) => {
             console.error(`[login] session=${req.sessionId} engine=${req.engine} failed:`, err);
             await this.setStatus(req.sessionId, { state: 'error', detail: String(err), updatedAt: new Date().toISOString() });
           })
-          .finally(() => active.delete(task));
+          .catch((err) => console.error('[login] failed to record terminal status:', (err as Error).message))
+          .finally(async () => {
+            try {
+              await this.redis.eval(
+                'if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) end return 0',
+                1, loginProfileKey(req.profileId), req.sessionId,
+              );
+            } catch (err) {
+              console.error('[login] lock cleanup failed:', (err as Error).message);
+            }
+            active.delete(task);
+          });
         active.add(task);
       } catch (err) {
         if (!this.stopped) {
@@ -139,6 +161,14 @@ export class LoginManager {
       proxyHint: req.proxyHint ?? undefined,
       purpose: 'login',
     });
+    let releaseTask: Promise<void> | undefined;
+    const releaseSession = () => releaseTask ??= (async () => {
+      try {
+        if (cdpBrowser) await cdpBrowser.close().catch(() => undefined);
+      } finally {
+        await session.release();
+      }
+    })();
     try {
       let page = session.page as Page | undefined;
       if (!page && /^wss?:\/\//.test(session.cdpUrl)) {
@@ -165,14 +195,15 @@ export class LoginManager {
         : [];
 
       try {
-        // 轮询:未登录指示消失 + 提问框可见,连续两轮(间隔 5s)成立才算成功;
+        // 轮询:正向登录凭证 + 提问框可见,连续两轮成立才算成功;
         // 操作者登录后若落在非会话页(如站点首页),周期性重导航回提问页再验证;
         // 每轮检查取消标记——手动取消立即终止并释放远程会话,不占后续登录队列
         let confirmStreak = 0;
         let lastNavAt = Date.now();
         let cancelled = false;
+        let loginPromptOpened = false;
         while (Date.now() - startedAt < LOGIN_TIMEOUT_MS) {
-          if (await this.cancelled(req.sessionId)) {
+          if (this.stopped || await this.cancelled(req.sessionId)) {
             cancelled = true;
             break;
           }
@@ -183,14 +214,10 @@ export class LoginManager {
             updatedAt: new Date().toISOString(),
           });
           const { loggedIn } = await checkLogin(page, site);
-          // 游客可输入的站点(元宝/文心)必须以登录 Cookie 为成功依据,
-          // 否则游客输入框可见 + 关弹窗等动作会被误判为登录成功
-          let usable =
-            site.requireLoginCookie && loggedIn !== true
-              ? false
-              : loggedIn !== false && (await hasVisibleInput(page, site));
-          // 豆包类:登录弹窗被关闭(二维码过期/协议未勾被拒)且仍未登录 → 自动重开登录框拿新码
-          if (!usable && site.loginHints.length > 0 && loggedIn !== true) {
+          // 人工登录必须有正向凭证;游客可提问仅影响采集,不能让账号进入可用池。
+          let usable = loggedIn === true && (await hasVisibleInput(page, site));
+          // 初次进入时打开登录入口一次;后续操作由操作者控制,避免反复切换登录方式。
+          if (!loginPromptOpened && !usable && site.loginHints.length > 0 && loggedIn !== true) {
             const dialogOpen = await page
               .getByText(/手机号登录|扫码登录|账号登录/)
               .first()
@@ -200,7 +227,11 @@ export class LoginManager {
               for (const h of site.loginHints) {
                 try {
                   const loc = page.locator(h).first();
-                  if (await loc.isVisible({ timeout: 400 })) { await loc.click(); break; }
+                  if (await loc.isVisible({ timeout: 400 })) {
+                    await loc.click({ timeout: 1_000 });
+                    loginPromptOpened = true;
+                    break;
+                  }
                 } catch { /* 下一个 */ }
               }
             }
@@ -209,27 +240,15 @@ export class LoginManager {
           try {
             const expired = page.getByText(/二维码(失效|过期)/).first();
             if (await expired.isVisible({ timeout: 300 }).catch(() => false)) {
-              await expired.click().catch(() => undefined);
+              await expired.click({ timeout: 1_000 }).catch(() => undefined);
             }
           } catch { /* 无过期态 */ }
-          // 协议勾选:豆包登录框为 radix 风格 button[role=checkbox][data-state=unchecked],
-          // 无 input 元素,须直接点击该按钮(或其文本标签)勾选
-          try {
-            const unchecked = page.locator('button[role="checkbox"][data-state="unchecked"], [role="checkbox"][aria-checked="false"]').first();
-            if (await unchecked.isVisible({ timeout: 400 }).catch(() => false)) {
-              await unchecked.click({ force: true }).catch(() => undefined);
-              console.log(`[login] 已自动勾选用户协议`);
-            }
-          } catch { /* 无勾选框的站点 */ }
-          if (!usable && Date.now() - lastNavAt > 15_000) {
+          if (loggedIn === true && !usable && Date.now() - lastNavAt > 15_000) {
             // 登录成功但落在非会话页(如站点首页):带回提问页
             await page.goto(site.chatUrl, { waitUntil: 'domcontentloaded', timeout: site.navigationTimeoutMs }).catch(() => undefined);
             lastNavAt = Date.now();
             const recheck = await checkLogin(page, site);
-            usable =
-              site.requireLoginCookie && recheck.loggedIn !== true
-                ? false
-                : recheck.loggedIn !== false && (await hasVisibleInput(page, site));
+            usable = recheck.loggedIn === true && (await hasVisibleInput(page, site));
           }
           confirmStreak = usable ? confirmStreak + 1 : 0;
           if (confirmStreak >= 2) {
@@ -237,15 +256,10 @@ export class LoginManager {
             // "无登录UI + 输入框可见"会误判成功 → 会话被提前释放、窗口消失。
             // 校验 = 重新整页导航再验一轮:真登录的 Cookie 过导航仍在;误判则回到等待循环,
             // 窗口继续保留,操作者可在手机端完成确认后自然通过。
-            await page
-              .goto(site.chatUrl, { waitUntil: 'domcontentloaded', timeout: site.navigationTimeoutMs })
-              .catch(() => undefined);
+            await page.goto(site.chatUrl, { waitUntil: 'domcontentloaded', timeout: site.navigationTimeoutMs });
             await page.waitForTimeout(2_000);
             const verify = await checkLogin(page, site);
-            const verifyUsable =
-              site.requireLoginCookie && verify.loggedIn !== true
-                ? false
-                : verify.loggedIn !== false && (await hasVisibleInput(page, site));
+            const verifyUsable = verify.loggedIn === true && (await hasVisibleInput(page, site));
             if (verifyUsable) break;
             confirmStreak = 0;
           }
@@ -255,21 +269,30 @@ export class LoginManager {
         if (cancelled) {
           console.warn(`[login] session=${req.sessionId} 手动取消,释放远程会话`);
         }
+        cancelled = cancelled || this.stopped || await this.cancelled(req.sessionId);
         const success = !cancelled && confirmStreak >= 2;
         if (success) {
-          // Cookie 持久化(docs/04 §3.1):Context 同步不可靠(AccessDenied/延迟),
-          // 登录成功即导出 Cookie 落库,采集会话注入——登录态留存不再依赖平台能力。
+          // 保存 Cookie 与 localStorage,不能依赖远程 Context 同步;导出失败禁止入池。
           // 同时落出口绑定(IP 亲和):后续采集按本次租约复用同一出口
-          const exported = await page.context().cookies().catch(() => []);
-          await this.db
+          const storageState = await page.context().storageState();
+          const exported = storageState.cookies;
+          // Finish browser persistence before exposing the profile to collectors.
+          stopViewer.value = true;
+          await Promise.allSettled(viewerTasks);
+          await releaseSession();
+          const updated = await this.db
             .update(accountProfiles)
             .set({
               status: 'available',
               contextRef: session.contextId ?? `local:${req.profileKey}`,
               cookies: exported,
+              storageState,
+              cooldownUntil: null,
               ...(loginLease ? { proxyServer: loginLease.server } : {}),
             })
-            .where(eq(accountProfiles.id, req.profileId));
+            .where(and(eq(accountProfiles.id, req.profileId), eq(accountProfiles.status, 'pending_login')))
+            .returning({ id: accountProfiles.id });
+          if (!updated.length) throw new Error('账号状态已改变,登录结果未写入;请刷新账号池');
           console.log(`[login] session=${req.sessionId} engine=${req.engine} 登录成功,档案 ${req.profileId} 置 available(cookies=${exported.length}${loginLease ? `,出口=${loginLease.server}` : ''})`);
         } else if (!cancelled) {
           // 超时诊断:页面 URL + 当前 Cookie 名(校准各站登录 Cookie 标记)
@@ -295,8 +318,7 @@ export class LoginManager {
         await this.redis.del(loginFrameKey(req.sessionId), loginCmdKey(req.sessionId), loginCancelKey(req.sessionId));
       }
     } finally {
-      await session.release(); // 登录会话立即干净退出:Cookie 刷盘后采集进程才能读到登录态
-      if (cdpBrowser) await cdpBrowser.close().catch(() => undefined);
+      await releaseSession();
     }
   }
 
@@ -304,7 +326,7 @@ export class LoginManager {
   private async frameLoop(sessionId: string, page: Page, stop: { value: boolean }): Promise<void> {
     while (!stop.value) {
       try {
-        const buf = await page.screenshot({ type: 'jpeg', quality: 55, timeout: 5_000 });
+        const buf = await page.screenshot({ type: 'jpeg', quality: 55, timeout: 5_000, scale: 'css' });
         await this.redis.set(loginFrameKey(sessionId), buf.toString('base64'), 'EX', LOGIN_FRAME_TTL_SEC);
       } catch {
         // 单帧失败(页面跳转瞬间)不影响循环
@@ -326,6 +348,16 @@ export class LoginManager {
         const cmd = JSON.parse(raw) as LoginInputCommand;
         if (cmd.type === 'click') {
           await page.mouse.click(cmd.x, cmd.y);
+        } else if (cmd.type === 'drag') {
+          await page.mouse.move(cmd.x, cmd.y);
+          await page.mouse.down();
+          try {
+            await page.mouse.move(cmd.toX, cmd.toY, { steps: 20 });
+          } finally {
+            await page.mouse.up();
+          }
+        } else if (cmd.type === 'scroll') {
+          await page.mouse.wheel(0, cmd.deltaY);
         } else if (cmd.type === 'type') {
           await page.keyboard.insertText(cmd.text.slice(0, 200));
         } else if (cmd.type === 'key') {

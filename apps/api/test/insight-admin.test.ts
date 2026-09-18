@@ -32,7 +32,7 @@ describe('resolveInsightAgentPatch(写入合并语义)', () => {
 
   it('http endpoint 拒绝;timeout 限幅;非法 mode/protocol 忽略', () => {
     expect(() => resolveInsightAgentPatch(current(), { endpoint: 'http://x.com/v1' })).toThrow(HttpException);
-    expect(resolveInsightAgentPatch(current(), { timeoutMs: 99_000 }).timeoutMs).toBe(30_000);
+    expect(resolveInsightAgentPatch(current(), { timeoutMs: 99_000 }).timeoutMs).toBe(60_000);
     expect(resolveInsightAgentPatch(current(), { timeoutMs: 100 }).timeoutMs).toBe(2_000);
     const r = resolveInsightAgentPatch(current(), { mode: 'evil' as never, protocol: 'grpc' as never });
     expect(r.mode).toBe('llm');

@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { Pool } from 'pg';
 import type { Db } from '@geo/db';
 import { accountProfiles } from '@geo/db';
-import { WEB_ENGINES } from '@geo/shared';
+import { WEB_ENGINES, type BrowserStorageState } from '@geo/shared';
 
 export interface AcquiredProfile {
   id: number;
@@ -14,6 +14,7 @@ export interface AcquiredProfile {
   contextRef: string | null;
   /** 登录成功导出的 Cookie(采集会话注入,登录态留存不依赖平台 Context 能力) */
   cookies: Array<Record<string, unknown>> | null;
+  storageState: BrowserStorageState | null;
 }
 
 /** 单账号单日提问上限(docs/04 §3.2 配额内化,超限强制轮换)。 */
@@ -58,6 +59,7 @@ export class AccountPoolService {
       proxy_server: string | null;
       context_ref: string | null;
       cookies: Array<Record<string, unknown>> | null;
+      storage_state: BrowserStorageState | null;
     }>(
       `with picked as (
          select id from account_profiles
@@ -74,7 +76,7 @@ export class AccountPoolService {
            daily_date = current_date
        from picked
        where ap.id = picked.id
-       returning ap.id, ap.fingerprint, ap.proxy_hint, ap.proxy_server, ap.context_ref, ap.cookies`,
+       returning ap.id, ap.fingerprint, ap.proxy_hint, ap.proxy_server, ap.context_ref, ap.cookies, ap.storage_state`,
       [engine, excludeIds.size > 0 ? [...excludeIds] : [-1]],
     );
     const row = res.rows[0];
@@ -87,6 +89,7 @@ export class AccountPoolService {
       proxyServer: row.proxy_server,
       contextRef: row.context_ref,
       cookies: row.cookies,
+      storageState: row.storage_state,
     };
   }
 
@@ -102,7 +105,7 @@ export class AccountPoolService {
   async expireCookies(profileId: number): Promise<void> {
     await this.db
       .update(accountProfiles)
-      .set({ status: 'login_required', cookies: null })
+      .set({ status: 'login_required', cookies: null, storageState: null })
       .where(eq(accountProfiles.id, profileId));
   }
 

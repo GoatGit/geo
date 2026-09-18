@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, HttpException, HttpStatus, OnModuleDestr
 import { BadRequestException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Request } from 'express';
 import { Queue } from 'bullmq';
@@ -13,6 +13,7 @@ import {
   REPUTATION_QUEUE,
   COLLECT_QUEUE,
   LOGIN_CANCEL_TTL_SEC,
+  LOGIN_FRAME_TTL_SEC,
   LOGIN_REQ_QUEUE,
   LOGIN_STATUS_TTL_SEC,
   WEB_ENGINES,
@@ -24,7 +25,9 @@ import {
   loginCancelKey,
   loginCmdKey,
   loginFrameKey,
+  loginProfileKey,
   loginStatusKey,
+  type LoginInputCommand,
   type InsightAgentSettings,
   type InsightStatEvent,
   type LoginRequest,
@@ -404,7 +407,8 @@ export class AdminController implements OnModuleDestroy {
       })
       .from(accountProfiles)
       .orderBy(accountProfiles.engine, accountProfiles.id);
-    return { accounts: rows };
+    const sessions = rows.length ? await this.redis.mget(...rows.map((row) => loginProfileKey(row.id))) : [];
+    return { accounts: rows.map((row, i) => ({ ...row, loginSessionId: sessions[i] ?? null })) };
   }
 
   /** 新建账号档案:仅登记引擎与指纹,状态 pending_login,等人工登录注入账号态。 */
@@ -470,6 +474,13 @@ export class AdminController implements OnModuleDestroy {
     this.assertEngine(profile.engine);
 
     const sessionId = randomUUID();
+    const lockKey = loginProfileKey(profile.id);
+    const claimed = await this.redis.set(lockKey, sessionId, 'EX', LOGIN_STATUS_TTL_SEC, 'NX');
+    if (!claimed) {
+      const existing = await this.redis.get(lockKey);
+      if (existing) return { sessionId: existing, engine: profile.engine, profileId: profile.id };
+      throw new ServiceUnavailableException('登录会话正在结束,请稍后重试');
+    }
     const payload: LoginRequest = {
       sessionId,
       profileId: profile.id,
@@ -480,16 +491,23 @@ export class AdminController implements OnModuleDestroy {
       contextRef: profile.contextRef,
       requestedAt: new Date().toISOString(),
     };
-    await this.redis
-      .multi()
-      .lpush(LOGIN_REQ_QUEUE, JSON.stringify(payload))
-      .ltrim(LOGIN_REQ_QUEUE, 0, 99) // 防御性截断:积压的陈旧登录请求不无限堆积
-      .set(loginStatusKey(sessionId), JSON.stringify({ state: 'queued', updatedAt: new Date().toISOString() }), 'EX', LOGIN_STATUS_TTL_SEC)
-      .exec();
-    await this.db
-      .update(accountProfiles)
-      .set({ status: 'pending_login' })
-      .where(eq(accountProfiles.id, id));
+    try {
+      if (await this.redis.llen(LOGIN_REQ_QUEUE) >= 100) throw new ServiceUnavailableException('登录队列已满,请稍后重试');
+      // Remove the account from collection before making the request visible to a worker.
+      const updated = await this.db.update(accountProfiles).set({ status: 'pending_login' })
+        .where(and(eq(accountProfiles.id, id), eq(accountProfiles.status, profile.status)))
+        .returning({ id: accountProfiles.id });
+      if (!updated.length) throw new BadRequestException('账号状态已改变,请刷新后重试');
+      const result = await this.redis.multi()
+        .set(loginStatusKey(sessionId), JSON.stringify({ state: 'queued', updatedAt: new Date().toISOString() }), 'EX', LOGIN_STATUS_TTL_SEC)
+        .rpush(LOGIN_REQ_QUEUE, JSON.stringify(payload))
+        .exec();
+      if (!result || result.some(([error]) => error)) throw new ServiceUnavailableException('登录请求入队失败');
+    } catch (err) {
+      await this.redis.set(loginCancelKey(sessionId), '1', 'EX', LOGIN_CANCEL_TTL_SEC);
+      await this.redis.eval('if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) end return 0', 1, lockKey, sessionId);
+      throw err;
+    }
     return { sessionId, engine: profile.engine, profileId: profile.id };
   }
 
@@ -525,29 +543,48 @@ export class AdminController implements OnModuleDestroy {
   @Post('login/:sessionId/input')
   async loginInput(
     @Param('sessionId') sessionId: string,
-    @Body() cmd: { type?: string; x?: number; y?: number; text?: string; key?: string },
+    @Body() cmd: { type?: string; x?: number; y?: number; toX?: number; toY?: number; deltaY?: number; text?: string; key?: string },
   ) {
-    if (cmd.type === 'click') {
-      const x = Math.max(0, Math.floor(Number(cmd.x) || 0));
-      const y = Math.max(0, Math.floor(Number(cmd.y) || 0));
-      await this.redis.lpush(loginCmdKey(sessionId), JSON.stringify({ type: 'click', x, y }));
+    const raw = await this.redis.get(loginStatusKey(sessionId));
+    if (!raw) throw new NotFoundException('登录会话不存在或已过期');
+    const status = JSON.parse(raw);
+    if (status.state !== 'running' || !status.viewer) throw new BadRequestException('登录会话当前不可操作');
+    const coordinate = (value: unknown) => {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 10_000) {
+        throw new BadRequestException('无效的画面坐标');
+      }
+      return Math.floor(value);
+    };
+    let input: LoginInputCommand;
+    if (cmd.type === 'click' || cmd.type === 'drag') {
+      const x = coordinate(cmd.x);
+      const y = coordinate(cmd.y);
+      input = cmd.type === 'click' ? { type: 'click', x, y }
+        : { type: 'drag', x, y, toX: coordinate(cmd.toX), toY: coordinate(cmd.toY) };
+    } else if (cmd.type === 'scroll') {
+      if (typeof cmd.deltaY !== 'number' || !Number.isFinite(cmd.deltaY)) throw new BadRequestException('无效的滚动距离');
+      input = { type: 'scroll', deltaY: Math.max(-2_000, Math.min(2_000, cmd.deltaY)) };
     } else if (cmd.type === 'type') {
       const text = String(cmd.text ?? '').slice(0, 200);
-      if (text) await this.redis.lpush(loginCmdKey(sessionId), JSON.stringify({ type: 'type', text }));
+      if (!text) throw new BadRequestException('输入文字不能为空');
+      input = { type: 'type', text };
     } else if (cmd.type === 'key') {
       const key = String(cmd.key ?? '');
-      if (/^[a-zA-Z0-9]$/.test(key) || ['Enter', 'Backspace', 'Escape', 'Tab'].includes(key)) {
-        await this.redis.lpush(loginCmdKey(sessionId), JSON.stringify({ type: 'key', key }));
-      }
+      if (!/^[a-zA-Z0-9]$/.test(key) && !['Enter', 'Backspace', 'Escape', 'Tab', 'ControlOrMeta+A'].includes(key)) throw new BadRequestException('不支持的按键');
+      input = { type: 'key', key };
     } else {
       throw new BadRequestException('未知指令类型');
     }
+    await this.redis.rpush(loginCmdKey(sessionId), JSON.stringify(input));
+    await this.redis.expire(loginCmdKey(sessionId), LOGIN_FRAME_TTL_SEC);
     return { ok: true };
   }
 
   @Post('accounts/:id/disable')
   async disableAccount(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
     void currentAccount(req);
+    const sessionId = await this.redis.get(loginProfileKey(id));
+    if (sessionId) await this.redis.set(loginCancelKey(sessionId), '1', 'EX', LOGIN_CANCEL_TTL_SEC);
     await this.db
       .update(accountProfiles)
       .set({ status: 'retired', retiredAt: new Date() })

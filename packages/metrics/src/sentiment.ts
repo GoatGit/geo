@@ -1,9 +1,18 @@
 import { normalizeText } from './normalize';
 
-/** 情绪得分(docs/02 §4):正面占比 ×100,四舍五入;无有效数据返回 null。 */
-export function sentimentScore(positive: number, valid: number): number | null {
+/** 中性权重:归一化计分的中间档(正面 +1 / 中性 +0.5 / 负面 −1)。 */
+export const SENTIMENT_NEUTRAL_WEIGHT = 0.5;
+
+/**
+ * 情绪得分(docs/02 §4,2026-09-18 修订为归一化负分制):
+ * 得分 = round((正面 + 0.5×中性 − 负面) / 有效数 × 100),值域 −100..+100;
+ * 负面主动扣分(负分),60 分以下为负面档(与行动规则/健康阈值同源,见 rules.ts)。
+ * 无有效数据返回 null。
+ */
+export function sentimentScore(positive: number, neutral: number, negative: number, valid: number): number | null {
   if (valid <= 0) return null;
-  return Math.round((positive / valid) * 100);
+  const weighted = positive + SENTIMENT_NEUTRAL_WEIGHT * neutral - negative;
+  return Math.round((weighted / valid) * 100);
 }
 
 export interface ImpressionInput {

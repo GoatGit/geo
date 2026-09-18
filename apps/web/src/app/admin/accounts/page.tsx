@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { Badge, PageHeader, Skeleton } from '@/components/ui';
 import { WEB_ENGINES } from '@geo/shared';
 
@@ -16,6 +16,7 @@ interface AccountRow {
   cooldownUntil: string | null;
   retiredAt: string | null;
   createdAt: string;
+  loginSessionId?: string | null;
 }
 
 interface LoginState {
@@ -46,47 +47,77 @@ const ENGINE_LABELS: Record<string, string> = {
  * 这里轮询展示;点击画面转发为远程鼠标点击,文字/回车按钮转发键盘输入——
  * 生产 agentbay 云端浏览器与本地无头模式统一走此通道完成人工扫码/验证码登录。
  */
-function ViewerPanel({ sessionId }: { sessionId: string }) {
+function ViewerPanel({ sessionId, label }: { sessionId: string; label: string }) {
   const [src, setSrc] = useState<string | null>(null);
   const [text, setText] = useState('');
   const [hint, setHint] = useState('');
   const imgRef = useRef<HTMLImageElement>(null);
+  const commandQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const pointerStart = useRef<{ x: number; y: number } | null>(null);
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
-    const t = setInterval(async () => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
       try {
         const r = await api<{ frame: string | null }>(`/admin/login/${sessionId}/frame`);
-        if (r.frame) setSrc(`data:image/jpeg;base64,${r.frame}`);
+        if (!stopped && r.frame) setSrc(`data:image/jpeg;base64,${r.frame}`);
       } catch {
         // 单帧失败忽略,下一轮重取
       }
-    }, 1_000);
-    return () => clearInterval(t);
+      if (!stopped) timer = setTimeout(poll, 1_000);
+    };
+    void poll();
+    return () => { stopped = true; clearTimeout(timer); };
   }, [sessionId]);
 
-  const send = (cmd: Record<string, unknown>) =>
-    api(`/admin/login/${sessionId}/input`, { method: 'POST', json: cmd }).catch((e) => setHint((e as Error).message));
+  const send = (cmd: Record<string, unknown>) => {
+    const next = commandQueue.current.then(() => api(`/admin/login/${sessionId}/input`, { method: 'POST', json: cmd }));
+    commandQueue.current = next.catch(() => undefined);
+    return next.then(() => { setHint(''); return true; }, (e) => { setHint((e as Error).message); return false; });
+  };
+  const sendText = async () => {
+    if (!text || sending) return;
+    setSending(true);
+    if (await send({ type: 'type', text })) setText('');
+    setSending(false);
+  };
 
-  const onClickImage = (e: React.MouseEvent<HTMLImageElement>) => {
+  const coordinates = (e: React.PointerEvent<HTMLImageElement>) => {
     const img = imgRef.current;
-    if (!img || !img.naturalWidth) return;
+    if (!img || !img.naturalWidth) return null;
     const rect = img.getBoundingClientRect();
-    const x = Math.round(((e.clientX - rect.left) * img.naturalWidth) / rect.width);
-    const y = Math.round(((e.clientY - rect.top) * img.naturalHeight) / rect.height);
-    void send({ type: 'click', x, y });
+    const x = Math.max(0, Math.min(img.naturalWidth - 1, Math.round(((e.clientX - rect.left) * img.naturalWidth) / rect.width)));
+    const y = Math.max(0, Math.min(img.naturalHeight - 1, Math.round(((e.clientY - rect.top) * img.naturalHeight) / rect.height)));
+    return { x, y };
   };
 
   return (
     <section className="card rise-2 p-4">
-      <h3 className="mb-2 text-sm font-semibold text-slate-900">远程登录实时画面</h3>
+      <h3 className="mb-2 text-sm font-semibold text-slate-900">{label} · 远程登录</h3>
       <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
         {src ? (
           <img
             ref={imgRef}
             src={src}
             alt="远程浏览器实时画面"
-            className="w-full cursor-crosshair select-none"
-            onClick={onClickImage}
+            className="w-full cursor-crosshair select-none touch-none"
+            onPointerDown={(e) => {
+              if (e.button !== 0) return;
+              pointerStart.current = coordinates(e);
+              e.currentTarget.setPointerCapture(e.pointerId);
+            }}
+            onPointerUp={(e) => {
+              const start = pointerStart.current;
+              const end = coordinates(e);
+              pointerStart.current = null;
+              if (!start || !end) return;
+              void send(Math.hypot(end.x - start.x, end.y - start.y) < 4
+                ? { type: 'click', ...start }
+                : { type: 'drag', ...start, toX: end.x, toY: end.y });
+            }}
+            onPointerCancel={() => { pointerStart.current = null; }}
             draggable={false}
           />
         ) : (
@@ -98,23 +129,26 @@ function ViewerPanel({ sessionId }: { sessionId: string }) {
           className="input h-9 flex-1 min-w-48"
           placeholder="输入文字(手机号/验证码等),发送到画面中已聚焦的输入框"
           value={text}
+          type="password"
+          autoComplete="off"
+          maxLength={200}
+          disabled={sending}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && text) {
-              void send({ type: 'type', text });
-              setText('');
-            }
+            if (e.key === 'Enter' && !e.nativeEvent.isComposing) void sendText();
           }}
         />
         <button
           className="btn-primary h-9 px-4"
-          onClick={() => {
-            if (text) void send({ type: 'type', text });
-            setText('');
-          }}
+          disabled={sending || !text}
+          onClick={() => void sendText()}
         >
           发送文字
         </button>
+        <button className="h-9 px-3 text-sm text-slate-600" onClick={() => void send({ type: 'key', key: 'ControlOrMeta+A' })}>全选</button>
+        <button className="h-9 px-3 text-sm text-slate-600" onClick={() => void send({ type: 'key', key: 'Tab' })}>下一输入框</button>
+        <button className="h-9 px-3 text-sm text-slate-600" onClick={() => void send({ type: 'scroll', deltaY: -400 })}>向上滚动</button>
+        <button className="h-9 px-3 text-sm text-slate-600" onClick={() => void send({ type: 'scroll', deltaY: 400 })}>向下滚动</button>
         <button className="h-9 px-4 text-sm text-slate-600 hover:text-slate-900" onClick={() => void send({ type: 'key', key: 'Enter' })}>
           回车
         </button>
@@ -124,7 +158,7 @@ function ViewerPanel({ sessionId }: { sessionId: string }) {
       </div>
       <p className="mt-2 text-xs leading-5 text-slate-500">
         操作方式:点击画面任意位置 = 远程鼠标点击;先用「点击」聚焦输入框,再「发送文字」;
-        手机扫码请对准画面中的二维码。画面约 1 秒一帧。
+        拖动画面可操作滑块;手机扫码请对准画面中的二维码。画面约 1 秒一帧。
         {hint && <span className="ml-2 text-bad">{hint}</span>}
       </p>
     </section>
@@ -149,23 +183,28 @@ export default function AdminAccountsPage() {
   const [message, setMessage] = useState('');
   const [loginStates, setLoginStates] = useState<Record<number, LoginState & { sessionId: string }>>({});
   const pollingRef = useRef<Map<number, NodeJS.Timeout>>(new Map());
+  const requestingRef = useRef(new Set<number>());
 
   useEffect(
     () => () => {
       for (const t of pollingRef.current.values()) clearInterval(t);
+      pollingRef.current.clear();
     },
     [],
   );
 
-  if (isLoading || !data) return <Skeleton />;
-  const accounts = data.accounts;
+  const accounts = data?.accounts ?? [];
 
-  const startPolling = (profileId: number, sessionId: string) => {
+  const startPolling = useCallback((profileId: number, sessionId: string) => {
     const prevTimer = pollingRef.current.get(profileId);
     if (prevTimer) clearInterval(prevTimer);
+    let inFlight = false;
     const timer = setInterval(async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
         const st = await api<LoginState>(`/admin/login/${sessionId}`);
+        if (pollingRef.current.get(profileId) !== timer) return;
         setLoginStates((prev) => ({ ...prev, [profileId]: { ...st, sessionId } }));
         if (st.state === 'done' || st.state === 'timeout' || st.state === 'error' || st.state === 'cancelled') {
           clearInterval(timer);
@@ -173,7 +212,12 @@ export default function AdminAccountsPage() {
           void queryClient.invalidateQueries({ queryKey: ['admin-accounts'] });
           void queryClient.invalidateQueries({ queryKey: ['admin-overview'] });
         }
-      } catch {
+      } catch (error) {
+        if (pollingRef.current.get(profileId) !== timer) return;
+        if (!(error instanceof ApiError) || error.code >= 500) {
+          setLoginStates((prev) => ({ ...prev, [profileId]: { ...prev[profileId], sessionId, detail: '连接暂时中断,正在重试…' } }));
+          return;
+        }
         clearInterval(timer);
         pollingRef.current.delete(profileId);
         setLoginStates((prev) => ({
@@ -186,10 +230,20 @@ export default function AdminAccountsPage() {
             updatedAt: new Date().toISOString(),
           },
         }));
-      }
+      } finally { inFlight = false; }
     }, 2_500);
     pollingRef.current.set(profileId, timer);
-  };
+  }, [queryClient]);
+
+  useEffect(() => {
+    for (const account of data?.accounts ?? []) {
+      if (account.loginSessionId && !pollingRef.current.has(account.id)) {
+        const sessionId = account.loginSessionId;
+        setLoginStates((prev) => ({ ...prev, [account.id]: { state: 'queued', sessionId, detail: '正在恢复登录会话…', updatedAt: new Date().toISOString() } }));
+        startPolling(account.id, sessionId);
+      }
+    }
+  }, [data, startPolling]);
 
   const cancelLogin = async (profileId: number, sessionId: string) => {
     try {
@@ -197,7 +251,7 @@ export default function AdminAccountsPage() {
       // 轮询会拉到 cancelled 终态并自行停止;立即置状态给操作者即时反馈
       setLoginStates((prev) => ({
         ...prev,
-        [profileId]: { ...(prev[profileId] ?? { viewer: false }), sessionId, state: 'cancelled' as const, detail: '取消中…', updatedAt: new Date().toISOString() },
+        [profileId]: { ...prev[profileId], sessionId, detail: '取消中…', updatedAt: new Date().toISOString() },
       }));
     } catch (e) {
       setMessage((e as Error).message);
@@ -205,6 +259,8 @@ export default function AdminAccountsPage() {
   };
 
   const requestLogin = async (id: number) => {
+    if (requestingRef.current.has(id)) return;
+    requestingRef.current.add(id);
     setMessage('');
     try {
       const r = await api<{ sessionId: string }>(`/admin/accounts/${id}/login`, { method: 'POST' });
@@ -215,6 +271,8 @@ export default function AdminAccountsPage() {
       startPolling(id, r.sessionId);
     } catch (e) {
       setMessage((e as Error).message);
+    } finally {
+      requestingRef.current.delete(id);
     }
   };
 
@@ -255,6 +313,8 @@ export default function AdminAccountsPage() {
   const viewerEntries = Object.entries(loginStates).filter(
     ([, st]) => st.viewer && st.sessionId && (st.state === 'running' || st.state === 'queued'),
   );
+
+  if (isLoading || !data) return <Skeleton />;
 
   return (
     <>
@@ -298,12 +358,12 @@ export default function AdminAccountsPage() {
         <p className="text-xs leading-5 text-slate-500">
           流程:添加账号(待登录)→ 点该行「人工登录」→ 本地模式弹出浏览器窗口 / agentbay 与
           LOGIN_VIEWER=1 模式在下方实时画面中操作(点击画面 = 远程鼠标,发送文字 = 远程键盘)→
-          系统检测到登录成功后自动入可用池。登录等待上限 5 分钟,超时可重试。
+          系统验证并保存登录态后自动入可用池。默认等待 10 分钟,以登录状态中的剩余时间为准,超时可重试。
         </p>
       </section>
 
       {viewerEntries.map(([profileId, st]) => (
-        <ViewerPanel key={profileId} sessionId={st.sessionId} />
+        <ViewerPanel key={st.sessionId} sessionId={st.sessionId} label={`${ENGINE_LABELS[accounts.find((a) => a.id === Number(profileId))?.engine ?? ''] ?? '账号'} #${profileId}`} />
       ))}
 
       <section className="card rise-1 overflow-hidden">

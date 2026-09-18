@@ -40,32 +40,47 @@ export function isEchoOfQuestion(answer: string, question: string): boolean {
   return a.length <= q.length + 8 && q.includes(a);
 }
 
-/** 登录态检测(适配器与人工登录编排共用)。判定顺序:
- * ① 正向信号:站点配置的登录 Cookie(如 doubao sessionid / wenxin BDUSS)存在 → 已登录
- *    (部分站点登录后页面仍有残留"登录"文案,Cookie 是最可靠的正向信号);
- * ② URL 命中登录页模式(如 deepseek 强制跳 /sign_in)→ 未登录;
- * ③ 任一未登录指示可见 → 未登录;
- * ④ 都不命中 → 未知(null,由调用方结合 requireLoginCookie 决定)。 */
+/** 登录页/登出重定向优先于旧凭证;只接受目标站点的非空登录凭证。 */
 export async function checkLogin(
   page: Page,
   site: EngineSiteConfig,
 ): Promise<{ loggedIn: boolean | null; hint: string | null }> {
+  const currentUrl = page.url();
+  for (const pattern of site.loginUrlPatterns) {
+    if (currentUrl.includes(pattern)) return { loggedIn: false, hint: `url:${pattern}` };
+  }
+  try {
+    if (new URL(currentUrl).origin !== new URL(site.chatUrl).origin) {
+      return { loggedIn: false, hint: 'outside_chat_origin' };
+    }
+  } catch {
+    return { loggedIn: null, hint: 'page_not_ready' };
+  }
   if (site.loggedInCookieHints?.length) {
     try {
       const cookies = await page.context().cookies(page.url());
       const hit = cookies.find((c) =>
-        site.loggedInCookieHints!.some((h) => c.name.toLowerCase() === h.toLowerCase()),
+        c.value.trim().length > 0 && site.loggedInCookieHints!.some((h) => c.name.toLowerCase() === h.toLowerCase()),
       );
       if (hit) return { loggedIn: true, hint: `cookie:${hit.name}` };
     } catch {
       // Cookie 读取失败:继续负向判定
     }
   }
-  const currentUrl = page.url();
-  for (const pattern of site.loginUrlPatterns) {
-    if (currentUrl.includes(pattern)) {
-      return { loggedIn: false, hint: `url:${pattern}` };
-    }
+  if (site.engine === 'deepseek') {
+    const token = await page.evaluate(() => {
+      const raw = localStorage.getItem('userToken');
+      if (!raw) return null;
+      try {
+        const stored = JSON.parse(raw);
+        // AppKit stores { value, ...metadata }; older versions stored a JSON string.
+        const value = typeof stored === 'string' ? stored : stored?.value;
+        return typeof value === 'string' && value.trim() ? value : null;
+      } catch {
+        return null;
+      }
+    }).catch(() => null);
+    if (token) return { loggedIn: true, hint: 'storage:userToken' };
   }
   for (const hint of site.loginHints) {
     try {

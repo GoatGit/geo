@@ -282,6 +282,7 @@ export const accountProfiles = pgTable('account_profiles', {
   contextRef: text('context_ref'),
   /** 登录成功导出的引擎 Cookie(采集会话注入;docs/04 §3.1) */
   cookies: jsonb('cookies').$type<unknown[]>(),
+  storageState: jsonb('storage_state').$type<import('@geo/shared').BrowserStorageState>(),
   healthScore: integer('health_score').notNull().default(100),
   status: text('status').notNull().default('available'),
   dailyUsed: integer('daily_used').notNull().default(0),

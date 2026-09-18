@@ -170,7 +170,7 @@ export class CollectProcessor {
       ({ ask, leaseServer, rotated } = await this.askWithTimeout(engine, profile, data.questionText));
       await this.breaker.record(engine, ask.status !== 'failed');
       if (needsLoginOf(ask)) {
-        if (profile.cookies?.length) {
+        if (profile.cookies?.length || profile.storageState?.origins.length) {
           if (rotated && leaseServer) {
             // 出口租约已切换:Cookie 是绑旧 IP 的,被判未登录不代表死——重绑新出口 + 短冷却,
             // 不计入 2-strike(不 experge Cookie);引擎若仍拒绝,冷却后自然再试
@@ -192,7 +192,7 @@ export class CollectProcessor {
             } else {
               await this.pool.markTransientLoginMiss(profile.id);
               console.error(
-                `[collect] engine=${engine} profile=${profile.id} 有 ${profile.cookies.length} 条 Cookie 仍 needs_login` +
+                `[collect] engine=${engine} profile=${profile.id} 有持久化登录态仍 needs_login` +
                   `(hint=${String(ask.engineMeta?.hint ?? '?')},cookies=${String(ask.engineMeta?.cookies ?? '?')})` +
                   `——冷却 10 分钟自动重试(${misses}/2)`,
               );
@@ -355,16 +355,15 @@ export class CollectProcessor {
           // 代理出口(docs/07 §13 闸门 #2):AgentBay BrowserOption.proxy 被静默忽略,
           // 改用 Playwright context 级代理。按档案绑定取同一出口——登录 Cookie 与
           // 出口 IP 绑定一致;租约消失时代理池会分配新出口并标 rotated
-          let context: import('playwright-core').BrowserContext;
           ({ lease, rotated } = await this.proxyPool.acquireForProfile(profile.proxyServer ?? null));
-          if (lease) {
-            context = await cdpBrowser.newContext({ proxy: { server: `http://${lease.server}` } });
-          } else {
-            // 无租约直连降级:此时 rotated=false 且 leaseServer=null,不触碰档案绑定
-            context = cdpBrowser.contexts()[0] ?? (await cdpBrowser.newContext());
-          }
+          const context = lease || profile.storageState
+            ? await cdpBrowser.newContext({
+              ...(lease ? { proxy: { server: `http://${lease.server}` } } : {}),
+              ...(profile.storageState ? { storageState: profile.storageState } : {}),
+            })
+            : cdpBrowser.contexts()[0] ?? await cdpBrowser.newContext();
           // 注入持久化 Cookie(docs/04 §3.1):登录导出的引擎会话态先于导航生效
-          if (profile.cookies?.length) {
+          if (!profile.storageState && profile.cookies?.length) {
             try {
               await context.addCookies(profile.cookies as never[]);
               console.log(`[collect] engine=${engine} profile=${profile.id} 注入 Cookie ${profile.cookies.length} 条${lease ? ` + 代理出口 ${lease.egressIp}${rotated ? '(已切换)' : ''}` : '(直连)'}`);

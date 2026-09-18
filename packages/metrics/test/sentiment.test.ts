@@ -2,10 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { aggregateImpressions, sentimentScore, topImpressions } from '../src/sentiment';
 
 describe('sentiment(docs/02 §4)', () => {
-  it('情绪得分 = round(正面/有效 ×100);无数据为 null', () => {
-    expect(sentimentScore(41, 58)).toBe(71);
-    expect(sentimentScore(0, 10)).toBe(0);
-    expect(sentimentScore(1, 0)).toBeNull();
+  it('情绪得分归一化负分制:(正面+0.5×中性−负面)/有效×100,值域 −100..+100;无数据为 null', () => {
+    expect(sentimentScore(41, 0, 0, 58)).toBe(71);
+    // 理想口碑实测案例:12 中性 + 1 负面 → (0 + 6 − 1)/13 ≈ 38,60 分以下判负面档
+    expect(sentimentScore(0, 12, 1, 13)).toBe(38);
+    // 全负面打负分
+    expect(sentimentScore(0, 0, 5, 5)).toBe(-100);
+    // 全中性落在 50(中性档),仍低于 60 及格线
+    expect(sentimentScore(0, 10, 0, 10)).toBe(50);
+    expect(sentimentScore(1, 0, 0, 0)).toBeNull();
   });
 
   it('印象词按词种计数(非出现次数),同义归并生效', () => {

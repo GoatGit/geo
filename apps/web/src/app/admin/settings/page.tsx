@@ -93,7 +93,7 @@ export default function AdminSettingsPage() {
             insightAgent: {
               ...form.insightAgent,
               apiKey: insightKeyDirty ? form.insightAgent.apiKey : '',
-              timeoutMs: Math.min(Math.max(Math.floor(Number(form.insightAgent.timeoutMs) || 0), 2000), 30000),
+              timeoutMs: Math.min(Math.max(Math.floor(Number(form.insightAgent.timeoutMs) || 0), 2000), 60000),
             },
           },
         }),
@@ -372,7 +372,7 @@ export default function AdminSettingsPage() {
             <input
               type="number"
               min={2000}
-              max={30000}
+              max={60000}
               step={500}
               className="input metric-num h-10"
               value={form.insightAgent.timeoutMs}

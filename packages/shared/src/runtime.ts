@@ -22,7 +22,7 @@ export const breakerManualKey = (engine: string) => `geo:breaker:manual:${engine
 
 /**
  * 人工登录编排(docs/04 §3.1 账号生命周期:注册/登录态供给由运营完成):
- * API 管理后台把登录请求 LPUSH 进队列,Worker(拥有浏览器)BLPOP 消费并轮询登录态,
+ * API 管理后台把登录请求 RPUSH 进队列,Worker(拥有浏览器)BLPOP 消费并轮询登录态,
  * 状态写 status key 供后台轮询展示。单消费者即可,队列不堆积。
  */
 export const LOGIN_REQ_QUEUE = 'geo:login:req';
@@ -33,11 +33,12 @@ export const LOGIN_STATUS_TTL_SEC = 3600;
 /**
  * 远程登录可视化操控(生产 BROWSER_MODE=agentbay 时浏览器在云端,操作者无法触碰本地窗口):
  * worker 把远程页面截帧(JPEG base64)写 frame key,后台轮询展示;
- * 后台把点击/文字/回车指令 LPUSH 进 cmd 队列,worker 经 CDP 注入远程页面。
+ * 后台把操作指令 RPUSH 进 cmd 队列,worker LPOP 顺序注入远程页面。
  * 本地模式同样适用(无头 + viewer,不再依赖弹窗)。
  */
 export const loginFrameKey = (sessionId: string) => `geo:login:frame:${sessionId}`;
 export const loginCmdKey = (sessionId: string) => `geo:login:cmd:${sessionId}`;
+export const loginProfileKey = (profileId: number) => `geo:login:profile:${profileId}`;
 /** 截帧 key 保留 120s:覆盖后台轮询间隔,避免崩溃残留。 */
 export const LOGIN_FRAME_TTL_SEC = 120;
 
@@ -51,6 +52,8 @@ export const LOGIN_CANCEL_TTL_SEC = 3600;
 /** 后台 → worker 的远程操控指令。 */
 export type LoginInputCommand =
   | { type: 'click'; x: number; y: number }
+  | { type: 'drag'; x: number; y: number; toX: number; toY: number }
+  | { type: 'scroll'; deltaY: number }
   | { type: 'type'; text: string }
   | { type: 'key'; key: string };
 
@@ -73,4 +76,13 @@ export interface LoginStatus {
   /** true = viewer 远程操控模式:后台应展示实时画面并转发输入 */
   viewer?: boolean;
   updatedAt: string;
+}
+
+/** Portable browser credentials: localStorage is required by DeepSeek. */
+export interface BrowserStorageState {
+  cookies: Array<{
+    name: string; value: string; domain: string; path: string; expires: number;
+    httpOnly: boolean; secure: boolean; sameSite: 'Strict' | 'Lax' | 'None';
+  }>;
+  origins: Array<{ origin: string; localStorage: Array<{ name: string; value: string }> }>;
 }

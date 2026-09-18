@@ -1,6 +1,6 @@
 import { and, eq, gte, sql } from 'drizzle-orm';
 import { brands, citationFacts, mentionFacts, monitoringQuestions, reputationFacts, type Db } from '@geo/db';
-import { classifyLayer, generateActionList } from '@geo/metrics';
+import { classifyLayer, generateActionList, sentimentScore } from '@geo/metrics';
 
 /** 窗口内单条 self 事实的最小投影(纯函数输入,便于单测)。 */
 export interface LayerFact {
@@ -108,6 +108,8 @@ export async function buildReportPayload(
     .where(and(eq(reputationFacts.brandId, brandId), gte(reputationFacts.ranAt, since)))
     .limit(200);
   const pos = rep.filter((r) => r.sentiment === 'pos').length;
+  const neu = rep.filter((r) => r.sentiment === 'neu').length;
+  const neg = rep.filter((r) => r.sentiment === 'neg').length;
 
   // 竞品榜(前 5,同批查询同口径)
   const comp = await db.execute(sql`
@@ -177,7 +179,7 @@ export async function buildReportPayload(
         : null,
     engineStats: eStats,
     competitorCitations: [],
-    sentimentScore: rep.length > 0 ? Math.round((pos / rep.length) * 100) : null,
+    sentimentScore: sentimentScore(pos, neu, neg, rep.length),
     negativeImpressions: [...negTerms.entries()].map(([term, count]) => ({ term, count })),
   });
 
@@ -204,7 +206,7 @@ export async function buildReportPayload(
     },
     reputation: {
       runs: rep.length,
-      sentimentScore: rep.length > 0 ? Math.round((pos / rep.length) * 100) : null,
+      sentimentScore: sentimentScore(pos, neu, neg, rep.length),
       weaknesses: [...negTerms.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([term, runs]) => ({ term, runs })),
     },
     actions: items,

@@ -90,6 +90,6 @@ describe('平台配置净化(管理后台 ↔ 调度器契约)', () => {
     expect(s.protocol).toBe('anthropic');
     expect(s.endpoint).toBe(''); // http 被拒
     expect(s.model).toBe('claude-sonnet-x');
-    expect(s.timeoutMs).toBe(30_000);
+    expect(s.timeoutMs).toBe(60_000);
   });
 });

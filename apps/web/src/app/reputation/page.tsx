@@ -67,9 +67,14 @@ export default function ReputationPage() {
             正面 <b className="metric-num text-good">{data.totals.pos}</b> / 中性{' '}
             <b className="metric-num text-slate-700">{data.totals.neu}</b> / 负面{' '}
             <b className="metric-num text-bad">{data.totals.neg}</b>
+            {data.totals.sentimentScore != null && (
+              <> · 档位 <b className={data.totals.sentimentScore < 60 ? 'text-bad' : 'text-good'}>
+                {data.totals.sentimentScore < 60 ? '偏负面' : '正面'}
+              </b></>
+            )}
           </p>
           <p className="mt-1 text-[11px] text-slate-400">
-            得分 = round(正面数 / 有效数 × 100),口径见 docs/02 §4;低置信判定已进入人工抽检池。
+            得分 = round((正面 + 0.5×中性 − 负面) / 有效数 × 100),值域 −100~+100;60 分以下为负面档(阈值与行动建议/健康体检同源),口径见 docs/02 §4。
           </p>
         </div>
       </div>
@@ -197,6 +202,9 @@ function ScoreRing({ value }: { value: number | null }) {
   const r = 40;
   const c = 2 * Math.PI * r;
   const v = value ?? 0;
+  // 环形进度只表达 0..100;负分以数字与本档位色呈现
+  const progress = Math.max(0, Math.min(100, v)) / 100;
+  const tone = value == null ? '#3f453e' : value < 60 ? '#a05252' : '#3f453e';
   return (
     <svg width="112" height="112" viewBox="0 0 100 100" className="shrink-0">
       <defs>
@@ -215,11 +223,11 @@ function ScoreRing({ value }: { value: number | null }) {
         strokeWidth="9"
         strokeLinecap="round"
         strokeDasharray={c}
-        strokeDashoffset={c * (1 - v / 100)}
+        strokeDashoffset={c * (1 - progress)}
         transform="rotate(-90 50 50)"
         className="transition-all duration-700"
       />
-      <text x="50" y="57" textAnchor="middle" fontSize="21" fontWeight="600" fill="#3f453e" className="metric-num">
+      <text x="50" y="57" textAnchor="middle" fontSize="21" fontWeight="600" fill={tone} className="metric-num">
         {value ?? '—'}
       </text>
     </svg>
