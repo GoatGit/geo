@@ -11,7 +11,7 @@ import { RoundScheduler } from './scheduler';
 import { AccountPoolService } from './profiles';
 import { ProxyPoolManager } from './qg-proxy';
 import { startReportsWorker, startReputationWorker, scheduleWeeklyReports } from './report-worker';
-import { startInsightsWorker } from './insights-worker';
+import { startInsightsWorker, scheduleWeeklyInsights } from './insights-worker';
 import { createBrokerFromEnv } from '@geo/browser-session';
 
 /**
@@ -54,6 +54,7 @@ async function bootstrap() {
   const reportsWorker = startReportsWorker(db);
   const insightsWorker = startInsightsWorker(db);
   await scheduleWeeklyReports();
+  await scheduleWeeklyInsights(); // 行业洞察每周一 09:00 自动生成(docs/01 §3.10 市场化)
 
   // 周报 cron 触发时,给每个活跃品牌入队报告;同一品牌同一周期幂等(failed 除外,可重生成)
   const cronQueue = new Queue(REPORTS_QUEUE, { connection: bullConnection() });

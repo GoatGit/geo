@@ -90,6 +90,98 @@ export class InsightsService implements OnModuleDestroy {
     return { deleted: true };
   }
 
+  // ===== 向导步骤②:监测品牌(AI 推荐 + 人工补充) =====
+
+  /** 该行业现有监测品牌(含问题数与近 7 天有效回答,供向导呈现)。 */
+  async listIndustryBrands(industryId: number) {
+    const industry = (await this.db.select().from(insightIndustries).where(eq(insightIndustries.id, industryId)).limit(1))[0];
+    if (!industry) throw new HttpException('行业不存在', HttpStatus.NOT_FOUND);
+    return this.db.execute(sql`
+      select b.id::bigint as id, b.name, b.status,
+             (select count(*) from monitoring_questions q where q.brand_id = b.id and q.status = 'active')::int as questions,
+             (select count(*) from query_runs r where r.brand_id = b.id
+                and r.ran_at > now() - interval '7 days'
+                and r.status in ('ok_with_answer','ok_empty'))::int as recent_answers
+      from brands b
+      where b.industry = ${industry.name} and b.status = 'active'
+      order by b.id
+    `);
+  }
+
+  /** AI 推荐行业监测品牌:LLM 产出 5-8 个头部品牌的建号描述(名称/官网/定位/竞品)。 */
+  async suggestIndustryBrands(industryId: number) {
+    const industry = (await this.db.select().from(insightIndustries).where(eq(insightIndustries.id, industryId)).limit(1))[0];
+    if (!industry) throw new HttpException('行业不存在', HttpStatus.NOT_FOUND);
+    const cfg = (await loadPlatformSettings(this.db)).insightAgent;
+    if (!cfg.enabled || cfg.mode === 'rules' || !cfg.endpoint || !cfg.apiKey || !cfg.model) {
+      throw new HttpException('需先在「全局配置 → Insight Agent」启用 LLM', HttpStatus.BAD_REQUEST);
+    }
+    const existing = await this.db.select({ name: brands.name }).from(brands).where(and(eq(brands.industry, industry.name), eq(brands.status, 'active')));
+
+    const system =
+      '你是行业研究员。为"AI 搜索品牌可见度监测"挑选值得监测的行业品牌。只输出一个 JSON 对象。' +
+      'schema: {"brands":[{"name":"品牌名(2-12字)","website":"官网域名(没有则空串)","description":"品牌叫X,行业{industry},官网 https://…。X是…(定位/核心产品线/卖点,60-120字),主要竞品是A、B、C。目标客群…"}]}。' +
+      '要求:5-8 个该行业真实存在的头部+成长期品牌(消费者在 AI 里会问到的);description 用"品牌叫X,行业Y"开头(建号解析依赖此格式);覆盖不同定位梯队;避开已监测品牌。';
+    const raw = await chatCompletion(
+      { protocol: cfg.protocol as 'openai' | 'anthropic', endpoint: cfg.endpoint, apiKey: cfg.apiKey, model: cfg.model, timeoutMs: 60_000 },
+      { system, user: JSON.stringify({ 行业: industry.name, 已监测: existing.map((b) => b.name) }), maxTokens: 1600 },
+    );
+    const m = raw.text.match(/\{[\s\S]*\}/);
+    if (!m) throw new HttpException('AI 返回格式异常,请重试', HttpStatus.BAD_GATEWAY);
+    const parsed = JSON.parse(m[0]) as { brands?: Array<{ name?: string; website?: string; description?: string }> };
+    const suggestions = (parsed.brands ?? [])
+      .map((b) => ({ name: String(b.name ?? '').trim(), website: String(b.website ?? '').trim(), description: String(b.description ?? '').trim() }))
+      .filter((b) => b.name.length >= 2 && b.description.length >= 30 && !existing.some((e) => e.name === b.name))
+      .slice(0, 8);
+    if (suggestions.length === 0) throw new HttpException('AI 未给出有效品牌建议,请重试', HttpStatus.BAD_GATEWAY);
+    return { industry: industry.name, suggestions };
+  }
+
+  // ===== 向导步骤③:行业问题(聚合呈现 + AI 生成 + 人工增删) =====
+
+  /** 行业问题聚合视图:按题面去重(行业问题会同时挂在多个品牌下),含覆盖品牌数。 */
+  async listIndustryQuestions(industryId: number) {
+    const industry = (await this.db.select().from(insightIndustries).where(eq(insightIndustries.id, industryId)).limit(1))[0];
+    if (!industry) throw new HttpException('行业不存在', HttpStatus.NOT_FOUND);
+    return this.db.execute(sql`
+      select q.text_raw as text, max(q.type) as type,
+             count(distinct q.brand_id)::int as brands,
+             min(q.id)::bigint as first_id
+      from monitoring_questions q
+      join brands b on b.id = q.brand_id
+      where b.industry = ${industry.name} and b.status = 'active' and q.status = 'active'
+      group by q.text_raw
+      order by min(q.id)
+    `);
+  }
+
+  /** 手动新增行业问题:同时挂到该行业全部品牌(与 AI 下发一致)。 */
+  async addIndustryQuestion(industryId: number, text: string, type: 'ranking' | 'reputation') {
+    const industry = (await this.db.select().from(insightIndustries).where(eq(insightIndustries.id, industryId)).limit(1))[0];
+    if (!industry) throw new HttpException('行业不存在', HttpStatus.NOT_FOUND);
+    const clean = text.trim();
+    if (clean.length < 8 || clean.length > 60) throw new HttpException('问题长度需在 8-60 字', HttpStatus.BAD_REQUEST);
+    const targets = await this.db.select({ id: brands.id }).from(brands).where(and(eq(brands.industry, industry.name), eq(brands.status, 'active')));
+    if (targets.length === 0) throw new HttpException('该行业还没有监测品牌', HttpStatus.BAD_REQUEST);
+    for (const b of targets) {
+      await this.db.insert(monitoringQuestions).values({ brandId: b.id, textRaw: clean, textExpanded: clean, type, status: 'active' });
+    }
+    return { added: clean, brands: targets.length };
+  }
+
+  /** 删除行业问题:按题面在该行业全部品牌下同步删除(行业级对称)。 */
+  async removeIndustryQuestion(industryId: number, text: string) {
+    const industry = (await this.db.select().from(insightIndustries).where(eq(insightIndustries.id, industryId)).limit(1))[0];
+    if (!industry) throw new HttpException('行业不存在', HttpStatus.NOT_FOUND);
+    const res = await this.db.execute(sql`
+      delete from monitoring_questions q
+      using brands b
+      where q.brand_id = b.id and b.industry = ${industry.name} and q.text_raw = ${text}
+      returning q.id
+    `);
+    return { deleted: res.rowCount ?? 0 };
+  }
+
   /**
    * 行业级监测问题生成器(市场化的关键一步):LLM 按行业生成"能产出多品牌声场"的
    * 行业问题(格局/品类对比/口碑),一键下发到该行业全部品牌。apply=false 只返回建议。
