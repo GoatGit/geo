@@ -2,12 +2,15 @@ import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import {
+  brandMaterials,
   brands,
   collectionPlans,
+  loadPlatformSettings,
   recognitionEntries,
   recognitionVersions,
   subscriptions,
 } from '@geo/db';
+import { chatCompletion } from '@geo/insight-agent';
 import { PLAN_LIMITS, WEB_ENGINES, type PlanTier } from '@geo/shared';
 import { parseBrandDescription } from './brand-intelligence';
 import { BillingService } from '../billing/billing.service';
@@ -215,5 +218,109 @@ export class BrandsService {
       .from(brands)
       .where(eq(brands.accountId, accountId));
     return (count[0]?.n ?? 0) as number;
+  }
+
+  /** 资料库列表(新→旧)。 */
+  async listMaterials(brandId: number) {
+    return this.db
+      .select()
+      .from(brandMaterials)
+      .where(eq(brandMaterials.brandId, brandId))
+      .orderBy(sql`${brandMaterials.id} desc`)
+      .limit(200);
+  }
+
+  async addMaterial(
+    brandId: number,
+    kind: 'text' | 'url',
+    title: string,
+    content: string,
+    source: 'manual' | 'dig',
+  ) {
+    const row = (
+      await this.db
+        .insert(brandMaterials)
+        .values({ brandId, kind, title: title.slice(0, 120), content, source, byteLen: content.length })
+        .returning()
+    )[0];
+    return row;
+  }
+
+  /** 删除资料:经 join 校验归属,防止横向越权删除他人品牌资料。 */
+  async removeOwnedMaterial(accountId: number, materialId: number) {
+    const rows = await this.db
+      .select({ id: brandMaterials.id })
+      .from(brandMaterials)
+      .innerJoin(brands, eq(brands.id, brandMaterials.brandId))
+      .where(and(eq(brandMaterials.id, materialId), eq(brands.accountId, accountId)))
+      .limit(1);
+    if (rows.length === 0) throw new HttpException('资料不存在', HttpStatus.NOT_FOUND);
+    await this.db.delete(brandMaterials).where(eq(brandMaterials.id, materialId));
+  }
+
+  /**
+   * AI 品牌挖掘(docs/01 IA ④ 对标竞品"品牌挖掘"):LLM 生成结构化品牌画像,
+   * 产物写入 intro + 自动归档一条"品牌挖掘"文本资料;竞品建议由调用方走既有待确认机制。
+   */
+  async digProfile(accountId: number, brandId: number) {
+    const brand = await this.getOwned(accountId, brandId);
+    const settings = await loadPlatformSettings(this.db);
+    const cfg = settings.insightAgent;
+    if (!cfg.enabled || cfg.mode === 'rules' || !cfg.endpoint || !cfg.apiKey || !cfg.model) {
+      throw new HttpException(
+        'AI 品牌挖掘需要先在「全局配置 → Insight Agent」启用并配置 LLM',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const system =
+      '你是品牌战略分析师。基于给定的品牌档案信息,输出一个 JSON 对象(不要多余文字)。' +
+      'schema: {"summary":"品牌一句话定位(≤60字)","narrative":"结构化品牌画像,含:品牌定位与产品线、核心优势与差异化、主要竞品及竞争关系、目标客群画像(800字内,信息密集的事实陈述,不要营销腔)","competitors":[{"name":"竞品名","aliases":["常见叫法"]}]}。' +
+      'competitors 3-6 个,必须是同品类直接竞争的品牌(不是车型/产品名);aliases 收录常见简称/俗称。';
+    const user = [
+      `品牌名: ${brand.name}`,
+      brand.industry ? `行业: ${brand.industry}` : '',
+      brand.website ? `官网: ${brand.website}` : '',
+      brand.intro ? `现有资料:\n${brand.intro.slice(0, 1500)}` : '现有资料: (无,基于你的知识补全;不确定的内容不要编造)',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const raw = await chatCompletion(
+      { protocol: cfg.protocol as 'openai' | 'anthropic', endpoint: cfg.endpoint, apiKey: cfg.apiKey, model: cfg.model, timeoutMs: 60_000 },
+      { system, user, maxTokens: 2000 },
+    );
+    const m = raw.text.match(/\{[\s\S]*\}/);
+    if (!m) throw new HttpException('AI 返回格式异常,请重试', HttpStatus.BAD_GATEWAY);
+    let parsed: {
+      summary?: string;
+      narrative?: string;
+      competitors?: Array<{ name?: string; aliases?: string[] }>;
+    };
+    try {
+      parsed = JSON.parse(m[0]);
+    } catch {
+      throw new HttpException('AI 返回格式异常,请重试', HttpStatus.BAD_GATEWAY);
+    }
+
+    const narrative = String(parsed.narrative ?? '').trim();
+    if (narrative.length < 50) throw new HttpException('AI 返回内容过少,请重试', HttpStatus.BAD_GATEWAY);
+    const summary = String(parsed.summary ?? '').trim();
+    const intro = summary ? `${summary}\n${narrative}`.slice(0, 2000) : narrative.slice(0, 2000);
+    await this.db.update(brands).set({ intro }).where(eq(brands.id, brandId));
+
+    const material = await this.addMaterial(
+      brandId,
+      'text',
+      `品牌画像与市场处境(品牌挖掘)`,
+      narrative,
+      'dig',
+    );
+
+    const competitors = (parsed.competitors ?? [])
+      .map((c) => ({ name: String(c.name ?? '').trim(), aliases: (c.aliases ?? []).map((a) => String(a).trim()).filter(Boolean) }))
+      .filter((c) => c.name.length >= 2 && c.name !== brand.name);
+
+    return { intro, material, competitors };
   }
 }

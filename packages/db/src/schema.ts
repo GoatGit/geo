@@ -368,3 +368,18 @@ export const industryInsights = pgTable('industry_insights', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** 品牌资料库(docs/01 IA ④ 对标竞品品牌库):文本/链接资料,AI 写稿/问答/洞察时调用。
+ *  kind: 'text' | 'url';source: 'manual'(手动添加)| 'dig'(AI 品牌挖掘产物)。 */
+export const brandMaterials = pgTable('brand_materials', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  brandId: bigint('brand_id', { mode: 'number' })
+    .notNull()
+    .references(() => brands.id, { onDelete: 'cascade' }),
+  kind: text('kind').notNull(),
+  title: text('title').notNull(),
+  content: text('content').notNull().default(''),
+  source: text('source').notNull().default('manual'),
+  byteLen: integer('byte_len').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
