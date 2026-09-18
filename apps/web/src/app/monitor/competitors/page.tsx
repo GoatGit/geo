@@ -1,4 +1,5 @@
 'use client';
+import { engineLabel } from '@geo/shared';
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -177,7 +178,7 @@ export default function CompetitorsPage() {
                     <th className="py-2 pr-4 font-medium">竞品</th>
                     {engines.map((e) => (
                       <th key={e} className="px-3 py-2 font-medium">
-                        {e}
+                        {engineLabel(e)}
                       </th>
                     ))}
                   </tr>

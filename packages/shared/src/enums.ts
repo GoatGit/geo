@@ -4,6 +4,18 @@
 export const WEB_ENGINES = ['doubao', 'deepseek', 'wenxin', 'qwen', 'yuanbao'] as const;
 export type EngineId = (typeof WEB_ENGINES)[number];
 
+/** 引擎展示名(UI 一律中文;底层数据/接口仍用 engine id,未知 id 原样回退)。 */
+export const ENGINE_LABELS: Record<EngineId | string, string> = {
+  doubao: '豆包',
+  deepseek: 'DeepSeek',
+  wenxin: '文心',
+  qwen: '千问',
+  yuanbao: '元宝',
+};
+export function engineLabel(engine: string): string {
+  return ENGINE_LABELS[engine] ?? engine;
+}
+
 export type Surface = 'web' | 'app';
 
 /** QueryRun 四态状态机(docs/02 §1.1):分母只计前两态,失败/拦截永不静默为 0。 */

@@ -1,4 +1,5 @@
 'use client';
+import { engineLabel } from '@geo/shared';
 
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -128,7 +129,7 @@ export default function ReputationPage() {
                 >
                   <span className="line-clamp-2">“{s.excerpt ?? '(无摘要)'}”</span>
                   <span className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-slate-400">
-                    {s.engine && <span className="rounded bg-white px-1.5 py-0.5 font-medium text-slate-500">{s.engine}</span>}
+                    {s.engine && <span className="rounded bg-white px-1.5 py-0.5 font-medium text-slate-500">{engineLabel(s.engine)}</span>}
                     <span className={st.cls}>{st.label}</span>
                     <span className="metric-num">run #{s.runId}</span>
                     <span>{new Date(s.ranAt).toLocaleString('zh-CN')}</span>
@@ -155,7 +156,7 @@ export default function ReputationPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-[11px] text-slate-400">
-                      run #{evidence.data.runId} · {evidence.data.engine} ·{' '}
+                      run #{evidence.data.runId} · {engineLabel(evidence.data.engine)} ·{' '}
                       {new Date(evidence.data.ranAt).toLocaleString('zh-CN')}
                     </p>
                     <h3 className="mt-1 text-[15px] font-semibold leading-6 text-slate-900">

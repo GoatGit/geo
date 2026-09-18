@@ -1,4 +1,5 @@
 'use client';
+import { engineLabel } from '@geo/shared';
 
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
@@ -77,7 +78,7 @@ export default function CitationsPage() {
                   </a>
                 </td>
                 <td className="px-3 py-2 text-xs text-slate-500">{c.domain}</td>
-                <td className="px-3 py-2 text-xs">{c.engine}</td>
+                <td className="px-3 py-2 text-xs">{engineLabel(c.engine)}</td>
                 <td className="px-3 py-2 text-xs">{c.isOwned ? '✓' : ''}</td>
               </tr>
             ))}

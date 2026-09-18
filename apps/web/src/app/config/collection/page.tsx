@@ -1,4 +1,5 @@
 'use client';
+import { engineLabel } from '@geo/shared';
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -86,7 +87,7 @@ export default function CollectionPage() {
             <tbody>
               {data.engines.map((e) => (
                 <tr key={e.engine} className="border-t">
-                  <td className="py-1.5">{e.engine}</td>
+                  <td className="py-1.5">{engineLabel(e.engine)}</td>
                   <td className="metric-num py-1.5">
                     {e.ok}✓ / {e.failed}✗
                   </td>

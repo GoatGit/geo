@@ -1,4 +1,5 @@
 'use client';
+import { engineLabel } from '@geo/shared';
 
 import { useState } from 'react';
 import { MetricCardView } from '@/components/metric-card';
@@ -93,7 +94,7 @@ export default function RankingsPage() {
         <div className="grid gap-x-6 gap-y-2 md:grid-cols-2">
           {data.engineStats.map((e) => (
             <div key={e.engine} className="flex items-center gap-3">
-              <span className="w-20 shrink-0 truncate text-xs font-semibold text-slate-700">{e.engine}</span>
+              <span className="w-20 shrink-0 truncate text-xs font-semibold text-slate-700">{engineLabel(e.engine)}</span>
               <div className="grid flex-1 gap-1">
                 {RATE_BARS.map((b) => (
                   <div key={b.key} className="flex items-center gap-2">
@@ -118,7 +119,7 @@ export default function RankingsPage() {
         >
           <option value="all">全部引擎</option>
           {data.engineStats.map((e) => (
-            <option key={e.engine} value={e.engine}>{e.engine}</option>
+            <option key={e.engine} value={e.engine}>{engineLabel(e.engine)}</option>
           ))}
         </select>
         <select
@@ -155,7 +156,7 @@ export default function RankingsPage() {
             <tr className="bg-slate-50/90 text-[11.5px] font-semibold text-slate-500">
               <th className="sticky left-0 z-10 border-b border-slate-200 bg-slate-50/95 px-4 py-2.5 text-left backdrop-blur">监控问题</th>
               {visibleEngines.map((eng) => (
-                <th key={eng} className="border-b border-slate-200 px-2.5 py-2.5 text-center">{eng}</th>
+                <th key={eng} className="border-b border-slate-200 px-2.5 py-2.5 text-center">{engineLabel(eng)}</th>
               ))}
               {/* 分组分割线:引擎组 | 综合+三率组 */}
               <th className="border-b border-l-2 border-l-slate-200 border-slate-200 px-3 py-2.5 text-center">综合名次</th>

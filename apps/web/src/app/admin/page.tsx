@@ -1,4 +1,5 @@
 'use client';
+import { engineLabel } from '@geo/shared';
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -209,7 +210,7 @@ export default function AdminOverviewPage() {
               const paused = e.manuallyPaused;
               return (
                 <tr key={e.engine} className="border-t">
-                  <td className="py-1.5">{e.engine}</td>
+                  <td className="py-1.5">{engineLabel(e.engine)}</td>
                   <td className="metric-num py-1.5">
                     {e.ok}✓ / {e.failed}✗
                   </td>
@@ -253,7 +254,7 @@ export default function AdminOverviewPage() {
           {data.recentRuns.slice(0, 60).map((r, i) => (
             <span
               key={i}
-              title={`${r.brandName} · ${r.engine} · ${r.status} · ${new Date(r.ranAt).toLocaleTimeString('zh-CN')}`}
+              title={`${r.brandName} · ${engineLabel(r.engine)} · ${r.status} · ${new Date(r.ranAt).toLocaleTimeString('zh-CN')}`}
               className={`h-2.5 w-2.5 rounded-sm ${
                 r.status === 'ok_with_answer'
                   ? 'bg-good'

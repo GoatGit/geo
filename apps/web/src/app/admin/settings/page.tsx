@@ -1,4 +1,5 @@
 'use client';
+import { engineLabel } from '@geo/shared';
 
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -195,7 +196,7 @@ export default function AdminSettingsPage() {
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           {WEB_ENGINES.map((engine) => (
             <label key={engine} className="block">
-              <span className="mb-1 block text-xs font-medium text-slate-600">{engine}</span>
+              <span className="mb-1 block text-xs font-medium text-slate-600">{engineLabel(engine)}</span>
               <input
                 type="number"
                 min={0}

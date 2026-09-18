@@ -1,4 +1,5 @@
 'use client';
+import { engineLabel } from '@geo/shared';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -34,13 +35,6 @@ const STATUS_META: Record<string, { label: string; tone: 'good' | 'warn' | 'bad'
   retired: { label: '已退役', tone: 'slate' },
 };
 
-const ENGINE_LABELS: Record<string, string> = {
-  doubao: '豆包',
-  deepseek: 'DeepSeek',
-  wenxin: '百度文心助手',
-  qwen: '通义千问',
-  yuanbao: '腾讯元宝',
-};
 
 /**
  * 远程登录实时画面(viewer):worker 把远程/无头浏览器页面截帧写 Redis,
@@ -284,7 +278,7 @@ export default function AdminAccountsPage() {
         json: { engine: newEngine, count: newCount },
       });
       void queryClient.invalidateQueries({ queryKey: ['admin-accounts'] });
-      setMessage(`已添加 ${r.created} 个 ${ENGINE_LABELS[newEngine] ?? newEngine} 账号(待登录),逐个点「人工登录」完成扫码`);
+      setMessage(`已添加 ${r.created} 个 ${engineLabel(newEngine)} 账号(待登录),逐个点「人工登录」完成扫码`);
     } catch (e) {
       setMessage((e as Error).message);
     }
@@ -327,7 +321,7 @@ export default function AdminAccountsPage() {
         <div className="mb-3 flex flex-wrap items-center gap-2">
           {engineSummary.map((s) => (
             <span key={s.engine} className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
-              {ENGINE_LABELS[s.engine] ?? s.engine}:{s.available}/{s.total} 可用
+              {engineLabel(s.engine)}:{s.available}/{s.total} 可用
               {s.pending > 0 && <span className="ml-1 text-warn">(待登录 {s.pending})</span>}
             </span>
           ))}
@@ -337,7 +331,7 @@ export default function AdminAccountsPage() {
           <select className="input h-9 w-40" value={newEngine} onChange={(e) => setNewEngine(e.target.value)}>
             {WEB_ENGINES.map((e) => (
               <option key={e} value={e}>
-                {ENGINE_LABELS[e] ?? e}
+                {engineLabel(e)}
               </option>
             ))}
           </select>
@@ -363,7 +357,7 @@ export default function AdminAccountsPage() {
       </section>
 
       {viewerEntries.map(([profileId, st]) => (
-        <ViewerPanel key={st.sessionId} sessionId={st.sessionId} label={`${ENGINE_LABELS[accounts.find((a) => a.id === Number(profileId))?.engine ?? ''] ?? '账号'} #${profileId}`} />
+        <ViewerPanel key={st.sessionId} sessionId={st.sessionId} label={`${engineLabel(accounts.find((a) => a.id === Number(profileId))?.engine ?? '')} #${profileId}`} />
       ))}
 
       <section className="card rise-1 overflow-hidden">
@@ -392,7 +386,7 @@ export default function AdminAccountsPage() {
               return (
                 <tr key={a.id} className="border-b border-slate-50 last:border-0">
                   <td className="px-5 py-3">
-                    <div className="font-medium text-slate-800">{ENGINE_LABELS[a.engine] ?? a.engine}</div>
+                    <div className="font-medium text-slate-800">{engineLabel(a.engine)}</div>
                     <div className="text-xs text-slate-400">profile #{a.id}</div>
                   </td>
                   <td className="px-5 py-3">

@@ -1,4 +1,5 @@
 'use client';
+import { engineLabel } from '@geo/shared';
 
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -44,7 +45,7 @@ export function EvidenceModal({ runId, onClose }: { runId: number | null; onClos
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-[11px] text-slate-400">
-                  run #{evidence.data.runId} · {evidence.data.engine} ·{' '}
+                  run #{evidence.data.runId} · {engineLabel(evidence.data.engine)} ·{' '}
                   {new Date(evidence.data.ranAt).toLocaleString('zh-CN')}
                 </p>
                 <h3 className="mt-1 text-[15px] font-semibold leading-6 text-slate-900">

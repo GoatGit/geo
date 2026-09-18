@@ -1,4 +1,5 @@
 'use client';
+import { engineLabel } from '@geo/shared';
 
 import { useEffect, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -67,7 +68,7 @@ export default function NewBrandPage() {
       {result && (
         <div className="space-y-3 rounded-lg border bg-white p-5 text-sm">
           <p>
-            已创建品牌:<b>{result.brand.name}</b> · 套餐 {result.plan} · 引擎 {result.engines.join('/')}
+            已创建品牌:<b>{result.brand.name}</b> · 套餐 {result.plan} · 引擎 {result.engines.map(engineLabel).join('/')}
           </p>
           <p>
             建议识别别名(已默认登记):
