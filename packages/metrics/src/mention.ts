@@ -1,6 +1,7 @@
 import { PARSER_VERSION, type MentionFactDraft } from '@geo/shared';
 import { extractListItems, proseText } from './extract';
 import { makeEvidence, matchSubject, type SubjectDef, type SubjectMatch } from './match';
+import { normalizeText } from './normalize';
 
 /**
  * 即时抽取(docs/05 §2):提及与位次判定,产出 mention_facts 草稿。
@@ -47,20 +48,21 @@ export function buildMentionFacts(input: {
 
   // 1) 列表项:同一项命中多个主体 → co_ranked
   for (const item of items) {
-    const matches = collectMatchesInText(item.name, subjects);
+    // 每个列表项只归一一次(原先每列表项 × 每 subject 重复归一整段文本)
+    const normItemName = normalizeText(item.name);
+    const matches = collectMatchesInText(item.name, normItemName, subjects);
     if (matches.length === 0) continue;
     for (const m of matches) {
       const fact = ensure(m.subject);
       const better =
         !fact.mentioned || (fact.rank === null && item.rank !== null) ||
         (item.rank !== null && fact.rank !== null && item.rank < fact.rank!);
+      // better=false 时第三子条件必为 false,原 else-if 是永不可达的死分支,已删除
       if (better) {
         fact.mentioned = true;
         fact.rank = item.rank;
         fact.evidence = makeEvidence(m.hitWord, item.raw, item.itemIndex);
         fact.confidence = m.confidence;
-      } else if (fact.mentioned && fact.rank !== null && item.rank !== null && item.rank < fact.rank) {
-        fact.rank = item.rank;
       }
       if (matches.length > 1) fact.coRanked = true;
     }
@@ -83,10 +85,18 @@ export function buildMentionFacts(input: {
   return [...byKey.values()];
 }
 
-function collectMatchesInText(text: string, subjects: SubjectDef[]): SubjectMatch[] {
+/**
+ * 逐主体匹配列表项文本;归一结果由调用方传入(每列表项归一一次),
+ * 避免旧实现每列表项 × 每 subject 重复归一整段文本。
+ */
+function collectMatchesInText(
+  text: string,
+  normText: string,
+  subjects: SubjectDef[],
+): SubjectMatch[] {
   const out: SubjectMatch[] = [];
   for (const s of subjects) {
-    const m = matchSubject(text, [s]);
+    const m = matchSubject(text, [s], normText);
     if (m) out.push(m);
   }
   return out;

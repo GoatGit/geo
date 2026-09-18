@@ -24,6 +24,18 @@ export async function runMigrations(pool: Pool, dir = MIGRATIONS_DIR): Promise<s
     .filter((f) => f.endsWith('.sql'))
     .sort();
 
+  // 版本号唯一性告警:同号迁移(如 0004_a/0004_b)按文件名字典序隐式定序,
+  // 执行顺序依赖字符串比较而非版本语义,历史上已出现两例;重号时大声提示重命名
+  const seenVersions = new Map<string, string>();
+  for (const file of files) {
+    const version = file.match(/^(\d+)/)?.[1] ?? file;
+    const prev = seenVersions.get(version);
+    if (prev) {
+      console.warn(`[migrator] duplicate migration version ${version}: ${prev} & ${file} — execute order is lexicographic, consider renaming`);
+    }
+    seenVersions.set(version, file);
+  }
+
   const newlyApplied: string[] = [];
   for (const file of files) {
     if (applied.has(file)) continue;

@@ -108,3 +108,41 @@ export function buildEvidencePack(input: EvidenceInput): EvidencePack {
     },
   };
 }
+
+export interface EvidenceVerifyResult {
+  ok: boolean;
+  /** integrity.sha256 内容的哈希;与 query_runs.evidence_hash 比对即链根校验 */
+  manifestHash: string;
+  /** 哈希不匹配或读取失败的文件清单(ok 时为空) */
+  broken: string[];
+}
+
+/**
+ * 读取侧完整性校验(防篡改闭环):生成侧写 integrity.sha256 只是单向承诺,
+ * 只有读取侧重算每个文件哈希、并可与落库的 evidence_hash 比对链根,承诺才成立。
+ * getFile 按包内相对路径(如 answer.json)提供内容;manifest 行序无关,逐行独立校验。
+ */
+export async function verifyEvidencePack(
+  manifestBody: Buffer,
+  getFile: (name: string) => Promise<Buffer | null>,
+): Promise<EvidenceVerifyResult> {
+  const lines = manifestBody.toString('utf8').split('\n').filter((l) => l.trim());
+  const broken: string[] = [];
+  for (const line of lines) {
+    const sep = line.indexOf('  ');
+    const hash = sep > 0 ? line.slice(0, sep) : '';
+    const name = sep > 0 ? line.slice(sep + 2).trim() : '';
+    if (!/^[0-9a-f]{64}$/.test(hash) || !name) {
+      broken.push(name || line.slice(0, 64));
+      continue;
+    }
+    let body: Buffer | null = null;
+    try {
+      body = await getFile(name);
+    } catch {
+      body = null;
+    }
+    if (!body || sha256(body) !== hash) broken.push(name);
+  }
+  return { ok: broken.length === 0, manifestHash: sha256(manifestBody), broken };
+}

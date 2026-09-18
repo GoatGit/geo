@@ -1,9 +1,9 @@
-import { Controller, Get, HttpException, HttpStatus, Inject, Param, ParseIntPipe, Req } from '@nestjs/common';
+import { Controller, Get, HttpException, HttpStatus, Inject, Param, ParseIntPipe, Query, Req } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Request } from 'express';
 import { queryRuns } from '@geo/db';
-import { createStorageFromEnv, type EvidenceStorage } from '@geo/evidence';
+import { createStorageFromEnv, verifyEvidencePack, type EvidenceStorage } from '@geo/evidence';
 import { currentAccount } from '../common/auth';
 import { DB } from '../common/infra.module';
 import { BrandsService } from '../brands/brands.service';
@@ -67,9 +67,15 @@ export class RunsController {
     };
   }
 
-  /** 原文证据内容:直接返回 answer.json 解析结果(免前端二次取签名 URL;docs/05 §6)。 */
+  /** 原文证据内容:直接返回 answer.json 解析结果(免前端二次取签名 URL;docs/05 §6)。
+   *  verify=1 时重算证据包哈希链(防篡改闭环:生成侧单向写 integrity.sha256,
+   *  从无读取侧校验,承诺不成立)。 */
   @Get(':id/answer')
-  async answer(@Req() req: Request, @Param('id', ParseIntPipe) runId: number) {
+  async answer(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) runId: number,
+    @Query('verify') verify?: string,
+  ) {
     const accountId = currentAccount(req).accountId;
     const run = (
       await this.db
@@ -109,6 +115,17 @@ export class RunsController {
     } catch {
       throw new HttpException('证据包读取失败(可能已过保留期)', HttpStatus.GONE);
     }
+    // 完整性校验(可选):重算包内文件哈希;evidenceHash 落库值可另行与返回的 manifestHash 比对
+    let integrity: { ok: boolean; broken: string[]; manifestHash: string } | null = null;
+    if (verify === '1') {
+      try {
+        const manifest = await this.storage.get(`evidence/${runId}/integrity.sha256`);
+        const r = await verifyEvidencePack(manifest, (name) => this.storage.get(`evidence/${runId}/${name}`));
+        integrity = { ok: r.ok, broken: r.broken, manifestHash: r.manifestHash };
+      } catch {
+        integrity = { ok: false, broken: ['integrity.sha256 读取失败(包不完整或已过保留期)'], manifestHash: '' };
+      }
+    }
     return {
       runId,
       status: run.status,
@@ -121,6 +138,7 @@ export class RunsController {
       manifestHash: run.evidenceHash,
       answerRef: run.answerRef,
       engineMeta,
+      integrity,
     };
   }
 }

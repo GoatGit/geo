@@ -83,7 +83,24 @@ export class CollectProcessor {
       concurrency,
     });
     worker.on('error', (err) => console.error('[collect] worker error', err));
+    // 兜底收口:job 重试耗尽仍失败(多为执行前段 DB/Redis 抖动抛出)时给轮次计一次 failed,
+    // 否则 done 永远追不上 total,轮次 finishedAt 永不落库、进度永久卡死。
+    // process() 内部已处理的失败走正常完成路径,不会触发此事件,不会双重计数。
+    worker.on('failed', (job, err) => this.onJobFinalFailure(job, err));
     return worker;
+  }
+
+  private async onJobFinalFailure(job: Job<CollectJobData> | undefined, err: Error): Promise<void> {
+    if (!job) return;
+    const maxAttempts = job.opts.attempts ?? 1;
+    if (job.attemptsMade < maxAttempts) return; // 仍有重试机会,不提前收口
+    console.error(
+      `[collect] job final failure round=${job.data.roundId} engine=${job.data.engine} ` +
+        `question=${job.data.questionId}: ${err.message}`,
+    );
+    await this.bumpRound(job.data.roundId, 'failed').catch((e) =>
+      console.error(`[collect] final-failure round close failed round=${job.data.roundId}:`, e),
+    );
   }
 
   async shutdown(): Promise<void> {

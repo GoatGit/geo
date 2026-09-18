@@ -47,6 +47,9 @@ export const tokenStore = {
   },
 };
 
+type BrandListener = () => void;
+const brandListeners = new Set<BrandListener>();
+
 export const brandStore = {
   get(): number | null {
     if (typeof window === 'undefined') return null;
@@ -58,6 +61,15 @@ export const brandStore = {
   },
   set(id: number) {
     localStorage.setItem(BRAND_KEY, String(id));
+    // 通知订阅者(React 端经 useSyncExternalStore 订阅),切换品牌免整页刷新
+    brandListeners.forEach((l) => l());
+  },
+  /** 订阅品牌变化(供 useSyncExternalStore);返回退订函数。 */
+  subscribe(listener: BrandListener): () => void {
+    brandListeners.add(listener);
+    return () => {
+      brandListeners.delete(listener);
+    };
   },
 };
 
@@ -98,6 +110,39 @@ async function tryRefreshAccessToken(): Promise<boolean> {
   return refreshing;
 }
 
+/** 鉴权请求通用参数(auth=false 为公开接口;_retried401 防刷新后无限重放)。 */
+type AuthedInit = RequestInit & {
+  /** 公开接口:不携带凭证,401 也不触发跳登录(如官网首页) */
+  auth?: boolean;
+  /** 内部标记:401 刷新后已重放一次,再次 401 不再重试 */
+  _retried401?: boolean;
+};
+
+/**
+ * 底层请求(JSON 与二进制下载两条路径共用):Bearer 注入 + 401 单飞刷新后重放一次。
+ * 刷新失败时清凭证并携场景化理由跳登录页,再抛 401 ApiError。
+ */
+async function requestWithAuth(path: string, init: AuthedInit): Promise<Response> {
+  const token = init.auth === false ? null : tokenStore.access;
+  const res = await fetch(`/api${path}`, {
+    ...init,
+    headers: {
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(init.headers ?? {}),
+    },
+  });
+  if (res.status === 401 && init.auth !== false && !init._retried401 && typeof window !== 'undefined') {
+    if (await tryRefreshAccessToken()) {
+      return requestWithAuth(path, { ...init, _retried401: true });
+    }
+    tokenStore.clear();
+    const { buildLoginUrl } = await import('./login-reasons');
+    window.location.href = buildLoginUrl('session', location.pathname + location.search);
+    throw new ApiError(401, '未登录');
+  }
+  return res;
+}
+
 export async function api<T>(
   path: string,
   init?: RequestInit & {
@@ -108,30 +153,14 @@ export async function api<T>(
     _retried401?: boolean;
   },
 ): Promise<T> {
-  const token = init?.auth === false ? null : tokenStore.access;
-  const res = await fetch(`/api${path}`, {
+  const res = await requestWithAuth(path, {
     ...init,
     headers: {
       'content-type': 'application/json',
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...(init?.headers ?? {}),
     },
     body: init?.json !== undefined ? JSON.stringify(init.json) : init?.body,
   });
-  if (
-    res.status === 401 &&
-    init?.auth !== false &&
-    !init?._retried401 &&
-    typeof window !== 'undefined'
-  ) {
-    if (await tryRefreshAccessToken()) {
-      return api<T>(path, { ...init, _retried401: true });
-    }
-    tokenStore.clear();
-    const { buildLoginUrl } = await import('./login-reasons');
-    window.location.href = buildLoginUrl('session', location.pathname + location.search);
-    throw new ApiError(401, '未登录');
-  }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const message = (body as { error?: { message?: string } })?.error?.message ?? `HTTP ${res.status}`;
@@ -140,12 +169,9 @@ export async function api<T>(
   return body as T;
 }
 
-/** 二进制下载(带凭证):PDF 等附件;失败时按错误包络解析并抛出。 */
+/** 二进制下载(带凭证):PDF 等附件;401 同样单飞刷新后重试一次;失败按错误包络解析并抛出。 */
 export async function apiDownload(path: string, fallbackName: string): Promise<void> {
-  const token = tokenStore.access;
-  const res = await fetch(`/api${path}`, {
-    headers: token ? { authorization: `Bearer ${token}` } : {},
-  });
+  const res = await requestWithAuth(path, {});
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
     throw new ApiError(res.status, body?.error?.message ?? `HTTP ${res.status}`);

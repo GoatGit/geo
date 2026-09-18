@@ -10,6 +10,7 @@ export function compositeRank(
   enginesCollected: number,
 ): number | null {
   if (enginesCollected <= 0) return null;
+  if (entries.length === 0) return null; // 空条目:sorted[-1] 为 undefined,避免返回 NaN
   const n = enginesCollected;
   const normalized = entries.map((e) =>
     e.mentioned && e.rank !== null ? e.rank : n + 1,

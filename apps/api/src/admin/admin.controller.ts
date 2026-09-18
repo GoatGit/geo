@@ -94,17 +94,18 @@ export class AdminController implements OnModuleDestroy {
       'reports',
       'subscriptions',
     ];
+    // 单事务整体删除:14 张从属表逐条裸删时,任一条中途失败(连接抖动/锁超时)
+    // 都会把品牌留在"从属数据残缺但 brands 行还在"的半删态且无回滚
     const deleted: Record<string, number> = {};
-    for (const table of tables) {
-      const r = await this.db.execute(
-        sql.raw(`delete from ${table} where brand_id = ${Number(id)}`),
-      );
-      deleted[table] = r.rowCount ?? 0;
-    }
-    const brandDeleted = await this.db
-      .delete(brands)
-      .where(eq(brands.id, id))
-      .returning({ id: brands.id });
+    await this.db.transaction(async (tx) => {
+      for (const table of tables) {
+        const r = await tx.execute(
+          sql.raw(`delete from ${table} where brand_id = ${id}`),
+        );
+        deleted[table] = r.rowCount ?? 0;
+      }
+      await tx.delete(brands).where(eq(brands.id, id));
+    });
     return { deleted: true, brand: brand.name, rows: deleted };
   }
 

@@ -169,6 +169,12 @@ export function mergePlatformSettings(stored: Partial<Record<string, unknown>> |
     const n = Number(v);
     return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
   };
+  // 布尔净化必须与 num 一样严格:Boolean('false') === true,脏字符串会把 kill switch 重新打开
+  const bool = (v: unknown, fallback: boolean): boolean => {
+    if (v === true || v === 1 || v === 'true' || v === 'on') return true;
+    if (v === false || v === 0 || v === 'false' || v === 'off') return false;
+    return fallback;
+  };
   const capsRaw = byKey.get('engineDailyCaps');
   const engineDailyCaps: Record<string, number> = {};
   if (capsRaw && typeof capsRaw === 'object' && !Array.isArray(capsRaw)) {
@@ -178,14 +184,14 @@ export function mergePlatformSettings(stored: Partial<Record<string, unknown>> |
     }
   }
   return {
-    schedulerEnabled: byKey.get('schedulerEnabled') === undefined ? true : Boolean(byKey.get('schedulerEnabled')),
+    schedulerEnabled: byKey.get('schedulerEnabled') === undefined ? true : bool(byKey.get('schedulerEnabled'), true),
     globalDailyRunCap: num(byKey.get('globalDailyRunCap'), 0),
     engineDailyCaps,
     proxyPool: (() => {
       const raw = byKey.get('proxyPool');
       if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
         const r = raw as { enabled?: unknown; key?: unknown };
-        return { enabled: Boolean(r.enabled), key: typeof r.key === 'string' ? r.key : '' };
+        return { enabled: bool(r.enabled, false), key: typeof r.key === 'string' ? r.key : '' };
       }
       return { enabled: false, key: '' };
     })(),

@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { buildEvidencePack, sha256 } from '../src/pack';
+import { buildEvidencePack, sha256, verifyEvidencePack } from '../src/pack';
 import { LocalEvidenceStorage } from '../src/storage';
 
 const input = {
@@ -90,5 +90,38 @@ describe('LocalEvidenceStorage', () => {
 
     await expect(storage.put('not-evidence/x.txt', Buffer.from('x'))).rejects.toThrow();
     await expect(storage.put('evidence/../../etc/passwd', Buffer.from('x'))).rejects.toThrow();
+  });
+
+  it('路径遍历挡住反斜杠形态与兄弟目录前缀(曾可绕过 startsWith 前缀检查)', async () => {
+    const storage = new LocalEvidenceStorage(dir);
+    // Windows 分隔符形态:posix 上反斜杠是普通字符,join/resolve 在 win32 会解释为目录跳转
+    await expect(storage.put('evidence\\..\\..\\evil.txt', Buffer.from('x'))).rejects.toThrow();
+    // 兄弟目录:/data/evidence-evil 能通过 /data/evidence 的 startsWith 前缀检查,relative() 判定挡住
+    await expect(storage.put('evidence/../evidence-evil/x.txt', Buffer.from('x'))).rejects.toThrow();
+    await expect(storage.get('evidence/..\\secret')).rejects.toThrow();
+  });
+});
+
+describe('verifyEvidencePack(读取侧防篡改闭环)', () => {
+  it('完整包校验通过,manifestHash 与链根一致', async () => {
+    const pack = buildEvidencePack(input);
+    const manifest = pack.files.find((f) => f.path.endsWith('integrity.sha256'))!.body;
+    const byName = new Map(pack.files.filter((f) => !f.path.endsWith('integrity.sha256')).map((f) => [f.path.replace('evidence/run-1/', ''), f.body]));
+    const r = await verifyEvidencePack(manifest, (name) => Promise.resolve(byName.get(name) ?? null));
+    expect(r.ok).toBe(true);
+    expect(r.broken).toEqual([]);
+    expect(r.manifestHash).toBe(pack.manifestHash);
+  });
+
+  it('内容被篡改或文件缺失时列出 broken,ok=false', async () => {
+    const pack = buildEvidencePack(input);
+    const manifest = pack.files.find((f) => f.path.endsWith('integrity.sha256'))!.body;
+    const byName = new Map(pack.files.filter((f) => !f.path.endsWith('integrity.sha256')).map((f) => [f.path.replace('evidence/run-1/', ''), f.body]));
+    byName.set('answer.json', Buffer.from('tampered'));
+    byName.delete('meta.json');
+    const r = await verifyEvidencePack(manifest, (name) => Promise.resolve(byName.get(name) ?? null));
+    expect(r.ok).toBe(false);
+    expect(r.broken).toContain('answer.json');
+    expect(r.broken).toContain('meta.json');
   });
 });

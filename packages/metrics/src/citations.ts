@@ -4,7 +4,18 @@ export interface NormalizedUrl {
   domain: string;
 }
 
-const TRACKING_PARAMS = /^(utm_|spm|from|fr|share_|sh_h|vd_source|vd)/i;
+/**
+ * 跟踪参数剔除口径:
+ * - 无下划线的短参数(from/fr/spm/vd 等)按「参数名精确相等」剔除——前缀匹配会误伤正常参数
+ *   (旧口径 /^(...|vd)/ 会删掉 video、/^fr/ 会删掉 front 等);
+ * - utm_/share_/vd_ 等自带下划线的命名空间按前缀剔除,覆盖变体且无误伤面。
+ */
+const TRACKING_PARAM_EXACT = new Set(['from', 'fr', 'spm', 'vd', 'sh_h', 'igshid', 'si']);
+const TRACKING_PARAM_PREFIX = /^(utm_|share_|vd_)/i;
+
+function isTrackingParam(key: string): boolean {
+  return TRACKING_PARAM_EXACT.has(key.toLowerCase()) || TRACKING_PARAM_PREFIX.test(key);
+}
 
 /** 引用 URL 归一(docs/05 §3.1):去协议差异、剥跟踪参数、取主域。 */
 export function normalizeUrl(raw: string): NormalizedUrl {
@@ -17,7 +28,7 @@ export function normalizeUrl(raw: string): NormalizedUrl {
   }
   const keep: Array<[string, string]> = [];
   u.searchParams.forEach((v, k) => {
-    if (!TRACKING_PARAMS.test(k)) keep.push([k, v]);
+    if (!isTrackingParam(k)) keep.push([k, v]);
   });
   u.search = '';
   for (const [k, v] of keep) u.searchParams.append(k, v);
@@ -58,8 +69,8 @@ export function classifyDomain(
   domain: string,
   dict: Record<string, PlatformClassification> = DEFAULT_DOMAIN_DICT,
 ): PlatformClassification {
-  // 容错:允许误传完整 URL,取 host 部分
-  const host = domain.split('/')[0].trim().toLowerCase().replace(/^www\./, '');
+  // 容错:允许误传完整 URL(含协议/路径/大小写/www),统一归一为裸 host
+  const host = normalizeDomainInput(domain);
   if (dict[host]) return dict[host];
   const suffixMatch = Object.keys(dict)
     .filter((d) => host.endsWith(`.${d}`))
@@ -68,13 +79,21 @@ export function classifyDomain(
   return { platform: host, category: 'unknown' };
 }
 
-/** 自有域名判定:精确或子域归属,双方归一协议/www/路径(docs/05 §3.1 是否自有域名)。 */
+/** 域名归一:去空白、小写、剥协议、取 host、剥 www(与 classifyDomain 同一口径)。 */
+function normalizeDomainInput(d: string): string {
+  return d
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .split('/')[0]
+    .replace(/^www\./, '');
+}
+
+/** 自有域名判定:精确或子域归属;双方都做协议/www/路径/大小写归一(docs/05 §3.1 是否自有域名)。 */
 export function isOwnedDomain(domain: string, ownedDomains: string[]): boolean {
+  const host = normalizeDomainInput(domain);
   return ownedDomains.some((o) => {
-    const oo = o
-      .replace(/^https?:\/\//, '')
-      .replace(/^www\./, '')
-      .split('/')[0];
-    return domain === oo || domain.endsWith(`.${oo}`);
+    const oo = normalizeDomainInput(o);
+    return host === oo || host.endsWith(`.${oo}`);
   });
 }

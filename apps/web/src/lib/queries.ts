@@ -1,5 +1,6 @@
 'use client';
 
+import { useSyncExternalStore } from 'react';
 import { api, brandStore } from './api';
 
 export { api, brandStore };
@@ -7,8 +8,14 @@ export { api, brandStore };
 /** 通用查询 hooks:统一带 brandId。 */
 import { useQuery } from '@tanstack/react-query';
 
+/** 响应式读取当前品牌:订阅 brandStore,切换品牌后依赖它的查询自动换 key 重取(免整页刷新)。 */
 export function useBrandId(): number | null {
-  return brandStore.get();
+  return useSyncExternalStore(
+    brandStore.subscribe,
+    () => brandStore.get(),
+    // SSR/水合期无 localStorage,以 null 起步,水合后再读到真实值
+    () => null,
+  );
 }
 
 export interface RankingsDto {

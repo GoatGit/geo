@@ -53,24 +53,59 @@ export function tzOffsetMs(instant: Date, timeZone: string): number {
 
 /**
  * 次日采集时刻(docs/04 §3.4 拟人化节奏):在品牌时区的 10:00–15:59 白天时段随机,
- * 保证距 now ≥ 24h。纯函数(rand 可注入)便于单测。
+ * 且距 now ≥ 24h。纯函数(rand 可注入)便于单测。
+ *
+ * 24h 下限与"次日白天"可能冲突(晚间派发时次日窗口不足 24h):取候选日窗口与
+ * [now+24h, ∞) 的交集随机;交集为空(窗口整段早于下限)则顺延到下一日完整窗口,
+ * 宁可间隔拉长也不在同一自然日跑两轮(每日一轮的口径承诺)。
  */
 export function nextRunAtFrom(now: Date, timezone: string, rand: () => number = Math.random): Date {
-  const targetWall = now.getTime() + DAY_MS + tzOffsetMs(now, timezone);
-  const local = new Date(targetWall);
-  const hour = 10 + Math.floor(rand() * 6);
-  const minute = Math.floor(rand() * 60);
-  const wall = Date.UTC(
-    local.getUTCFullYear(),
-    local.getUTCMonth(),
-    local.getUTCDate(),
-    hour,
-    minute,
-    0,
-  );
-  // 墙钟 → instant:偏移随目标时刻的 DST 变化,迭代一次收敛
-  const firstGuess = new Date(wall - tzOffsetMs(now, timezone));
-  return new Date(wall - tzOffsetMs(firstGuess, timezone));
+  const minAt = now.getTime() + DAY_MS;
+  /** 品牌时区某本地日指定分钟数的墙钟 → instant(偏移随目标时刻 DST 变化,迭代一次收敛)。 */
+  const buildAt = (year: number, month: number, day: number, minuteOfDay: number): Date => {
+    const wall = Date.UTC(year, month, day, Math.floor(minuteOfDay / 60), minuteOfDay % 60, 0);
+    const firstGuess = new Date(wall - tzOffsetMs(now, timezone));
+    return new Date(wall - tzOffsetMs(firstGuess, timezone));
+  };
+  const randMinuteIn = (from: Date, to: Date): Date => {
+    const span = Math.max(to.getTime() - from.getTime(), 60_000);
+    return new Date(from.getTime() + Math.floor((rand() * span) / 60_000) * 60_000);
+  };
+
+  // 候选日 = now+24h 落在的品牌本地日期
+  const local = new Date(minAt + tzOffsetMs(now, timezone));
+  const [y, m, d] = [local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()];
+  const windowStart = buildAt(y, m, d, 10 * 60);
+  const windowEnd = buildAt(y, m, d, 16 * 60); // 15:59 截止(排他)
+  const from = Math.max(windowStart.getTime(), minAt);
+  if (from < windowEnd.getTime()) {
+    return randMinuteIn(new Date(from), windowEnd);
+  }
+  // 窗口整段早于 24h 下限:下一日完整窗口(其起点必然晚于 now+24h,见单测)
+  return randMinuteIn(buildAt(y, m, d + 1, 10 * 60), buildAt(y, m, d + 1, 16 * 60));
+}
+
+/**
+ * 展开一轮的入队计划(纯函数,便于单测):问题×引擎,受全局与每引擎剩余额度双重截断。
+ * 每入队一个任务都复查该引擎余量——只在轮次开始前检查一次的话,"余量 < 题数"的引擎
+ * 会被单轮超发(引擎日上限形同虚设)。直接扣减传入的 budget,与派发循环共享同一份账本。
+ */
+export function planRoundJobs<Q extends { id: number }>(
+  questions: ReadonlyArray<Q>,
+  engineList: readonly string[],
+  budget: Budget,
+): Array<{ question: Q; engine: string }> {
+  const jobs: Array<{ question: Q; engine: string }> = [];
+  for (const question of questions) {
+    for (const engine of engineList) {
+      if (budget.globalRemaining <= jobs.length) return jobs;
+      const left = budget.engineRemaining.get(engine) ?? 0;
+      if (left <= 0) continue; // 该引擎今日额度已尽:跳过,不超发
+      budget.engineRemaining.set(engine, left - 1);
+      jobs.push({ question, engine });
+    }
+  }
+  return jobs;
 }
 
 /**
@@ -226,8 +261,12 @@ export class RoundScheduler {
     const sub = (
       await this.db.select().from(subscriptions).where(eq(subscriptions.brandId, brandId)).limit(1)
     )[0];
-    // 过期/停用订阅不派发(按原计划付费口径,docs/01 §3.10)
-    if (!sub || sub.accountId == null || (sub.status && sub.status !== 'active')) return true;
+    // 过期/停用订阅不派发(按原计划付费口径,docs/01 §3.10)。订阅行没有自动到期降档任务,
+    // status 会一直停在 active——必须同时校验 periodEnd,否则过期套餐仍按付费档消耗采集配额
+    if (!sub || sub.accountId == null) return true;
+    if ((sub.status && sub.status !== 'active') || !sub.periodEnd || sub.periodEnd.getTime() <= Date.now()) {
+      return true;
+    }
     const accountId = sub.accountId;
     const priority = priorityOf(sub?.plan ?? 'free');
 
@@ -261,7 +300,9 @@ export class RoundScheduler {
     }
     if (engineList.length === 0) return true;
 
-    const maxJobs = Math.min(budget.globalRemaining, questions.length * engineList.length);
+    // 入队计划:每任务复查全局/引擎额度(纯函数,预算账本被就地扣减)
+    const jobs = planRoundJobs(questions, engineList, budget);
+    if (jobs.length === 0) return true;
     const round = (
       await this.db.insert(collectionRounds).values({ brandId }).returning()
     )[0]!;
@@ -269,44 +310,43 @@ export class RoundScheduler {
     // totals 先行写入(only-total):避免与 processor 的 done 增量发生"先增后覆盖"竞态
     await this.db
       .update(collectionRounds)
-      .set({ totals: { total: maxJobs, enqueued: 0, done: 0, ok: 0, failed: 0 } })
+      .set({ totals: { total: jobs.length, enqueued: 0, done: 0, ok: 0, failed: 0 } })
       .where(eq(collectionRounds.id, round.id));
 
     let enqueued = 0;
-    for (const q of questions) {
-      for (const engine of engineList) {
-        if (enqueued >= maxJobs) break;
-        await this.queue.add(
-          'collect',
-          {
-            runId: 0, // 执行时落库获得真实 id
-            brandId,
-            accountId,
-            roundId: round.id,
-            questionId: q.id,
-            questionType: q.type as 'ranking' | 'reputation',
-            questionText: q.textExpanded,
-            engine,
-            surface: 'web',
-            priority,
-          },
-          {
-            jobId: `round${round.id}-q${q.id}-${engine}`,
-            priority,
-            // 采集载荷大(含问题文本),completed/failed 只留最近 500 条防 Redis 无界增长
-            removeOnComplete: { count: 500 },
-            removeOnFail: { count: 500 },
-          },
-        );
-        enqueued += 1;
-        budget.engineRemaining.set(engine, (budget.engineRemaining.get(engine) ?? 0) - 1);
-      }
-      if (enqueued >= maxJobs) break;
+    for (const job of jobs) {
+      await this.queue.add(
+        'collect',
+        {
+          runId: 0, // 执行时落库获得真实 id
+          brandId,
+          accountId,
+          roundId: round.id,
+          questionId: job.question.id,
+          questionType: job.question.type as 'ranking' | 'reputation',
+          questionText: job.question.textExpanded,
+          engine: job.engine,
+          surface: 'web',
+          priority,
+        },
+        {
+          jobId: `round${round.id}-q${job.question.id}-${job.engine}`,
+          priority,
+          // 执行前段(熔断检查/账号池/延迟重排)依赖 DB/Redis,抛错默认 1 次即终态:
+          // 样本静默丢失且轮次进度永久卡死——给一次快速重试让瞬时抖动自愈
+          attempts: 2,
+          backoff: { type: 'fixed', delay: 5_000 },
+          // 采集载荷大(含问题文本),completed/failed 只留最近 500 条防 Redis 无界增长
+          removeOnComplete: { count: 500 },
+          removeOnFail: { count: 500 },
+        },
+      );
+      enqueued += 1;
     }
     budget.globalRemaining -= enqueued;
 
     // 只补 enqueued 键,不覆盖 processor 已增量写入的 done/ok/failed
-    if (enqueued !== maxJobs) {
+    if (enqueued !== jobs.length) {
       await this.db.execute(sql`
         update collection_rounds
         set totals = jsonb_set(totals, '{enqueued}', ${enqueued}::text::jsonb)

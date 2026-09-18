@@ -8,6 +8,7 @@ import { WEB_ENGINES, breakerManualKey, breakerTrippedKey } from '@geo/shared';
 import { Queue } from 'bullmq';
 import { currentAccount } from '../common/auth';
 import { DB, REDIS } from '../common/infra.module';
+import { bullConnection } from '../common/queue';
 import { BrandsService } from '../brands/brands.service';
 
 /**
@@ -195,9 +196,7 @@ export class CollectionController {
     )[0]!;
 
     // 与 worker 的 CollectJobData 同构(docs/04 §5);优先级随套餐
-    const queue = new Queue('collect', {
-      connection: { url: process.env.REDIS_URL ?? 'redis://localhost:6379', maxRetriesPerRequest: null },
-    });
+    const queue = new Queue('collect', { connection: bullConnection() });
     try {
       for (const f of failedRuns) {
         await queue.add(

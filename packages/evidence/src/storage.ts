@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join, normalize, resolve } from 'node:path';
+import { dirname, isAbsolute, join, normalize, relative, resolve } from 'node:path';
 import {
   GetObjectCommand,
   PutObjectCommand,
@@ -15,11 +15,22 @@ export interface EvidenceStorage {
 }
 
 function assertEvidenceKey(key: string): string {
-  const clean = normalize(key).replace(/^(\.\.(\/|\\|$))+/, '');
-  if (!clean.startsWith('evidence/')) {
-    throw new Error(`evidence key must start with evidence/: ${key}`);
+  // 反斜杠在 posix 上是普通字符,但 Windows 文件系统按分隔符解释:
+  // 'evidence/..\..\x' 形态可借 join()/resolve() 逃出根目录,先统一分隔符再校验
+  const unified = key.replace(/\\/g, '/');
+  const clean = normalize(unified);
+  if (!clean.startsWith('evidence/') || clean.includes('..')) {
+    throw new Error(`evidence key must stay inside evidence/: ${key}`);
   }
   return clean;
+}
+
+/** 落盘绝对路径二次校验:前缀 startsWith 挡不住兄弟目录(/data/evidence-evil 过 /data/evidence 检查)。 */
+function assertInsideRoot(rootDir: string, abs: string, key: string): void {
+  const rel = relative(resolve(rootDir), resolve(abs));
+  if (rel.startsWith('..') || isAbsolute(rel) || rel === '') {
+    throw new Error(`path traversal blocked: ${key}`);
+  }
 }
 
 export interface S3EvidenceConfig {
@@ -82,32 +93,38 @@ export class LocalEvidenceStorage implements EvidenceStorage {
   async put(key: string, body: Buffer): Promise<void> {
     const clean = assertEvidenceKey(key);
     const abs = resolve(join(this.rootDir, clean));
-    if (!abs.startsWith(resolve(this.rootDir))) {
-      throw new Error(`path traversal blocked: ${key}`);
-    }
+    assertInsideRoot(this.rootDir, abs, key);
     await mkdir(dirname(abs), { recursive: true });
     await writeFile(abs, body);
   }
 
-  async signedUrl(key: string): Promise<string> {
+  async signedUrl(key: string, _ttlSec: number): Promise<string> {
     const clean = assertEvidenceKey(key);
     return `file://${join(this.rootDir, clean)}`;
   }
 
   async get(key: string): Promise<Buffer> {
     const clean = assertEvidenceKey(key);
-    return readFile(join(this.rootDir, clean));
+    const abs = resolve(join(this.rootDir, clean));
+    assertInsideRoot(this.rootDir, abs, key);
+    return readFile(abs);
   }
 }
 
 export function createStorageFromEnv(env: NodeJS.ProcessEnv = process.env): EvidenceStorage {
   if ((env.EVIDENCE_STORAGE ?? 'local') === 's3') {
+    const accessKeyId = env.S3_ACCESS_KEY_ID ?? '';
+    const secretAccessKey = env.S3_SECRET_ACCESS_KEY ?? '';
+    // 凭据缺失直接拒绝启动:静默空凭据只会把配置错误推迟到首次签名失败(采集已跑完,证据落不了盘)
+    if (!accessKeyId || !secretAccessKey) {
+      throw new Error('EVIDENCE_STORAGE=s3 需要 S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY(显式配置,不静默降级)');
+    }
     return new S3EvidenceStorage({
       endpoint: env.S3_ENDPOINT,
       region: env.S3_REGION ?? 'cn-shanghai',
       bucket: env.S3_BUCKET ?? 'geo-evidence',
-      accessKeyId: env.S3_ACCESS_KEY_ID ?? '',
-      secretAccessKey: env.S3_SECRET_ACCESS_KEY ?? '',
+      accessKeyId,
+      secretAccessKey,
       forcePathStyle: env.S3_FORCE_PATH_STYLE === 'true',
     });
   }

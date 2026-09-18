@@ -5,7 +5,9 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, brandStore, isAdmin, tokenStore } from '../lib/api';
+import { useBrandId } from '../lib/queries';
 import { buildLoginUrl } from '../lib/login-reasons';
+import { useToast } from './toast';
 import {
   IconChevron,
   IconConfig,
@@ -58,6 +60,7 @@ const NAV: NavGroup[] = [
     label: '配置',
     icon: <IconConfig />,
     items: [
+      { href: '/config/brand', label: '品牌资料', icon: <IconLogo width={15} height={15} /> },
       { href: '/config/questions', label: '监控问题', icon: <IconList /> },
       { href: '/config/recognition', label: '识别口径', icon: <IconShield /> },
       { href: '/config/collection', label: '采集状态', icon: <IconPulse /> },
@@ -444,27 +447,23 @@ function MobileNav({ pathname, open, onClose }: { pathname: string; open: boolea
 }
 
 function BrandSwitcher() {
+  const toast = useToast();
   const query = useQuery({
     queryKey: ['brands'],
     queryFn: () => api<BrandRow[]>('/brands'),
   });
   const brands = query.data ?? [];
-  const current = brandStore.get();
+  const current = useBrandId();
   const brand = brands.find((b) => b.id === current) ?? brands[0];
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   // 健壮性:切换账号/数据重灌后 localStorage 里可能残留失效的 brandId → 自动落到首个可用品牌。
-  // 必须整页刷新:各页面经 useBrandId() 非响应式读取,router.refresh() 不会让已挂载的客户端查询换 key 重取。
-  const corrected = useRef(false);
+  // useBrandId 已响应式订阅 store:写入后各页面查询换 key 自动重取,无需整页刷新。
   useEffect(() => {
-    if (query.isLoading || corrected.current) return;
-    if (brands.length > 0 && current !== brand?.id) {
-      corrected.current = true;
-      if (brand) {
-        brandStore.set(brand.id);
-        window.location.reload();
-      }
+    if (query.isLoading || !brand) return;
+    if (brands.length > 0 && current !== brand.id) {
+      brandStore.set(brand.id);
     }
   }, [brands, brand, current, query.isLoading]);
 
@@ -479,7 +478,8 @@ function BrandSwitcher() {
   const pick = (id: number) => {
     brandStore.set(id);
     setOpen(false);
-    window.location.reload();
+    const name = brands.find((b) => b.id === id)?.name;
+    if (name) toast(`已切换到「${name}」`);
   };
 
   return (

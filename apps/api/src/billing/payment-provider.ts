@@ -36,6 +36,8 @@ export interface NotifyVerifyResult {
   raw: Record<string, unknown>;
   /** 验签合法时应答渠道的响应体(微信 {} / 支付宝 'success') */
   ackBody: string;
+  /** 覆盖回调应答的 HTTP 状态:解密失败等"签名合法但内容不可读"场景应 5xx 让渠道重试(缺省按 ok 映射 200/401) */
+  httpStatus?: number;
 }
 
 export interface PaymentProvider {

@@ -6,6 +6,7 @@ import type {
   NotifyVerifyResult,
   PaymentProvider,
 } from './payment-provider';
+import { toAlipayTimestamp } from './timeformat';
 
 /**
  * 支付宝扫码支付(alipay.trade.precreate,docs/02 §7):
@@ -95,7 +96,7 @@ export class AlipayProvider implements PaymentProvider {
       format: 'JSON',
       charset: 'utf-8',
       sign_type: 'RSA2',
-      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      timestamp: toAlipayTimestamp(),
       version: '1.0',
       ...extra,
     };

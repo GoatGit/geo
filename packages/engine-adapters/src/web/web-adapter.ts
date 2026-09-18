@@ -16,6 +16,9 @@ export function needsLoginOf(result: AskResult): boolean {
 
 const stripEchoNoise = (s: string) => normalizeTextLite(s.replace(/\s+/g, ''));
 
+/** 基线对比归一:仅去空白(流式输出的换行抖动不影响对比;内容才是身份)。 */
+const normalizeForDiff = (s: string) => s.replace(/\s+/g, '');
+
 /** 轻量归一(仅采集端回声判定用):去标点/空白 + 小写。 */
 function normalizeTextLite(s: string): string {
   return s
@@ -205,10 +208,17 @@ export class DomWebAdapter implements EngineAdapter {
         };
       }
 
+      // 原始页面快照(docs/04 §4 证据承诺):截断到 512KB,证据包"raw.html 永不存在"的
+      // 空谈在此补齐;快照失败不影响回答正文(证据缺失 ≠ 采集失败)
+      const rawHtml = await page
+        .content()
+        .then((html) => (html.length > 512 * 1024 ? Buffer.from(html.slice(0, 512 * 1024)).toString('utf8') : html))
+        .catch(() => null);
+
       return {
         status: 'ok_with_answer' as AskStatus,
         answerText: cleaned,
-        rawHtml: null, // DOM 路线归一正文为主;页面快照由证据层按需补拍
+        rawHtml,
         citations: await this.extractCitations(page, main),
         timing: this.timing(queuedAt),
         engineMeta: { mode: 'dom', profileKey: ctx.profileKey, timedOut, guest: asGuest },
@@ -273,6 +283,10 @@ export class DomWebAdapter implements EngineAdapter {
    * 完成判定(docs/04 §2.1):停止生成控件消失 + 主回答文本连续 stableMs 无新增。
    * 主回答 = 命中容器中文本最长者(推荐列表/建议芯片/引用卡都更短,不选);
    * 返回 timedOut=true 表示到达 ask 预算(可能有部分文本,按 ok_with_answer 收录)。
+   *
+   * 基线门控(元宝实测教训):页面常驻容器(侧栏菜单等)在提交前就有稳定长文本,
+   * "最长且稳定"会被侧栏骗过 → 提交后立即快照全页候选文本,只有包含基线之外
+   * "新增内容"的容器才有资格成为回答(侧栏永不新增 → 永不合格)。
    */
   private async waitForAnswer(
     page: Page,
@@ -280,11 +294,27 @@ export class DomWebAdapter implements EngineAdapter {
     question: string,
   ): Promise<{ main: Locator | null; text: string | null; timedOut: boolean }> {
     const deadline = Date.now() + timeoutMs;
+    // 基线快照:提交完成瞬间的全页候选文本(去空白归一),回答必须是基线之外的新增内容
+    const baseline = new Set<string>();
+    for (const c of await this.findAnswerCandidates(page)) {
+      const t = normalizeForDiff(c.text);
+      if (t) baseline.add(t.slice(0, 400));
+    }
     let lastText = '';
+    let lastMain: Locator | null = null;
     let stableSince = 0;
     while (Date.now() < deadline) {
-      const main = await this.findMainAnswer(page);
-      const text = main ? await main.innerText({ timeout: 1_000 }).catch(() => '') : '';
+      const candidates = await this.findAnswerCandidates(page);
+      // 活跃候选:文本显著超出基线(新增内容),按长度取最长者为当前主回答
+      let main: Locator | null = null;
+      let text = '';
+      for (const c of candidates) {
+        if (!this.isNewCandidateText(c.text, baseline)) continue;
+        if (c.text.length > text.length) {
+          text = c.text;
+          main = c.locator;
+        }
+      }
       const trimmed = text.trim();
       const generating = await this.isGenerating(page);
       const now = Date.now();
@@ -300,14 +330,47 @@ export class DomWebAdapter implements EngineAdapter {
           stableSince = now;
         }
       }
-      lastText = trimmed || lastText;
+      if (trimmed) {
+        lastText = trimmed;
+        lastMain = main;
+      }
       await page.waitForTimeout(500);
     }
-    return { main: null, text: lastText || null, timedOut: true };
+    // 超时:只有"新增内容"的部分文本才收录(按 ok_with_answer);从未出现新增内容
+    // → 返回 null 由 ask() 按失败收口,而不是把侧栏常驻文本误录为回答(元宝实测教训)
+    return { main: lastMain, text: lastText || null, timedOut: true };
   }
 
-  /** 主回答定位:各候选选择器各扫最近若干个容器,取 innerText 最长者(实时 DOM,索引随流式变化)。 */
-  private async findMainAnswer(page: Page): Promise<Locator | null> {
+  /** 基线对比:候选文本是否为基线之外的新增内容(侧栏等常驻容器返回 false)。 */
+  private isNewCandidateText(text: string, baseline: Set<string>): boolean {
+    const norm = normalizeForDiff(text);
+    if (norm.length < 30) return false; // 过短容器(芯片/按钮组)不作回答候选
+    return !baseline.has(norm.slice(0, 400));
+  }
+
+  /** 全部回答候选(各选择器末尾若干容器,带文本):基线快照与活跃候选共用。 */
+  private async findAnswerCandidates(page: Page): Promise<Array<{ locator: Locator; text: string }>> {
+    const out: Array<{ locator: Locator; text: string }> = [];
+    for (const sel of this.site.answerSelectors) {
+      try {
+        const nodes = page.locator(sel);
+        const count = await nodes.count();
+        if (count === 0) continue;
+        const scan = Math.min(count, 10);
+        for (let i = count - scan; i < count; i++) {
+          const el = nodes.nth(i);
+          const text = await el.innerText({ timeout: 800 }).catch(() => '');
+          if (text.trim()) out.push({ locator: el, text });
+        }
+      } catch {
+        // 尝试下一个容器候选
+      }
+    }
+    return out;
+  }
+
+  /** 主回答定位(登录编排等外部复用):各候选选择器各扫最近若干个容器,取 innerText 最长者。 */
+  async findMainAnswer(page: Page): Promise<Locator | null> {
     for (const sel of this.site.answerSelectors) {
       try {
         const nodes = page.locator(sel);

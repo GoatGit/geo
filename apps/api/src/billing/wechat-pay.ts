@@ -14,6 +14,7 @@ import type {
   NotifyVerifyResult,
   PaymentProvider,
 } from './payment-provider';
+import { toRfc3339Beijing } from './timeformat';
 
 /**
  * 微信支付 v3 Native 下单(docs/02 §7):
@@ -54,7 +55,7 @@ export class WechatPayProvider implements PaymentProvider {
       mchid: this.mchId,
       description: input.subject.slice(0, 127),
       out_trade_no: input.outTradeNo,
-      time_expire: input.expireAt.replace(/\.\d{3}Z$/, '+08:00'),
+      time_expire: toRfc3339Beijing(input.expireAt),
       notify_url: input.notifyUrl,
       amount: { total: input.amountCents, currency: 'CNY' },
     });
@@ -101,15 +102,29 @@ export class WechatPayProvider implements PaymentProvider {
     let event: Record<string, unknown> = {};
     try {
       event = JSON.parse(this.decryptResource(parsed.resource ?? {}).toString('utf8')) as Record<string, unknown>;
-    } catch {
-      return { ok: true, outTradeNo: null, channelTradeId: null, amountCents: null, paid: false, raw: parsed, ackBody: ack };
+    } catch (err) {
+      // 签名合法但解密失败(典型:APIv3 key 配错/轮换)必须回 5xx 让微信重试,
+      // 否则 ack 成功后渠道不再通知,支付结果静默丢失且无自愈路径
+      console.error(`[wechat-pay] notify decrypt failed: ${err instanceof Error ? err.message : String(err)}`);
+      return {
+        ok: false,
+        outTradeNo: null,
+        channelTradeId: null,
+        amountCents: null,
+        paid: false,
+        raw: parsed,
+        ackBody: JSON.stringify({ code: 'FAIL', message: '解密失败' }),
+        httpStatus: 500,
+      };
     }
     const amount = (event.amount ?? {}) as { total?: number; payer_total?: number };
     return {
       ok: true,
       outTradeNo: (event.out_trade_no as string) ?? null,
       channelTradeId: (event.transaction_id as string) ?? null,
-      amountCents: amount.payer_total ?? amount.total ?? null,
+      // 订单金额口径 = 下单金额 total;payer_total(用户券后实付)小于 total 属正常,
+      // 不能用核对,否则用券订单永远金额不一致、付款后不发货(raw 里保留 payer_total 供对账)
+      amountCents: amount.total ?? amount.payer_total ?? null,
       paid: event.trade_state === 'SUCCESS',
       raw: event,
       ackBody: ack,

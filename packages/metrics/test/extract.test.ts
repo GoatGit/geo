@@ -50,4 +50,48 @@ describe('proseText', () => {
     expect(prose).not.toContain('比亚迪海豹');
     expect(prose).toContain('续航、智能化');
   });
+
+  it('超长「像列表项」的行留在散文域,品牌不两头落空', () => {
+    const longListy =
+      '1. 小米SU7 是一款非常值得推荐的纯电轿车,续航扎实、智能化体验出色,性价比在同级中相当突出,' +
+      '售后网络也在快速铺开,全家都很满意,身边朋友问了好多次,确实很香。';
+    expect(longListy.length).toBeGreaterThan(80);
+    // 列表口径:超长行不收录(不产生伪造位次)
+    expect(extractListItems(longListy)).toEqual([]);
+    // 散文口径:同一行不被剔除,品牌仍可被提及
+    const prose = proseText(`前言如下:\n${longListy}`);
+    expect(prose).toContain('小米SU7');
+  });
+
+  it('短列表行被剔除,超长行保留(剔除域 = 收录域)', () => {
+    const md = '开头散文\n\n1. 短列表项\n\n结尾散文';
+    const prose = proseText(md);
+    expect(prose).not.toContain('短列表项');
+    expect(prose).toContain('开头散文');
+    expect(prose).toContain('结尾散文');
+  });
+});
+
+describe('数字行误判防护(docs/02 §1.2 位次 1..99)', () => {
+  it("小数行 '30.98 万元起' 不作为列表项,留在散文域", () => {
+    const line = '30.98 万元起售,价格有诚意';
+    expect(extractListItems(line)).toEqual([]);
+    expect(proseText(line)).toContain('30.98');
+  });
+
+  it('小数变体 1.5T / 12.34 均不误判', () => {
+    expect(extractListItems('1.5T 发动机动力够用')).toEqual([]);
+    expect(extractListItems('12.34 的用户给出好评')).toEqual([]);
+  });
+
+  it('rank 越界(0 或 ≥100)不作为列表项', () => {
+    expect(extractListItems('0. 无位次实体')).toEqual([]);
+    expect(extractListItems('第 100 名:超界车型')).toEqual([]);
+  });
+
+  it('边界内位次正常收录(1 与 99)', () => {
+    expect(extractListItems('1. 首位车型')[0].rank).toBe(1);
+    expect(extractListItems('99. 末位车型')[0].rank).toBe(99);
+    expect(extractListItems('第 99 名:末位车型')[0].rank).toBe(99);
+  });
 });

@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, brandStore } from '@/lib/api';
+import { api } from '@/lib/api';
+import { useBrandId } from '@/lib/queries';
 import { useToast } from '@/components/toast';
 import { PageHeader, Skeleton } from '@/components/ui';
 
@@ -24,7 +25,7 @@ interface QuotaDto {
 export default function QuestionsPage() {
   const qc = useQueryClient();
   const toast = useToast();
-  const brandId = brandStore.get();
+  const brandId = useBrandId();
   const [input, setInput] = useState('');
   const [message, setMessage] = useState('');
 

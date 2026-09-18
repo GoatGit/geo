@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, useBrandId } from '@/lib/queries';
 import { EmptyState, PageHeader, Skeleton } from '@/components/ui';
@@ -33,7 +33,6 @@ const SENTIMENT_LABEL: Record<string, { label: string; cls: string }> = {
 /** 口碑分析(docs/01 §3.6):优势印象 vs 待攻印象 + 原文证据;空态显示引导而非结论(A5 对策)。 */
 export default function ReputationPage() {
   const brandId = useBrandId();
-  const queryClient = useQueryClient();
   const [evidenceRun, setEvidenceRun] = useState<number | null>(null);
   const evidence = useQuery({
     queryKey: ['run-evidence', evidenceRun],
@@ -75,31 +74,39 @@ export default function ReputationPage() {
         </div>
       </div>
 
-      <section className="grid gap-4 lg:grid-cols-2">
-        <div className="card p-6">
-          <h2 className="mb-3 font-semibold text-good">优势印象 · 巩固</h2>
-          <ul className="space-y-1.5 text-sm">
-            {data.strengths.map((s) => (
-              <li key={s.term} className="flex justify-between" title={s.excerpt}>
-                <span>{s.term}</span>
-                <span className="metric-num text-slate-400">{s.runs}</span>
-              </li>
-            ))}
-            {data.strengths.length === 0 && <li className="text-slate-400">暂无</li>}
-          </ul>
+      {/* 口碑天平:正负面印象双向发散条形图,视觉呈现口碑天平的倾斜方向 */}
+      <section className="card rise-1 p-6">
+        <h2 className="mb-1 font-semibold text-slate-900">口碑天平</h2>
+        <p className="mb-4 text-xs text-slate-500">
+          左侧 = 优势印象（巩固）· 右侧 = 待攻印象（攻坚）· 条长 = 被提及次数
+        </p>
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-x-0">
+          {/* 中轴线 */}
+          <div className="col-start-2 row-span-full w-px h-full bg-slate-200" />
+          {/* 正面(左半区) */}
+          {data.strengths.map((s, i) => (
+            <div key={'pos-' + s.term} className={`col-start-1 flex items-center justify-end gap-2 py-1 ${i > 0 ? '-mt-px' : ''}`} style={{ gridRow: i + 1 }}>
+              <span className="text-xs font-medium text-slate-700">{s.term}</span>
+              <span className="metric-num text-[10px] text-slate-400">{s.runs}</span>
+              <div className="h-3.5 rounded-l-full bg-good" style={{ width: `${Math.max(8, (s.runs / Math.max(...data.strengths.map(x => x.runs), 1)) * 100)}px` }} />
+            </div>
+          ))}
+          {/* 负面(右半区) */}
+          {data.weaknesses.map((s, i) => (
+            <div key={'neg-' + s.term} className={`col-start-3 flex items-center gap-2 py-1`} style={{ gridRow: i + 1 }}>
+              <div className="h-3.5 rounded-r-full bg-bad" style={{ width: `${Math.max(8, (s.runs / Math.max(...data.weaknesses.map(x => x.runs), 1)) * 100)}px` }} />
+              <span className="text-xs font-medium text-slate-700">{s.term}</span>
+              <span className="metric-num text-[10px] text-slate-400">{s.runs}</span>
+            </div>
+          ))}
+          {/* 如果正负面数量不同,行数对齐 */}
+          {Array.from({ length: Math.max(data.strengths.length, data.weaknesses.length) }).map((_, i) => (
+            <div key={'spacer-' + i} className="col-start-2" style={{ gridRow: i + 1 }} />
+          ))}
         </div>
-        <div className="card p-6">
-          <h2 className="mb-3 font-semibold text-warn">待攻印象 · 攻坚</h2>
-          <ul className="space-y-1.5 text-sm">
-            {data.weaknesses.map((s) => (
-              <li key={s.term} className="flex justify-between" title={s.excerpt}>
-                <span>{s.term}</span>
-                <span className="metric-num text-slate-400">{s.runs}</span>
-              </li>
-            ))}
-            {data.weaknesses.length === 0 && <li className="text-slate-400">暂无</li>}
-          </ul>
-        </div>
+        {data.strengths.length === 0 && data.weaknesses.length === 0 && (
+          <p className="text-sm text-slate-400">暂无印象数据</p>
+        )}
       </section>
 
       <section className="card rise-2 p-6">

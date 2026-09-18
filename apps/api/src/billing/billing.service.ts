@@ -27,25 +27,39 @@ const PLAN_RANK: Record<PlanTier, number> = { free: 0, starter: 1, standard: 2, 
 const PERIOD_DAYS: Record<BillingPeriod, number> = { monthly: 30, yearly: 365 };
 
 /**
- * 会员有效期解析(纯函数,可测):paid 订单 → 生效窗口;
- * 多笔叠加取最高档位,过期时间取该档位内最晚者。口径:窗口 = paid_at + PERIOD_DAYS。
+ * 会员有效期解析(纯函数,可测):paid 订单 → 生效窗口。
+ * 同档位续费链式顺延(与订阅行 nextPeriodEnd 同一口径:未过期从现有到期日上加,
+ * 已过期从购买时间起算),再按档位取最高——消除"每笔独立开窗取最晚"导致的
+ * 提前续费权益缩水(9/1 月付 + 9/10 续费应为 10/31,独立开窗只算到 10/10)。
  */
 export function resolveMembership(
   paid: Array<{ plan: string; period: string; paidAt: Date }>,
   now = new Date(),
 ): { plan: PlanTier; expiresAt: Date | null } {
-  const windows = paid
-    .filter((o) => o.period in PERIOD_DAYS)
-    .map((o) => ({
-      plan: o.plan as PlanTier,
-      paidAt: o.paidAt,
-      expiresAt: new Date(o.paidAt.getTime() + PERIOD_DAYS[o.period as BillingPeriod] * 24 * 3600 * 1000),
-    }))
-    .filter((w) => w.expiresAt.getTime() > now.getTime());
-  if (windows.length === 0) return { plan: 'free', expiresAt: null };
-  const top = Math.max(...windows.map((w) => PLAN_RANK[w.plan] ?? 0));
-  const best = windows.filter((w) => (PLAN_RANK[w.plan] ?? 0) === top);
-  return { plan: best[0]!.plan, expiresAt: new Date(Math.max(...best.map((w) => w.expiresAt.getTime()))) };
+  const chainEndByPlan = new Map<PlanTier, number>();
+  const chronological = paid
+    .filter((o) => o.period in PERIOD_DAYS && o.plan in PLAN_RANK)
+    .sort((a, b) => a.paidAt.getTime() - b.paidAt.getTime());
+  for (const o of chronological) {
+    const plan = o.plan as PlanTier;
+    const prevEnd = chainEndByPlan.get(plan) ?? 0;
+    const base = Math.max(prevEnd, o.paidAt.getTime());
+    chainEndByPlan.set(plan, base + PERIOD_DAYS[o.period as BillingPeriod] * 24 * 3600 * 1000);
+  }
+
+  const nowMs = now.getTime();
+  let top: PlanTier | null = null;
+  let topEnd = 0;
+  for (const [plan, end] of chainEndByPlan) {
+    if (end <= nowMs) continue; // 该档位续费链已整体过期
+    if (top === null || PLAN_RANK[plan] > PLAN_RANK[top]) {
+      top = plan;
+      topEnd = end;
+    } else if (plan !== top && PLAN_RANK[plan] === PLAN_RANK[top]) {
+      topEnd = Math.max(topEnd, end);
+    }
+  }
+  return top ? { plan: top, expiresAt: new Date(topEnd) } : { plan: 'free', expiresAt: null };
 }
 
 /** 续费不缩水:已有有效期未结束时从其基础上顺延,否则从当前时间起算(纯函数,可测)。 */
@@ -267,7 +281,10 @@ export class BillingService {
 
   async handleWechatNotify(headers: Record<string, string>, rawBody: string): Promise<{ status: number; body: string }> {
     const result = await this.wechat.verifyNotify(headers, rawBody, {});
-    if (!result.ok) return { status: HttpStatus.UNAUTHORIZED, body: '{"code":"FAIL","message":"验签失败"}' };
+    // 401=验签失败(非微信请求,重试无意义);5xx=签名合法但内容不可读(如解密失败),让渠道重试自愈
+    if (!result.ok) {
+      return { status: result.httpStatus ?? HttpStatus.UNAUTHORIZED, body: result.ackBody };
+    }
     if (result.paid && result.outTradeNo) {
       // 金额不一致属永久性差异:ack 成功止住渠道重试风暴,订单保留 created 供人工对账
       try {
@@ -322,7 +339,6 @@ export class BillingService {
     }
 
     const plan = order.plan as PlanTier;
-    const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS.free;
     const now = new Date();
     const period = order.period as BillingPeriod;
 
@@ -334,16 +350,21 @@ export class BillingService {
         .returning({ id: orders.id });
       if (claimed.length === 0) return; // 已被并发/上次回调认领
 
-      // 会员为账号级:名下全部活跃品牌订阅统一刷新(配额执行点在 subscriptions 行)
+      // 会员为账号级:名下全部活跃品牌订阅统一刷新(配额执行点在 subscriptions 行)。
+      // 档位只升不降:为另一品牌买低档不得把已购高档订阅降级(已付费权益缩水),
+      // 与账号级 resolveMembership"取最高档"口径一致;periodEnd 仍按本次购买周期顺延
       const subs = await tx.select().from(subscriptions).where(eq(subscriptions.accountId, order.accountId));
       for (const s of subs) {
         if (s.status !== 'active') continue;
+        const downgrade = (PLAN_RANK[s.plan as PlanTier] ?? 0) > (PLAN_RANK[plan] ?? 0);
+        const effective = downgrade ? (s.plan as PlanTier) : plan;
+        const effLimits = PLAN_LIMITS[effective] ?? PLAN_LIMITS.free;
         await tx
           .update(subscriptions)
           .set({
-            plan,
-            questionQuota: { ranking: limits.rankingQuota, reputation: limits.reputationQuota },
-            engineQuota: { web: limits.webEngines, app: limits.appEngines },
+            plan: effective,
+            questionQuota: { ranking: effLimits.rankingQuota, reputation: effLimits.reputationQuota },
+            engineQuota: { web: effLimits.webEngines, app: effLimits.appEngines },
             periodEnd: nextPeriodEnd(s.periodEnd, period, now),
           })
           .where(eq(subscriptions.id, s.id));
@@ -351,7 +372,7 @@ export class BillingService {
         // 轮次任务数 = 题数 × 旧引擎数,套餐扩容不生效(实测 12 ≠ 20 事故)
         await tx
           .update(collectionPlans)
-          .set({ engines: WEB_ENGINES.slice(0, limits.webEngines) })
+          .set({ engines: WEB_ENGINES.slice(0, effLimits.webEngines) })
           .where(eq(collectionPlans.brandId, s.brandId));
       }
     });

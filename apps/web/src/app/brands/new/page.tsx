@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { api, brandStore } from '@/lib/api';
+import { takeBrandDraft } from '@/lib/brand-draft';
 import { useToast } from '@/components/toast';
 
 /** 品牌初始化(docs/01 §3.1):自然语言 → 档案 + 识别口径预填(含自有产品线别名)。 */
@@ -18,6 +19,12 @@ export default function NewBrandPage() {
     engines: string[];
     plan: string;
   } | null>(null);
+
+  // 官网首页带入的品牌输入:挂载时读取一次并预填(读后即清,避免残留到后续会话)
+  useEffect(() => {
+    const draft = takeBrandDraft();
+    if (draft?.description) setDescription(draft.description);
+  }, []);
 
   const create = useMutation({
     mutationFn: () =>

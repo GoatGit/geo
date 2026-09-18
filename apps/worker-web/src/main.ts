@@ -2,6 +2,7 @@ import { Queue, Worker } from 'bullmq';
 import Redis from 'ioredis';
 import { sql } from 'drizzle-orm';
 import { createDb, ensurePartitions, reports } from '@geo/db';
+import { PLAN_LIMITS, type PlanTier } from '@geo/shared';
 import { REPORTS_QUEUE, REPUTATION_QUEUE, bullConnection } from './queue';
 import { envInt } from './config';
 import { CollectProcessor } from './processor';
@@ -57,10 +58,16 @@ async function bootstrap() {
     REPORTS_QUEUE,
     async (job) => {
       if (job.name !== 'cron-weekly') return;
+      // 只给未过期订阅的品牌入队:订阅行无自动到期降档,status 停在 active 不可信;
+      // 档位是否含周报由 PLAN_LIMITS.weeklyReport 判定(与用户侧生成入口同口径)
       const res = await db.execute(sql`
-        select cp.brand_id::bigint as brand_id, to_char(now(), 'IYYY-MM-DD') as period
+        select cp.brand_id::bigint as brand_id, s.plan as plan, to_char(now(), 'IYYY-MM-DD') as period
         from collection_plans cp
+        join subscriptions s on s.brand_id = cp.brand_id
         where cp.active
+          and s.status = 'active'
+          and s.account_id is not null
+          and s.period_end > now()
           and not exists (
             select 1 from reports r
             where r.brand_id = cp.brand_id and r.type = 'weekly'
@@ -68,8 +75,9 @@ async function bootstrap() {
               and r.status <> 'failed'
           )
       `);
-      const rows = (res as unknown as { rows: Array<{ brand_id: string; period: string }> }).rows;
+      const rows = (res as unknown as { rows: Array<{ brand_id: string; plan: string; period: string }> }).rows;
       for (const r of rows) {
+        if (!PLAN_LIMITS[r.plan as PlanTier]?.weeklyReport) continue;
         const brandId = Number(r.brand_id);
         const inserted = (
           await db

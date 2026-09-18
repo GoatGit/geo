@@ -30,7 +30,19 @@ if [ -z "$TAG" ]; then
 fi
 IMAGE="$REGISTRY:$TAG"
 echo "== ① 构建 $IMAGE(linux/amd64,无 provenance:ACR 个人版不接受 attestation 清单)=="
-git diff --quiet || { echo "工作区有未提交改动,将一并进入镜像(建议先提交)"; }
+# 工作区不干净则拒绝发布:脏改动会一并进入镜像且不可追溯。
+# 逃生门:FORCE_DEPLOY=1 可跳过此检查带脏改动强行构建(仅紧急修复用)。
+if [ -n "$(git status --porcelain)" ]; then
+  if [ "${FORCE_DEPLOY:-0}" = "1" ]; then
+    echo "!! FORCE_DEPLOY=1:忽略未提交改动,以下脏文件将一并进入镜像:"
+    git status --porcelain | sed 's/^/     /'
+  else
+    echo "✋ 工作区有未提交改动,拒绝构建。脏文件清单:"
+    git status --porcelain | sed 's/^/     /'
+    echo "   请先提交再发布;确需带脏改动发布,用 FORCE_DEPLOY=1 $0 重跑。"
+    exit 1
+  fi
+fi
 docker buildx build --platform linux/amd64 --provenance=false --sbom=false \
   --build-arg API_ORIGIN="$API_ORIGIN" -t "$IMAGE" .
 

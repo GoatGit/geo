@@ -38,11 +38,17 @@ export class QuestionsService {
     if (!sub || sub.accountId !== accountId) {
       throw new HttpException('品牌不存在或未订阅', HttpStatus.NOT_FOUND);
     }
-    const plan = sub.plan as PlanTier;
+    // 到期校验:订阅行没有自动到期降档任务,status 会一直停在 active——
+    // 权益执行点必须自己看 periodEnd,否则过期套餐仍按付费档接受新增问题
+    const expired = !sub.periodEnd || sub.periodEnd.getTime() <= Date.now();
+    const plan: PlanTier = expired ? 'free' : (sub.plan as PlanTier);
+    const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS.free;
     return {
       plan,
-      limits: PLAN_LIMITS[plan] ?? PLAN_LIMITS.free,
-      quotas: sub.questionQuota as { ranking: number; reputation: number },
+      limits,
+      quotas: expired
+        ? { ranking: limits.rankingQuota, reputation: limits.reputationQuota }
+        : (sub.questionQuota as { ranking: number; reputation: number }),
       brandName: (
         await this.db.select({ name: brands.name }).from(brands).where(eq(brands.id, brandId)).limit(1)
       )[0]?.name ?? '',

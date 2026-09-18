@@ -8,4 +8,6 @@ coverage/
 infra/local-data/
 .DS_Store
 .env.debug
-.env.debug
+uploads/
+*.tar.gz
+.code-review-graph/

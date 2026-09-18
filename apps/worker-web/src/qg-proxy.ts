@@ -27,7 +27,7 @@ interface QgGetResponse {
   message?: string;
 }
 
-async function qgGet<T = unknown>(url: string): Promise<{ ok: boolean; body: string }> {
+async function qgGet(url: string): Promise<{ ok: boolean; body: string }> {
   const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
   return { ok: res.ok, body: (await res.text()).trim() };
 }

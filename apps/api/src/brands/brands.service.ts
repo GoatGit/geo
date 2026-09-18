@@ -134,6 +134,46 @@ export class BrandsService {
     return brand;
   }
 
+  /**
+   * 品牌资料修改(品牌资产栏目):名称/行业/官网/描述。
+   * 名称是识别匹配的本品词 —— 改名须同步本品口径条目并落口径版本快照,
+   * 否则历史口径与采集匹配仍用旧名(docs/05 §2 品牌匹配)。
+   */
+  async update(
+    accountId: number,
+    brandId: number,
+    patch: { name?: string; industry?: string; website?: string; intro?: string },
+  ) {
+    const brand = await this.getOwned(accountId, brandId);
+    const next: Partial<{ name: string; industry: string; website: string; intro: string }> = {};
+    if (patch.name !== undefined) {
+      const name = patch.name.trim();
+      if (!name) throw new HttpException('品牌名不能为空', HttpStatus.BAD_REQUEST);
+      if (name !== brand.name) {
+        await this.db
+          .update(recognitionEntries)
+          .set({ name })
+          .where(
+            and(
+              eq(recognitionEntries.brandId, brandId),
+              eq(recognitionEntries.kind, 'self'),
+              eq(recognitionEntries.name, brand.name),
+            ),
+          );
+        await this.snapshotRecognition(brandId);
+      }
+      next.name = name;
+    }
+    if (patch.industry !== undefined) next.industry = patch.industry.trim() || null as never;
+    if (patch.website !== undefined) next.website = patch.website.trim() || null as never;
+    if (patch.intro !== undefined) next.intro = patch.intro.trim() || null as never;
+    if (Object.keys(next).length === 0) return brand;
+
+    return (
+      await this.db.update(brands).set(next).where(eq(brands.id, brandId)).returning()
+    )[0]!;
+  }
+
   /** 口径版本化(docs/research 03-B):每次口径变更落一版快照。 */
   async snapshotRecognition(brandId: number) {
     const entries = await this.db

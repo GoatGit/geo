@@ -14,6 +14,7 @@
 | 5 | [数据管道与数据模型](./05-data-pipeline.md) | 答案解析、实体归一、口径计算、ER 模型 | 后端 / 数据 |
 | 6 | [路线图、成本与风险](./06-roadmap-risk.md) | 里程碑、成本模型、合规与风险 | 全员 |
 | 7 | [技术实施方案](./07-tech-plan-nodejs-aliyun.md) | Node.js + PostgreSQL；SAE 部署（web/worker）；AgentBay Browser Use 镜像 + CDP 采集 | 后端 / 架构 / 运维 |
+| 8 | [生产环境接线手册](./08-production-wiring.md) | 生产接线/SAE 部署/短信与证书：生产拓扑、域名与 HTTPS、环境变量与凭据清单 | 后端 / 运维 |
 
 ## 调研存档（reference-only，禁止复制文案/素材）
 

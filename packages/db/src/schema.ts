@@ -214,13 +214,19 @@ export const reputationFacts = pgTable(
   }),
 );
 
-export const dailyMetrics = pgTable('daily_metrics', {
-  brandId: bigint('brand_id', { mode: 'number' }).notNull(),
-  date: date('date').notNull(),
-  engine: text('engine').notNull().default('all'),
-  metrics: jsonb('metrics').$type<Record<string, unknown>>().notNull(),
-  health: jsonb('health').$type<Record<string, unknown> | null>(),
-});
+export const dailyMetrics = pgTable(
+  'daily_metrics',
+  {
+    brandId: bigint('brand_id', { mode: 'number' }).notNull(),
+    date: date('date').notNull(),
+    engine: text('engine').notNull().default('all'),
+    metrics: jsonb('metrics').$type<Record<string, unknown>>().notNull(),
+    health: jsonb('health').$type<Record<string, unknown> | null>(),
+  },
+  // 与 0001_init.sql 的 PRIMARY KEY (brand_id, date, engine) 对齐:类型层缺失会让
+  // onConflictDoUpdate(target=组合键) 无从书写,upsert 只能绕行
+  (t) => [primaryKey({ columns: [t.brandId, t.date, t.engine] })],
+);
 
 export const competitorCandidates = pgTable('competitor_candidates', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),

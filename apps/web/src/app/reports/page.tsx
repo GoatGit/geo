@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, brandStore } from '@/lib/queries';
+import { api, useBrandId } from '@/lib/queries';
 import { PageHeader, Skeleton } from '@/components/ui';
 import { useToast } from '@/components/toast';
 
@@ -34,7 +34,7 @@ const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
 export default function ReportsPage() {
   const qc = useQueryClient();
   const toast = useToast();
-  const brandId = brandStore.get();
+  const brandId = useBrandId();
   const reports = useQuery({ queryKey: ['reports', brandId], queryFn: () => api<ReportRow[]>('/reports') });
   const templates = useQuery({ queryKey: ['templates'], queryFn: () => api<TemplateDto[]>('/reports/templates') });
 

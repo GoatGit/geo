@@ -1,10 +1,12 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { InsightSummaryDto } from '@geo/shared';
 import { api, tokenStore } from '../lib/api';
+import { saveBrandDraft } from '../lib/brand-draft';
 import { buildLoginUrl } from '../lib/login-reasons';
 import {
   IconArrowRight,
@@ -66,12 +68,19 @@ const PRICING = [
 
 /** 官网落地页(匿名访客;原创文案,docs/00 价值主张)。 */
 export default function LandingPage() {
+  const router = useRouter();
   const [logged, setLogged] = useState(false);
   const [brand, setBrand] = useState('');
   useEffect(() => setLogged(!!tokenStore.access), []);
 
   // 场景化登录:免费开始→控制台;选套餐→开通会员;登录后各自回跳原目标
   const startHref = logged ? '/dashboard' : buildLoginUrl('console', '/dashboard');
+  // 品牌输入提交:暂存到 localStorage(geo.brandDraft),登录/注册跳转后由 /brands/new 读取预填,输入不丢失
+  const submitBrand = () => {
+    const text = brand.trim();
+    if (text) saveBrandDraft({ description: text });
+    router.push(startHref);
+  };
   // 官网精选行业洞察(公开接口;docs/01 §3.10 扩展)
   const featured = useQuery({
     queryKey: ['insights-featured'],
@@ -158,14 +167,14 @@ export default function LandingPage() {
               <input
                 value={brand}
                 onChange={(e) => setBrand(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && (window.location.href = startHref)}
+                onKeyDown={(e) => e.key === 'Enter' && submitBrand()}
                 placeholder='例如:「小米汽车,主打高性能纯电轿车」'
                 className="h-11 flex-1 bg-transparent px-3 text-sm text-white placeholder:text-slate-500 focus:outline-none"
               />
-              <Link href={startHref} className="btn-primary h-11 shrink-0 px-5">
+              <button type="button" onClick={submitBrand} className="btn-primary h-11 shrink-0 px-5">
                 免费诊断
                 <IconArrowRight width={15} height={15} />
-              </Link>
+              </button>
             </div>
             <p className="mt-3 text-xs text-slate-500">
               注册即可用免费版监测 3 个排名词 + 1 个口碑词 · 10 分钟出真实数据

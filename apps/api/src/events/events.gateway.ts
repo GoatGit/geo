@@ -15,8 +15,26 @@ import { loadEnv } from '../config/env';
  * 采集进度实时推送(docs/01 §3.3 采集队列实时面板,docs/05 §6 /runs/progress):
  * worker 发布 Redis 频道 geo:progress → 本网关按账号房间转发。
  * 房间按 accountId 隔离(品牌归属校验在订阅时做,越权不可见)。
+ * CORS 与 HTTP 侧同口径:生产仅放行显式配置的站点域名,未配置则关闭跨域
+ * (鉴权靠 token,但裸放的跨域握手仍是不必要的攻击面)。
  */
-@WebSocketGateway({ path: '/ws', transports: ['websocket'] })
+const wsAllowedOrigins = (process.env.ALLOWED_ORIGIN ?? '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+@WebSocketGateway({
+  path: '/ws',
+  transports: ['websocket'],
+  cors: {
+    origin:
+      process.env.NODE_ENV === 'production'
+        ? wsAllowedOrigins.length > 0
+          ? wsAllowedOrigins
+          : false
+        : true,
+  },
+})
 export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server!: Namespace;
   private readonly logger = new Logger(EventsGateway.name);

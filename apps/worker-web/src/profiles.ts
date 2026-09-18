@@ -38,6 +38,16 @@ export class AccountPoolService {
 
   async acquire(engine: string, excludeIds: ReadonlySet<number> = new Set()): Promise<AcquiredProfile | null> {
     const client = this.db.$client as Pool;
+    // 冷却到期自愈:瞬时登录误判(10min)与健康分 24h 冷却都把 status 置为 'cooldown',
+    // 而领取条件要求 status='available'——没有这条回收,冷却档案永远无法自动回池
+    // (只能人工逐个 recover),账号池随失败单调缩水直至全量 quota_blocked
+    await client.query(
+      `update account_profiles
+       set status = 'available', cooldown_until = null
+       where engine = $1 and surface = 'web' and status = 'cooldown'
+         and cooldown_until is not null and cooldown_until < now()`,
+      [engine],
+    );
     // drizzle 暴露底层 pool;直接用事务级 SELECT FOR UPDATE SKIP LOCKED
     const res = await client.query<{
       id: number;

@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Req } from '@nestjs/common';
-import { IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Req } from '@nestjs/common';
+import { IsInt, IsOptional, IsString, Length, Max, MaxLength, Min } from 'class-validator';
 import type { Request } from 'express';
 import { currentAccount } from '../common/auth';
 import { BrandsService } from './brands.service';
@@ -13,6 +13,28 @@ class CreateBrandDto {
   @IsInt()
   @Min(1)
   dummy?: number;
+}
+
+class UpdateBrandDto {
+  @IsOptional()
+  @IsString()
+  @Length(1, 60)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  industry?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  website?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  intro?: string;
 }
 
 @Controller('brands')
@@ -37,5 +59,15 @@ export class BrandsController {
   @Get(':id')
   get(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
     return this.brandsService.getOwned(currentAccount(req).accountId, id);
+  }
+
+  /** 品牌资料修改(品牌资产栏目):名称/行业/官网/描述;改名同步本品识别口径。 */
+  @Patch(':id')
+  async update(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateBrandDto,
+  ) {
+    return this.brandsService.update(currentAccount(req).accountId, id, dto);
   }
 }

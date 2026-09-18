@@ -53,6 +53,10 @@ describe('compositeRank(docs/02 §1.3)', () => {
     expect(compositeRank([], 0)).toBeNull();
   });
 
+  it('条目为空时返回 null 而非 NaN', () => {
+    expect(compositeRank([], 5)).toBeNull();
+  });
+
   it('averageCompositeRanks:忽略 null,保留 1 位小数', () => {
     expect(averageCompositeRanks([5, null, 4])).toBe(4.5);
     expect(averageCompositeRanks([])).toBeNull();

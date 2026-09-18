@@ -117,11 +117,20 @@ export class ReportsController implements OnModuleDestroy {
     return row;
   }
 
-  /** 卡住的报告重新入队(排队中超时或失败)。 */
+  /** 卡住的报告重新入队(失败,或长时间停留在排队/生成中的卡死任务)。 */
   @Post(':id/retry')
   async retry(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
     const row = await this.ownedRow(req, id);
     if (row.status === 'done') throw new HttpException('报告已完成,无需重试', HttpStatus.BAD_REQUEST);
+    // 频控:queued/generating 可被反复重新入队刷队列(每次 attempts:3)。
+    // failed 直接可重试;在途状态只允许"卡死 30 分钟以上"的旧任务重试
+    const stale =
+      row.status === 'queued' || row.status === 'generating'
+        ? Date.now() - row.createdAt.getTime() > 30 * 60_000
+        : false;
+    if (row.status !== 'failed' && !stale) {
+      throw new HttpException('报告正在生成中,请稍候(卡死超 30 分钟可重试)', HttpStatus.CONFLICT);
+    }
     await this.db.update(reports).set({ status: 'queued' }).where(eq(reports.id, id));
     await this.queue.add(
       'generate',

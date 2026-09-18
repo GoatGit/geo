@@ -1,10 +1,11 @@
-import { Body, Controller, Get, HttpException, HttpStatus, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpException, HttpStatus, Post, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { IsPhoneNumber, IsString, Length } from 'class-validator';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Inject } from '@nestjs/common';
 import { Public, currentAccount, signAccessToken, signRefreshToken, verifyRefreshToken } from '../common/auth';
 import { DB } from '../common/infra.module';
+import { RateLimit, RateLimitGuard } from '../common/rate-limit.guard';
 import { AuthService } from './auth.service';
 import { loadEnv } from '../config/env';
 
@@ -32,6 +33,8 @@ export class AuthController {
   ) {}
 
   @Public()
+  @UseGuards(RateLimitGuard)
+  @RateLimit(5, 60, 'sms-send')
   @Post('sms/code')
   async sendCode(@Body() dto: SendCodeDto) {
     const { devCode } = await this.authService.sendLoginCode(dto.phone);
@@ -39,6 +42,8 @@ export class AuthController {
   }
 
   @Public()
+  @UseGuards(RateLimitGuard)
+  @RateLimit(10, 60, 'sms-verify')
   @Post('sms/verify')
   async verify(@Body() dto: VerifyCodeDto) {
     const ok = await this.authService.verifyLoginCode(dto.phone, dto.code);
@@ -48,6 +53,8 @@ export class AuthController {
   }
 
   @Public()
+  @UseGuards(RateLimitGuard)
+  @RateLimit(30, 60, 'token-refresh')
   @Post('token:refresh')
   async refresh(@Body() dto: RefreshDto) {
     const env = loadEnv();
