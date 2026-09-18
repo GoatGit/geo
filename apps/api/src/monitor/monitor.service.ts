@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import {
@@ -8,7 +8,7 @@ import {
   mentionFacts,
   monitoringQuestions,
   queryRuns,
-  recognitionEntries, reputationFacts,
+  reputationFacts,
 } from '@geo/db';
 import {
   DEFAULT_HEALTH_THRESHOLDS,
@@ -383,50 +383,7 @@ export class MonitorService {
     });
   }
 
-  /**
-   * 修正品牌名(docs/07 竞品数据质量):变体竞品归并到主条目。
-   * mention_facts 的 subject_key/subject_name 原地改写(历史事实随之并账),
-   * 源识别条目删除、其名称收编为主条目别名——后续采集直接按主条目匹配。
-   */
-  async mergeCompetitor(brandId: number, fromKey: string, toKey: string) {
-    // toKey 形如 competitor:{id}:反查主条目
-    const toId = Number(toKey.split(':')[1]);
-    const to = (
-      await this.db
-        .select()
-        .from(recognitionEntries)
-        .where(and(eq(recognitionEntries.brandId, brandId), eq(recognitionEntries.id, toId)))
-        .limit(1)
-    )[0];
-    if (!to) throw new HttpException('目标竞品不存在', HttpStatus.NOT_FOUND);
-
-    // ① 历史事实原地改写(提及随主条目并账)
-    await this.db
-      .update(mentionFacts)
-      .set({ subjectKey: toKey, subjectName: to.name })
-      .where(and(eq(mentionFacts.brandId, brandId), eq(mentionFacts.subjectKey, fromKey)));
-
-    // ② 源名称收编为目标别名(后续采集直接按主条目匹配);源条目下线
-    const fromId = Number(fromKey.split(':')[1]);
-    const from = (
-      await this.db
-        .select({ id: recognitionEntries.id, name: recognitionEntries.name, aliases: recognitionEntries.aliases })
-        .from(recognitionEntries)
-        .where(and(eq(recognitionEntries.brandId, brandId), eq(recognitionEntries.id, fromId)))
-        .limit(1)
-    )[0];
-    if (from) {
-      await this.db.delete(recognitionEntries).where(eq(recognitionEntries.id, from.id));
-      const aliases = new Set([...(to.aliases ?? []), from.name]);
-      await this.db
-        .update(recognitionEntries)
-        .set({ aliases: [...aliases] })
-        .where(eq(recognitionEntries.id, toId));
-    }
-    return { merged: true, fromKey, toKey };
-  }
-
-  /** 引用源分析(docs/01 §3.5):明细 + 信源平台偏好 + 自有占比。 */
+    /** 引用源分析(docs/01 §3.5):明细 + 信源平台偏好 + 自有占比。 */
   async citations(brandId: number, days: number, page = 1, pageSize = 20) {
     const since = new Date(Date.now() - days * 24 * 3600 * 1000);
     const where = and(eq(citationFacts.brandId, brandId), gte(citationFacts.extractedAt, since));

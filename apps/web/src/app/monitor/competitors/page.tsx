@@ -1,8 +1,7 @@
 'use client';
 import { engineLabel } from '@geo/shared';
 
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { api, useBrandId } from '@/lib/queries';
 import { EmptyState, PageHeader, Skeleton, pct } from '@/components/ui';
 
@@ -28,9 +27,6 @@ interface LeaderRow {
 /** 竞品透视(docs/01 §3.4):竞品榜单 + 竞品×引擎 分引擎对比热力矩阵(同批查询同口径)。 */
 export default function CompetitorsPage() {
   const brandId = useBrandId();
-  const queryClient = useQueryClient();
-  const [mergeFrom, setMergeFrom] = useState<string | null>(null);
-  const [mergeBusy, setMergeBusy] = useState(false);
   const days = 7;
   const leader = useQuery({
     queryKey: ['competitors', brandId],
@@ -56,28 +52,12 @@ export default function CompetitorsPage() {
   };
   const heatText = (v: number | null): string => (v != null && v > 0.55 ? '#f4f6f3' : 'inherit');
 
-  const doMerge = async (fromKey: string) => {
-    if (!mergeFrom || mergeFrom === fromKey) return;
-    setMergeBusy(true);
-    try {
-      await api('/monitor/competitors/merge', {
-        method: 'POST',
-        json: { brand: brandId, fromKey, toKey: mergeFrom },
-      });
-      setMergeFrom(null);
-      void queryClient.invalidateQueries({ queryKey: ['competitors', brandId] });
-      void queryClient.invalidateQueries({ queryKey: ['competitors-matrix', brandId] });
-    } finally {
-      setMergeBusy(false);
-    }
-  };
-
   const top = leader.data?.[0];
   return (
     <div className="space-y-6">
       <PageHeader
         title="竞品透视"
-        desc="基于同批 AI 查询的竞品提及与位次分析;「修正品牌名」可把变体写法归并,消除重复计数"
+        desc="基于同批 AI 查询的竞品提及与位次分析(同口径解析)"
       />
       {top && (
         <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -126,32 +106,11 @@ export default function CompetitorsPage() {
                     <td className="px-4 py-2.5 font-medium text-slate-800">
                       <span className="metric-num mr-2 text-xs text-slate-400">#{i + 1}</span>
                       {r.name}
-                      {mergeFrom === r.key && (
-                        <span className="ml-2 rounded bg-brand-50 px-1.5 py-0.5 text-[10px] text-brand-700">
-                          归并目标——请点其他行的「并入」
-                        </span>
-                      )}
                     </td>
                     <td className="metric-num px-3 py-2.5">{r.mentions}</td>
                     <td className="metric-num px-3 py-2.5">{pct(r.mentionRate)}</td>
                     <td className="metric-num px-3 py-2.5">{pct(r.top3Rate)}</td>
                     <td className="metric-num px-3 py-2.5">{pct(r.top1Rate)}</td>
-                    <td className="px-3 py-2.5 text-right">
-                      {mergeFrom === r.key ? (
-                        <span className="text-[11px] text-slate-400">源条目</span>
-                      ) : (
-                        <button
-                          onClick={() => doMerge(r.key)}
-                          disabled={mergeBusy}
-                          title={mergeFrom ? `把「${r.name}」并入「${board.find(b => b.key === mergeFrom)?.name ?? ''}」` : '先点目标行的「修正品牌名」'}
-                          className={`text-[11px] transition-colors ${
-                            mergeFrom ? 'text-brand-600 hover:underline' : 'text-slate-300'
-                          }`}
-                        >
-                          并入
-                        </button>
-                      )}
-                    </td>
                   </tr>
                 ))}
                 {board.length === 0 && (
