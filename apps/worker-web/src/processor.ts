@@ -259,7 +259,8 @@ export class CollectProcessor {
                 error: String(ask.engineMeta?.error ?? 'unknown'),
                 ...(needsLoginOf(ask) ? {
                   needsLogin: true,
-                  loginHint: String(ask.engineMeta?.hint ?? 'unknown'),
+                  loginHint: ['url:sign_in', 'url:login', 'outside_chat_origin', 'page_not_ready'].includes(String(ask.engineMeta?.hint))
+                    ? String(ask.engineMeta?.hint) : 'login_not_confirmed',
                   savedState: Boolean(profile.storageState),
                   savedOrigins: profile.storageState?.origins.map((origin) => origin.origin) ?? [],
                 } : {}),

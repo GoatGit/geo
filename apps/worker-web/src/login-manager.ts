@@ -274,9 +274,10 @@ export class LoginManager {
               const browser = cdpBrowser ?? page.context().browser();
               try {
                 // Local persistent Chrome uses its installed UA; mirror that identity for the check.
-                const fingerprint = cdpBrowser ? req.fingerprint : await page.evaluate(() => ({
-                  ua: navigator.userAgent, locale: navigator.language, viewport: `${innerWidth}x${innerHeight}`,
-                }));
+                const fingerprint = cdpBrowser ? req.fingerprint : {
+                  ...req.fingerprint,
+                  ...await page.evaluate(() => ({ ua: navigator.userAgent, locale: navigator.language })),
+                };
                 const restored = browser && await verifyStoredLogin(
                   browser, site, fingerprint, loginLease?.server ?? null, await page.context().storageState(),
                 );
