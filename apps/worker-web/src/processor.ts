@@ -128,6 +128,11 @@ export class CollectProcessor {
     if (!roundRow || roundRow.finishedAt) {
       return { status: 'deferred' };
     }
+    // 过期重排僵尸:延迟重排超过 2 小时仍未执行的任务,其采集窗口已失真且会长期占坑,
+    // 拾起即弃(轮次进度由其余任务或下次轮次覆盖)。新入队任务不受影响
+    if (deferredCount > 0 && Date.now() - job.timestamp > 2 * 3600_000) {
+      return { status: 'deferred' };
+    }
 
     // 延迟重排上限:熔断/账号池长时间不恢复时,任务不能无限自我复制(docs/02 §1.1:
     // 配额拦截必须可见)——落 quota_blocked 四态收口,轮次进度同步走完
