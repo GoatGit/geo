@@ -119,13 +119,13 @@ export class BrandsController {
     }
     this.brandsService
       .digProfile(accountId, id)
-      .catch(() => undefined); // 失败静默:前端轮询发现无产物可重试
+      .catch((err) => console.error(`[brands] dig failed brand=${id}:`, err?.message ?? err));
     return { started: true, running: true };
   }
 
   /** 挖掘进行中?(同一品牌并发去重 + 前端轮询判定) */
   @Get(':id/dig/status')
   digStatus(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
-    return { running: this.brandsService.isDigging(id) };
+    return { running: this.brandsService.isDigging(id), lastError: this.brandsService.lastDigError(id) };
   }
 }

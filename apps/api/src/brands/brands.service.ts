@@ -20,9 +20,14 @@ import { DB } from '../common/infra.module';
 export class BrandsService {
   /** 进行中的挖掘任务(进程内去重;API 单实例部署,无需跨进程锁) */
   private readonly digging = new Set<number>();
+  private readonly digErrors = new Map<number, string>();
 
   isDigging(brandId: number): boolean {
     return this.digging.has(brandId);
+  }
+
+  lastDigError(brandId: number): string | null {
+    return this.digErrors.get(brandId) ?? null;
   }
 
   constructor(
@@ -274,6 +279,9 @@ export class BrandsService {
     this.digging.add(brandId);
     try {
       return await this.digProfileInner(accountId, brandId);
+    } catch (err) {
+      this.digErrors.set(brandId, (err as Error).message.slice(0, 200));
+      throw err;
     } finally {
       this.digging.delete(brandId);
     }
