@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Req } from '@nestjs/common';
 import { IsArray, IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
 import { and, eq } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -31,9 +31,20 @@ class UpdateRecognitionDto {
   state?: string;
 }
 
-class ConfirmRecognitionDto {
+/** PATCH /recognition/:entryId:条目完整编辑(名称/别名/确认态),供竞品清单行内编辑与本品别名维护。 */
+class UpdateEntryDto {
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  aliases?: string[];
+
+  @IsOptional()
   @IsBoolean()
-  confirmed!: boolean;
+  confirmed?: boolean;
 }
 
 @Controller('brands/:id/recognition')
@@ -93,18 +104,29 @@ export class RecognitionController {
     return { saved: true };
   }
 
-  /** 确认/驳回 AI 建议的口径条目(确认后参与识别;落版本快照)。 */
+  /** 条目编辑:名称/别名/确认态(竞品清单行内编辑、本品别名维护);变更落版本快照。 */
   @Patch(':entryId')
-  async setConfirmed(
+  async updateEntry(
     @Req() req: Request,
     @Param('id', ParseIntPipe) brandId: number,
     @Param('entryId', ParseIntPipe) entryId: number,
-    @Body() dto: ConfirmRecognitionDto,
+    @Body() dto: UpdateEntryDto,
   ) {
     await this.brandsService.getOwned(currentAccount(req).accountId, brandId);
+    const patch: Record<string, unknown> = {};
+    if (dto.name !== undefined) {
+      const name = dto.name.trim();
+      if (!name) throw new BadRequestException('名称不能为空');
+      patch.name = name;
+    }
+    if (dto.aliases !== undefined) {
+      patch.aliases = dto.aliases.map((a) => a.trim()).filter(Boolean);
+    }
+    if (dto.confirmed !== undefined) patch.confirmed = dto.confirmed;
+    if (Object.keys(patch).length === 0) throw new BadRequestException('没有需要更新的字段');
     await this.db
       .update(recognitionEntries)
-      .set({ confirmed: dto.confirmed })
+      .set(patch)
       .where(and(eq(recognitionEntries.brandId, brandId), eq(recognitionEntries.id, entryId)));
     await this.brandsService.snapshotRecognition(brandId);
     return { saved: true };
