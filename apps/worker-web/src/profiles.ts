@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { Pool } from 'pg';
 import type { Db } from '@geo/db';
 import { accountProfiles } from '@geo/db';
@@ -101,28 +101,44 @@ export class AccountPoolService {
       .where(eq(accountProfiles.id, profileId));
   }
 
-  /** Cookie 判死:清空持久化 Cookie 并转人工重登(连续 miss 后由 processor 调用)。 */
-  async expireCookies(profileId: number): Promise<void> {
-    await this.db
-      .update(accountProfiles)
-      .set({ status: 'login_required', cookies: null, storageState: null })
-      .where(eq(accountProfiles.id, profileId));
+  /** A collection result must not invalidate credentials from a newer manual login. */
+  private loginVersion(profile: AcquiredProfile) {
+    return and(
+      eq(accountProfiles.id, profile.id),
+      inArray(accountProfiles.status, ['available', 'cooldown']),
+      sql`${accountProfiles.storageState} is not distinct from ${profile.storageState === null ? null : JSON.stringify(profile.storageState)}::jsonb`,
+      sql`${accountProfiles.cookies} is not distinct from ${profile.cookies === null ? null : JSON.stringify(profile.cookies)}::jsonb`,
+    );
+  }
+
+  /** Save rotating tokens/device state without overwriting a concurrent re-login. */
+  async saveStorageState(profile: AcquiredProfile, storageState: BrowserStorageState): Promise<void> {
+    await (this.db.$client as Pool).query(
+      `update account_profiles set storage_state = $1::jsonb, cookies = $2::jsonb
+       where id = $3 and status = 'available'
+         and storage_state is not distinct from $4::jsonb
+         and cookies is not distinct from $5::jsonb`,
+      [JSON.stringify(storageState), JSON.stringify(storageState.cookies), profile.id,
+        profile.storageState === null ? null : JSON.stringify(profile.storageState),
+        profile.cookies === null ? null : JSON.stringify(profile.cookies)],
+    );
   }
 
   /** 有持久化 Cookie 但被引擎判未登录(多为出口 IP 变化):短冷却自动重试,不要求人工重登。 */
-  async markTransientLoginMiss(profileId: number, minutes = 10): Promise<void> {
+  async markTransientLoginMiss(profile: AcquiredProfile, minutes = 10): Promise<void> {
     await this.db
       .update(accountProfiles)
       .set({ status: 'cooldown', cooldownUntil: new Date(Date.now() + minutes * 60 * 1000) })
-      .where(eq(accountProfiles.id, profileId));
+      .where(this.loginVersion(profile));
   }
 
   /** 登录态失效(docs/04 §3.1 生命周期):不扣健康分,摘出可用池等人工重登。 */
-  async markLoginRequired(profileId: number): Promise<void> {
+  async markLoginRequired(profile: AcquiredProfile): Promise<void> {
     await this.db
       .update(accountProfiles)
-      .set({ status: 'login_required' })
-      .where(eq(accountProfiles.id, profileId));
+      // A redirect or temporary challenge is not proof that stored credentials are dead.
+      .set({ status: 'login_required', cooldownUntil: null })
+      .where(this.loginVersion(profile));
   }
 
   async report(engine: string, profileId: number, ok: boolean): Promise<void> {

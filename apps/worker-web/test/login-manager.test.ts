@@ -5,6 +5,11 @@ import type { SessionBroker } from '@geo/browser-session';
 import type { LoginRequest } from '@geo/shared';
 import { LoginManager } from '../src/login-manager';
 import type { ProxyPoolManager } from '../src/qg-proxy';
+import { verifyStoredLogin } from '../src/browser-context';
+
+vi.mock('../src/browser-context', async (original) => ({
+  ...await original<object>(), verifyStoredLogin: vi.fn(async () => null),
+}));
 
 const login = vi.hoisted(() => ({ loggedIn: false as boolean | null }));
 vi.mock('@geo/engine-adapters', async (original) => ({
@@ -24,9 +29,10 @@ function fixture() {
   const state = { cookies: [{ name: 'sessionid', value: 'test' }], origins: [{ origin: 'https://chat.deepseek.com', localStorage: [{ name: 'userToken', value: 'test' }] }] };
   const storageState = vi.fn(async () => state);
   const page = {
+    evaluate: async () => ({ ua: 'local-chrome', locale: 'zh-CN', viewport: '1366x850' }),
     goto: vi.fn(async () => undefined), url: () => 'https://www.doubao.com/chat/',
     waitForTimeout: vi.fn(async (ms: number) => { now += ms; }),
-    context: () => ({ cookies: async () => state.cookies, storageState }),
+    context: () => ({ cookies: async () => state.cookies, storageState, browser: () => ({}) }),
     locator: () => ({ first: () => ({ isVisible: async () => false }) }),
     getByText: () => ({ first: () => ({ isVisible: async () => false }) }),
   };
@@ -43,11 +49,11 @@ function fixture() {
   const release = vi.fn(async () => undefined);
   const broker = { acquire: async () => ({ page, release }) };
   const manager = new LoginManager(db as unknown as Db, redis as unknown as Redis, broker as unknown as SessionBroker, {} as ProxyPoolManager);
-  return { run: () => (manager as unknown as { run(req: LoginRequest): Promise<void> }).run(req), page, set, redis, release, storageState, state, returning };
+  return { run: (overrides: Partial<LoginRequest> = {}) => (manager as unknown as { run(req: LoginRequest): Promise<void> }).run({ ...req, ...overrides }), page, set, redis, release, storageState, state, returning };
 }
 
 describe('manual account login', () => {
-  beforeEach(() => { vi.stubEnv('BROWSER_MODE', 'local'); vi.stubEnv('LOGIN_VIEWER', '0'); login.loggedIn = false; });
+  beforeEach(() => { vi.stubEnv('BROWSER_MODE', 'local'); vi.stubEnv('LOGIN_VIEWER', '0'); login.loggedIn = false; vi.mocked(verifyStoredLogin).mockReset().mockResolvedValue(null); });
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
   it('does not refresh a login form while the operator enters credentials', async () => {
@@ -100,5 +106,34 @@ describe('manual account login', () => {
     f.returning.mockResolvedValue([]);
     await expect(f.run()).rejects.toThrow('账号状态已改变');
     expect(f.redis.set.mock.calls.some((call) => String(call[1]).includes('"state":"done"'))).toBe(false);
+  });
+
+  it('keeps DeepSeek out of the pool when exported login cannot be restored', async () => {
+    login.loggedIn = true;
+    const f = fixture();
+    await f.run({ engine: 'deepseek' });
+    expect(verifyStoredLogin).toHaveBeenCalled();
+    expect(f.set).not.toHaveBeenCalled();
+    expect(f.redis.set.mock.calls.some((call) => String(call[1]).includes('"state":"done"'))).toBe(false);
+  });
+
+  it('persists the verified DeepSeek state, including credentials refreshed during restoration', async () => {
+    login.loggedIn = true;
+    const f = fixture();
+    const verified = { cookies: [], origins: [{ origin: 'https://chat.deepseek.com', localStorage: [{ name: 'userToken', value: '{"value":"refreshed"}' }] }] };
+    vi.mocked(verifyStoredLogin).mockResolvedValue(verified);
+    await f.run({ engine: 'deepseek' });
+    expect(f.set).toHaveBeenCalledWith(expect.objectContaining({ status: 'available', storageState: verified, proxyServer: null }));
+  });
+
+  it('does not complete DeepSeek login when cancelled during the restoration check', async () => {
+    login.loggedIn = true;
+    const f = fixture();
+    vi.mocked(verifyStoredLogin).mockImplementation(async () => {
+      f.redis.get.mockResolvedValue('1');
+      return { cookies: [], origins: [] };
+    });
+    await f.run({ engine: 'deepseek' });
+    expect(f.set).not.toHaveBeenCalled();
   });
 });

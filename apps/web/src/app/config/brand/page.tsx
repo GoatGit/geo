@@ -327,13 +327,6 @@ export default function BrandAssetPage() {
             </button>
             <button
               className="rounded-lg border bg-white px-3.5 py-1.5 text-[12.5px] font-semibold text-slate-700 transition-colors hover:border-brand/40 hover:text-brand"
-              onClick={() => document.getElementById('competitor-section')?.scrollIntoView({ behavior: 'smooth' })}
-              title="维护竞品清单与本品别名,决定 AI 回答里哪些说法算作谁"
-            >
-              竞品与识别口径
-            </button>
-            <button
-              className="rounded-lg border bg-white px-3.5 py-1.5 text-[12.5px] font-semibold text-slate-700 transition-colors hover:border-brand/40 hover:text-brand"
               onClick={() => setEditing((v) => !v)}
             >
               {editing ? '收起编辑' : '编辑档案'}

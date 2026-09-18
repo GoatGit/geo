@@ -4,7 +4,7 @@ import { chromium } from 'playwright-core';
 import type { Db } from '@geo/db';
 import { accountProfiles } from '@geo/db';
 import type { Redis } from 'ioredis';
-import type { EngineId } from '@geo/shared';
+import type { BrowserStorageState, EngineId } from '@geo/shared';
 import {
   LOGIN_FRAME_TTL_SEC,
   LOGIN_REQ_QUEUE,
@@ -22,6 +22,7 @@ import { checkLogin, hasVisibleInput, siteConfigOf } from '@geo/engine-adapters'
 import { browserModeFromEnv, viewerLoginFromEnv, type SessionBroker } from '@geo/browser-session';
 import { ProxyPoolManager } from './qg-proxy';
 import { envInt } from './config';
+import { browserContextOptions, verifyStoredLogin } from './browser-context';
 
 /** 人工登录等待窗口:操作者扫码/验证码在此时间内完成,超时置 timeout 可重试。
  *  10 分钟起步:扫码后常要切换手机 App 再确认,窗口太短会"刚扫完就关"(可用 LOGIN_TIMEOUT_MS 覆盖)。 */
@@ -177,9 +178,11 @@ export class LoginManager {
         // 之后采集经同一代理注入 Cookie,引擎才会认(docs/07 §13 闸门 #2)
         const { lease } = await this.proxyPool.acquireForProfile(profRow?.proxyServer ?? null);
         loginLease = lease;
-        const context = lease
-          ? await cdpBrowser.newContext({ proxy: { server: `http://${lease.server}` } })
-          : cdpBrowser.contexts()[0] ?? (await cdpBrowser.newContext());
+        const context = req.engine === 'deepseek'
+          ? await cdpBrowser.newContext(browserContextOptions(req.fingerprint, lease?.server ?? null))
+          : lease
+            ? await cdpBrowser.newContext({ proxy: { server: `http://${lease.server}` } })
+            : cdpBrowser.contexts()[0] ?? await cdpBrowser.newContext();
         if (lease) console.log(`[login] session=${req.sessionId} 经代理 ${lease.server} 登录(出口 ${lease.egressIp})`);
         page = context.pages()[0] ?? (await context.newPage());
       }
@@ -202,6 +205,8 @@ export class LoginManager {
         let lastNavAt = Date.now();
         let cancelled = false;
         let loginPromptOpened = false;
+        let verifiedState: BrowserStorageState | undefined;
+        let restoreHint = '';
         while (Date.now() - startedAt < LOGIN_TIMEOUT_MS) {
           if (this.stopped || await this.cancelled(req.sessionId)) {
             cancelled = true;
@@ -209,7 +214,7 @@ export class LoginManager {
           }
           await this.setStatus(req.sessionId, {
             state: 'running',
-            detail: `等待登录…(剩余 ${Math.ceil((LOGIN_TIMEOUT_MS - (Date.now() - startedAt)) / 1000)}s,请${viewer ? '在下方实时画面' : '在弹出的浏览器窗口'}中完成 ${site.displayName} 登录)`,
+            detail: `${restoreHint}等待登录…(剩余 ${Math.ceil((LOGIN_TIMEOUT_MS - (Date.now() - startedAt)) / 1000)}s,请${viewer ? '在下方实时画面' : '在弹出的浏览器窗口'}中完成 ${site.displayName} 登录)`,
             viewer,
             updatedAt: new Date().toISOString(),
           });
@@ -260,7 +265,27 @@ export class LoginManager {
             await page.waitForTimeout(2_000);
             const verify = await checkLogin(page, site);
             const verifyUsable = verify.loggedIn === true && (await hasVisibleInput(page, site));
-            if (verifyUsable) break;
+            if (verifyUsable) {
+              if (req.engine !== 'deepseek') break;
+              await this.setStatus(req.sessionId, {
+                state: 'running', detail: '正在验证 DeepSeek 登录态能否在采集会话中恢复…', viewer,
+                updatedAt: new Date().toISOString(),
+              });
+              const browser = cdpBrowser ?? page.context().browser();
+              try {
+                // Local persistent Chrome uses its installed UA; mirror that identity for the check.
+                const fingerprint = cdpBrowser ? req.fingerprint : await page.evaluate(() => ({
+                  ua: navigator.userAgent, locale: navigator.language, viewport: `${innerWidth}x${innerHeight}`,
+                }));
+                const restored = browser && await verifyStoredLogin(
+                  browser, site, fingerprint, loginLease?.server ?? null, await page.context().storageState(),
+                );
+                if (restored) { verifiedState = restored; break; }
+                restoreHint = 'DeepSeek 未接受恢复的登录态,请在原窗口确认登录或重新登录。';
+              } catch {
+                restoreHint = 'DeepSeek 登录态恢复验证暂未完成,正在重试。';
+              }
+            }
             confirmStreak = 0;
           }
           await page.waitForTimeout(2_500);
@@ -274,7 +299,7 @@ export class LoginManager {
         if (success) {
           // 保存 Cookie 与 localStorage,不能依赖远程 Context 同步;导出失败禁止入池。
           // 同时落出口绑定(IP 亲和):后续采集按本次租约复用同一出口
-          const storageState = await page.context().storageState();
+          const storageState = verifiedState ?? await page.context().storageState();
           const exported = storageState.cookies;
           // Finish browser persistence before exposing the profile to collectors.
           stopViewer.value = true;
@@ -288,12 +313,12 @@ export class LoginManager {
               cookies: exported,
               storageState,
               cooldownUntil: null,
-              ...(loginLease ? { proxyServer: loginLease.server } : {}),
+              proxyServer: loginLease?.server ?? null,
             })
             .where(and(eq(accountProfiles.id, req.profileId), eq(accountProfiles.status, 'pending_login')))
             .returning({ id: accountProfiles.id });
           if (!updated.length) throw new Error('账号状态已改变,登录结果未写入;请刷新账号池');
-          console.log(`[login] session=${req.sessionId} engine=${req.engine} 登录成功,档案 ${req.profileId} 置 available(cookies=${exported.length}${loginLease ? `,出口=${loginLease.server}` : ''})`);
+          console.log(`[login] session=${req.sessionId} engine=${req.engine} 登录成功,档案 ${req.profileId} 置 available(cookies=${exported.length},origins=${storageState.origins.length},restoreVerified=${Boolean(verifiedState)}${loginLease ? `,出口=${loginLease.server}` : ''})`);
         } else if (!cancelled) {
           // 超时诊断:页面 URL + 当前 Cookie 名(校准各站登录 Cookie 标记)
           const cookieNames = await page

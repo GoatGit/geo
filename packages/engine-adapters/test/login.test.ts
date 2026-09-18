@@ -32,6 +32,11 @@ describe('login evidence', () => {
     expect((await checkLogin(page, ENGINE_SITES.deepseek)).loggedIn).toBe(true);
   });
 
+  it('DeepSeek requires its user token, not a generic session cookie', async () => {
+    const page = pageFor(ENGINE_SITES.deepseek.chatUrl, [{ name: 'sessionid', value: 'not-a-deepseek-token' }]);
+    expect((await checkLogin(page, ENGINE_SITES.deepseek)).loggedIn).not.toBe(true);
+  });
+
   it('DeepSeek sign-in page remains logged out even with stale credentials', async () => {
     const page = pageFor('https://chat.deepseek.com/sign_in', [{ name: 'sessionid', value: 'stale' }], 'token');
     expect((await checkLogin(page, ENGINE_SITES.deepseek)).loggedIn).toBe(false);

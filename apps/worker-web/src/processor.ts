@@ -6,6 +6,8 @@ import {
   AdapterRegistry,
   DomWebAdapter,
   needsLoginOf,
+  checkLogin,
+  siteConfigOf,
   type AskResult,
 } from '@geo/engine-adapters';
 import { WEB_ENGINES, type AskStatus } from '@geo/shared';
@@ -18,6 +20,8 @@ import { chromium } from 'playwright-core';
 import { EngineBreaker } from './breaker';
 import { ProxyPoolManager } from './qg-proxy';
 import { envInt } from './config';
+import { createHash } from 'node:crypto';
+import { browserContextOptions } from './browser-context';
 import { AccountPoolService, type AcquiredProfile } from './profiles';
 import {
   COLLECT_QUEUE,
@@ -76,8 +80,8 @@ export class CollectProcessor {
 
   private readonly realBrowser: boolean;
   private readonly proxyPool: ProxyPoolManager;
-  /** Cookie 连续被拒计数(≥2 判死清空,见 needs_login 处理) */
-  private readonly cookieMisses = new Map<number, number>();
+  /** Count misses per credential version; a successful re-login starts fresh. */
+  private readonly cookieMisses = new Map<number, { version: string; count: number }>();
 
   start(concurrency: number): Worker<CollectJobData> {
     const worker = new Worker<CollectJobData>(COLLECT_QUEUE, (job) => this.process(job), {
@@ -176,21 +180,23 @@ export class CollectProcessor {
             // 不计入 2-strike(不 experge Cookie);引擎若仍拒绝,冷却后自然再试
             this.cookieMisses.delete(profile.id);
             await this.pool.bindProxy(profile.id, leaseServer);
-            await this.pool.markTransientLoginMiss(profile.id);
+            await this.pool.markTransientLoginMiss(profile);
             console.error(
               `[collect] engine=${engine} profile=${profile.id} 出口租约切换为 ${leaseServer},Cookie 保留短冷却重试(不计 2-strike)`,
             );
           } else {
-            const misses = (this.cookieMisses.get(profile.id) ?? 0) + 1;
-            this.cookieMisses.set(profile.id, misses);
+            const version = createHash('sha256').update(JSON.stringify(profile.storageState ?? profile.cookies)).digest('hex');
+            const previous = this.cookieMisses.get(profile.id);
+            const misses = (previous?.version === version ? previous.count : 0) + 1;
+            this.cookieMisses.set(profile.id, { version, count: misses });
             if (misses >= 2) {
               this.cookieMisses.delete(profile.id);
-              await this.pool.expireCookies(profile.id);
+              await this.pool.markLoginRequired(profile);
               console.error(
-                `[collect] engine=${engine} profile=${profile.id} Cookie 连续 ${misses} 次被拒,已清空并转人工重登`,
+                `[collect] engine=${engine} profile=${profile.id} 登录态连续 ${misses} 次未通过,保留凭证并转人工核验`,
               );
             } else {
-              await this.pool.markTransientLoginMiss(profile.id);
+              await this.pool.markTransientLoginMiss(profile);
               console.error(
                 `[collect] engine=${engine} profile=${profile.id} 有持久化登录态仍 needs_login` +
                   `(hint=${String(ask.engineMeta?.hint ?? '?')},cookies=${String(ask.engineMeta?.cookies ?? '?')})` +
@@ -201,7 +207,7 @@ export class CollectProcessor {
         } else {
           this.cookieMisses.delete(profile.id);
           // 真正未登录过的档案才要求人工重登
-          await this.pool.markLoginRequired(profile.id);
+          await this.pool.markLoginRequired(profile);
           console.error(
             `[collect] engine=${engine} profile=${profile.id} 登录态失效(无持久化 Cookie),已置 login_required`,
           );
@@ -249,7 +255,15 @@ export class CollectProcessor {
             ranAt,
             // 失败原因落 meta:失败必须可诊断(展示层透出,docs/02 §1.1 可见性)
             ...(ask.status === 'failed'
-              ? { meta: { error: String(ask.engineMeta?.error ?? 'unknown') } }
+              ? { meta: {
+                error: String(ask.engineMeta?.error ?? 'unknown'),
+                ...(needsLoginOf(ask) ? {
+                  needsLogin: true,
+                  loginHint: String(ask.engineMeta?.hint ?? 'unknown'),
+                  savedState: Boolean(profile.storageState),
+                  savedOrigins: profile.storageState?.origins.map((origin) => origin.origin) ?? [],
+                } : {}),
+              } }
               : {}),
           })
           .returning({ id: queryRuns.id })
@@ -356,12 +370,15 @@ export class CollectProcessor {
           // 改用 Playwright context 级代理。按档案绑定取同一出口——登录 Cookie 与
           // 出口 IP 绑定一致;租约消失时代理池会分配新出口并标 rotated
           ({ lease, rotated } = await this.proxyPool.acquireForProfile(profile.proxyServer ?? null));
-          const context = lease || profile.storageState
-            ? await cdpBrowser.newContext({
+          const contextOptions = engine === 'deepseek'
+            ? browserContextOptions(profile.fingerprint, lease?.server ?? null, profile.storageState)
+            : {
               ...(lease ? { proxy: { server: `http://${lease.server}` } } : {}),
               ...(profile.storageState ? { storageState: profile.storageState } : {}),
-            })
-            : cdpBrowser.contexts()[0] ?? await cdpBrowser.newContext();
+            };
+          const context = lease || profile.storageState
+            ? await cdpBrowser.newContext(contextOptions)
+            : cdpBrowser.contexts()[0] ?? await cdpBrowser.newContext(contextOptions);
           // 注入持久化 Cookie(docs/04 §3.1):登录导出的引擎会话态先于导航生效
           if (!profile.storageState && profile.cookies?.length) {
             try {
@@ -385,10 +402,20 @@ export class CollectProcessor {
           questionText,
           { timeoutMs: ASK_TIMEOUT_MS },
         );
+        if (page && profile.storageState && ask.status !== 'failed' && !needsLoginOf(ask)) {
+          try {
+            if ((await checkLogin(page, siteConfigOf(engine as never))).loggedIn === true) {
+              await this.pool.saveStorageState(profile, await page.context().storageState());
+            }
+          } catch {
+            // Keep a valid answer; preserve the previous credentials if export/save failed.
+            console.warn(`[collect] engine=${engine} profile=${profile.id} 登录态刷新保存失败,保留上次凭证`);
+          }
+        }
         return { ask, leaseServer: lease?.server ?? null, rotated };
       } finally {
-        await session.release();
         if (cdpBrowser) await cdpBrowser.close().catch(() => undefined); // CDP 连接的 close 只断连,不关远端浏览器
+        await session.release();
       }
     } catch (err) {
       // 超时/会话异常/无适配器统一按 failed 定格(docs/04 §7 失败模式手册)

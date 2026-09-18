@@ -96,7 +96,7 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     submitSelectors: ['div[class*="send"][role="button"]', 'button[type="submit"]'],
     answerSelectors: ['.ds-markdown', 'div[class*="markdown"]'],
     stopSelectors: ['div[class*="stop"]', 'button:has-text("停止")'],
-    loggedInCookieHints: ['sessionid'],
+    // DeepSeek authenticates with localStorage.userToken; generic session cookies are insufficient.
     answerNoisePatterns: [],
     completionStableMs: BASE_COMPLETION_STABLE_MS,
     navigationTimeoutMs: BASE_NAV_TIMEOUT_MS,
