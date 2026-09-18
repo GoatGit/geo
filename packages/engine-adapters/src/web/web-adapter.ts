@@ -118,7 +118,8 @@ export class DomWebAdapter implements EngineAdapter {
     if (!page) {
       return this.fail('browser 模式需要 SessionHandle.page(connectOverCDP 或本地代理注入)', queuedAt);
     }
-    const timeoutMs = opts?.timeoutMs ?? 120_000;
+    // 预算:取调用方预算与本引擎最低预算的较大者(深度搜索引擎需要更长的完整回答窗口)
+    const timeoutMs = Math.max(opts?.timeoutMs ?? 120_000, this.site.minAskTimeoutMs ?? 0);
     // 网络引用收割器(docs/04 §2.1 补充通路):挂到整个 ask 生命周期,
     // 从 JSON/SSE 响应载荷中提取引用来源(元宝/豆包正文不渲染引用链接,实测教训)
     const netHarvest = attachNetCitationHarvester(page, this.engine);
@@ -195,10 +196,14 @@ export class DomWebAdapter implements EngineAdapter {
         return this.fail(timedOut ? '完成判定超时且无答案文本' : '回答容器为空(页面改版?需校准 answerSelectors)', queuedAt);
       }
       // 最短回答门槛(豆包实测:风控软拦截时"猜你想问"推荐位是唯一新增 DOM 内容,
-      // 会被基线门控当回答收录;真实回答远长于此,按失败收口可被重采)
+      // 会被基线门控当回答收录;超时场景下"正在搜索资料"状态行同理——过短的部分文本
+      // 不是答案,按失败收口可被重采;真实部分答案远长于此,仍按 ok_with_answer 收录)
       const minChars = this.site.minAnswerChars ?? 0;
-      if (!timedOut && minChars > 0 && cleaned.length < minChars) {
-        return this.fail(`回答仅 ${cleaned.length} 字符,低于最小门槛 ${minChars}(疑似推荐位/风控拦截)`, queuedAt);
+      if (minChars > 0 && cleaned.length < minChars) {
+        return this.fail(
+          `回答仅 ${cleaned.length} 字符,低于最小门槛 ${minChars}${timedOut ? '(超时且无实质内容)' : '(疑似推荐位/风控拦截)'}`,
+          queuedAt,
+        );
       }
       // 回声防污染(docs/04 §2.1):回答≈问题原文 = 输入回显被当回答(游客态被静默拦截的实测形态)
       if (isEchoOfQuestion(cleaned, question)) {

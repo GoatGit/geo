@@ -32,8 +32,11 @@ export interface EngineSiteConfig {
    *  防止会话列表/历史接口把旧问题的引用串进当前 run;缺省 = 不启用收割。 */
   netCitationAllow?: string[];
   /** 有效回答最小字符数:低于此值按失败收口(挡风控拦截时的"猜你想问"推荐位),
-   *  0 = 不设门槛;仅对非超时答案生效。 */
+   *  0 = 不设门槛;对超时部分文本同样生效(超时且过短的"正在搜索资料"状态行不是答案)。 */
   minAnswerChars?: number;
+  /** 本引擎最低提问预算(ms):深度搜索型引擎(元宝/豆包)在全局预算内可能不够完成
+   *  一次带搜索的回答,取 max(调用方预算, 此值)。 */
+  minAskTimeoutMs?: number;
   /** 回答文本的站点噪声行(整行匹配移除,如工具调用状态行);正则字符串 */
   answerNoisePatterns: string[];
   /** 回答文本稳定窗口(docs/04 §2.1 完成判定三条件之二) */
@@ -74,6 +77,8 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     netCitationAllow: ['chat/completion', 'alice/search'],
     // 实测:风控软拦截时唯一新增 DOM 内容是"猜你想问"推荐位(~80 字符)
     minAnswerChars: 120,
+    // 实测:完整回答(含搜索阶段)需要更长时间
+    minAskTimeoutMs: 180_000,
     // 实测:游客态可正常提问;且豆包风控拒绝云端环境的扫码登录,游客采集为兜底
     guestAllowed: true,
     answerNoisePatterns: [],
@@ -145,6 +150,8 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     // 引用来源在会话详情接口与 chat SSE 流里(正文/抽屉 DOM 均无 <a> 链接,实测 2026-09)
     netCitationAllow: ['conversation/v1/detail', '/api/chat/'],
     minAnswerChars: 120,
+    // 实测:深度搜索完整回答需要 ~3-4 分钟(150s 预算会在"正在搜索资料"阶段超时)
+    minAskTimeoutMs: 240_000,
     requireLoginCookie: true,
     submitSelectors: ['button:has-text("发送")', 'button[class*="send"]'],
     // 实测(2026-09,登录态):回答被拆成数十个 markdown 小块,须取整轮对话容器
