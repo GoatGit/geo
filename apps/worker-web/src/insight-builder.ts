@@ -589,7 +589,7 @@ export async function runInsightBuild(db: Db, job: InsightBuildJob): Promise<voi
       select count(*)::int as n from industry_insights
       where industry_id = ${row.industryId} and id <> ${job.insightId}
     `);
-    const issueNo = rowsOf<{ n: number }>(priorCount)[0]?.n ?? 1;
+    const issueNo = (rowsOf<{ n: number }>(priorCount)[0]?.n ?? 0) + 1;
 
     await db
       .update(industryInsights)
@@ -650,18 +650,30 @@ async function polishWithLlm(
   const cfg = settings.insightAgent;
   if (!cfg.enabled || cfg.mode === 'rules' || !cfg.endpoint || !cfg.apiKey || !cfg.model) return composed;
 
-  const digest = { ...factsDigest(agg, windowDays), 行业: industryName };
+  // 品牌资料库内容一并喂给 LLM(品牌档案、品牌挖掘产物等——提供"为什么"的语境)
+  const matRes = await db.execute(sql`
+    select bm.title, bm.content from brand_materials bm
+    join brands b on b.id = bm.brand_id
+    where b.industry = ${industryName} and bm.kind = 'text'
+    order by bm.id desc limit 3
+  `);
+  const materials = rowsOf<{ title: string; content: string }>(matRes).map((r) => ({
+    标题: r.title,
+    内容: r.content.slice(0, 400),
+  }));
+
+  const digest = { ...factsDigest(agg, windowDays), 行业: industryName, 品牌资料库: materials };
   const system =
-    '你是行业分析主编。基于给定的行业 AI 可见度监测聚合事实,只输出一个 JSON 对象。' +
-    'schema: {"title":"报告标题(≤24字,点明行业与AI可见度,可带锐评)","summary":"摘要(≤90字,给出最有信息量的结论,禁止空话)","takeaways":["核心洞察1(≤50字,必须引用具体品牌名与数据)","核心洞察2(≤50字)","核心洞察3(≤50字)"]}。' +
-    '洞察必须基于事实(提及率排名/信源被引/口碑词),禁止编造数据。';
+    '你是行业分析主编,为一份"行业 AI 可见度监测报告"撰写深度洞察。只输出一个 JSON 对象。' +
+    'schema: {"title":"报告标题(≤24字,点明行业与AI可见度,可带锐评)","summary":"摘要(≤90字,给出最有信息量的结论,禁止空话)","takeaways":["核心洞察(≤60字):现象+数据+成因,必须引用具体品牌名与数字","…×3"],"narrative":"主编综述(350-500字):①行业格局与成因(谁强谁弱、为什么——结合品牌资料库里的品牌定位解释)②AI 引用的信源偏好意味着什么内容策略 ③口碑情绪对可见度的影响 ④给排名靠后品牌的 1-2 条立即可执行建议。要求:每个论断带数字;揭示因果而非复述;语气专业锐利像分析报告,禁止营销腔。"}。' +
+    '所有论断必须基于给定事实,禁止编造数据;品牌资料库仅作背景语境,其中的主观描述不要照抄。';
   const raw = await chatCompletion(
-    { protocol: cfg.protocol as 'openai' | 'anthropic', endpoint: cfg.endpoint, apiKey: cfg.apiKey, model: cfg.model, timeoutMs: 60_000 },
-    { system, user: JSON.stringify(digest), maxTokens: 1200 },
+    { protocol: cfg.protocol as 'openai' | 'anthropic', endpoint: cfg.endpoint, apiKey: cfg.apiKey, model: cfg.model, timeoutMs: 90_000 },
+    { system, user: JSON.stringify(digest), maxTokens: 2500 },
   );
   const m = raw.text.match(/\{[\s\S]*\}/);
   if (!m) return composed;
-  const parsed = JSON.parse(m[0]) as { title?: string; summary?: string; takeaways?: string[] };
+  const parsed = JSON.parse(m[0]) as { title?: string; summary?: string; takeaways?: string[]; narrative?: string };
   const takeaways = (parsed.takeaways ?? []).filter((t) => typeof t === 'string' && t.length >= 8).slice(0, 3);
   if (!parsed.title || !parsed.summary || takeaways.length === 0) return composed;
 
@@ -675,10 +687,20 @@ async function polishWithLlm(
       tone: 'brand',
     };
   }
+  const narrative = String(parsed.narrative ?? '').trim();
+  if (narrative.length >= 100) {
+    // 综述块插在主编洞察之后(数据块之前),是精品报告的深度核心
+    blocks.splice(idx >= 0 ? idx + 1 : 0, 0, {
+      type: 'takeaway',
+      title: '主编综述:格局、成因与建议',
+      text: narrative,
+      tone: 'warn',
+    });
+  }
   return {
     title: parsed.title.slice(0, 60),
     summary: parsed.summary.slice(0, 160),
     cover: composed.cover,
     blocks,
-  };
+  }
 }
