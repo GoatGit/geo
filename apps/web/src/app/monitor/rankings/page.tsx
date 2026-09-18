@@ -6,14 +6,15 @@ import { EmptyState, PageHeader, Skeleton, pct } from '@/components/ui';
 import { useRankings } from '@/lib/queries';
 import { EvidenceModal } from '@/components/evidence-modal';
 
-const LAYER_LABEL: Record<string, string> = {
-  L1: 'L1 全线领先',
-  L2: 'L2 多数上榜',
-  L3: 'L3 少数上榜',
-  L4: 'L4 全线缺席',
-};
+/** 排名透视(docs/01 §3.3,对标竞品全景矩阵重构):
+ * 指标卡组 → 分引擎三率条 → 全景矩阵(综合名次+三率与引擎分组之间有分割线)。 */
 
-/** 排名透视(docs/01 §3.3):指标卡组 → 矩阵 → 漏斗 → 引擎分化。 */
+const RATE_BARS: Array<{ key: 'mentionRate' | 'top3Rate' | 'top1Rate'; label: string; tone: string }> = [
+  { key: 'mentionRate', label: '提及', tone: 'bg-brand-500' },
+  { key: 'top3Rate', label: 'Top3', tone: 'bg-brand-700' },
+  { key: 'top1Rate', label: '首推', tone: 'bg-good' },
+];
+
 export default function RankingsPage() {
   const [days, setDays] = useState(1);
   const [engineFilter, setEngineFilter] = useState<string>('all');
@@ -32,13 +33,13 @@ export default function RankingsPage() {
     (r) => questionFilter === 'all' || String(r.questionId) === questionFilter,
   );
   const exportMatrix = (rows: typeof data.matrix, engines: string[]) => {
-    const header = ['监控问题', ...engines, '综合名次', '提及率', 'Top3 率', '首推率', '分层'];
+    const header = ['监控问题', ...engines, '综合名次', '提及率', 'Top3 率', '首推率'];
     const lines = rows.map((r) => {
       const cells = engines.map((eng) => {
         const c = r.cells.find((x) => x.engine === eng);
         return c ? (c.rank !== null ? `#${c.rank}` : c.mentioned ? '提及未上榜' : '未上榜') : '—';
       });
-      return [r.questionText, ...cells, r.compositeRank ?? '', pct(r.mentionRate), pct(r.top3Rate), pct(r.top1Rate), r.layer ?? ''];
+      return [r.questionText, ...cells, r.compositeRank ?? '', pct(r.mentionRate), pct(r.top3Rate), pct(r.top1Rate)];
     });
     const csv = [header, ...lines].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
@@ -49,7 +50,7 @@ export default function RankingsPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <PageHeader
         title="排名透视"
         actions={
@@ -76,14 +77,38 @@ export default function RankingsPage() {
         <MetricCardView title="平均名次" card={data.cards.find((c) => c.metric === 'avgRank')} lowerBetter />
       </section>
 
-      <div className="rise flex flex-wrap items-center gap-4 text-[11px] text-slate-500">
-        <span className="font-medium text-slate-600">图例</span>
-        <span className="inline-flex items-center gap-1.5"><span className="metric-num rounded bg-good-50 px-1.5 py-0.5 text-good">#1</span>首推</span>
-        <span className="inline-flex items-center gap-1.5"><span className="metric-num rounded bg-brand-50 px-1.5 py-0.5 text-brand-700">#2-3</span>进 Top3</span>
-        <span className="inline-flex items-center gap-1.5"><span className="metric-num rounded bg-slate-100 px-1.5 py-0.5">#4+</span>上榜靠后</span>
-        <span className="inline-flex items-center gap-1.5"><span className="rounded bg-bad-50 px-1.5 py-0.5 text-bad">未上榜</span>出局</span>
-        <span className="text-slate-400">综合名次 = 未上榜记 N+1 取中位数(docs/02 §1.3)</span>
-      </div>
+      {/* ===== 分引擎三率(条形对比,置于矩阵前) ===== */}
+      <section className="card rise p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-slate-900">分引擎三率</h2>
+          <div className="flex items-center gap-3 text-[10px] text-slate-400">
+            {RATE_BARS.map((b) => (
+              <span key={b.key} className="inline-flex items-center gap-1">
+                <span className={`h-1.5 w-3 rounded-full ${b.tone}`} />
+                {b.label}率
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="grid gap-x-6 gap-y-2 md:grid-cols-2">
+          {data.engineStats.map((e) => (
+            <div key={e.engine} className="flex items-center gap-3">
+              <span className="w-20 shrink-0 truncate text-xs font-semibold text-slate-700">{e.engine}</span>
+              <div className="grid flex-1 gap-1">
+                {RATE_BARS.map((b) => (
+                  <div key={b.key} className="flex items-center gap-2">
+                    <div className="h-1.5 flex-1 rounded-full bg-slate-100">
+                      <div className={`h-1.5 rounded-full ${b.tone}`} style={{ width: `${Math.round(e[b.key] * 100)}%` }} />
+                    </div>
+                    <span className="metric-num w-10 text-right text-[11px] text-slate-500">{pct2(e[b.key])}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          {data.engineStats.length === 0 && <p className="text-sm text-slate-400">暂无采集数据</p>}
+        </div>
+      </section>
 
       <div className="flex flex-wrap items-center gap-2">
         <select
@@ -114,35 +139,44 @@ export default function RankingsPage() {
         >
           导出 CSV
         </button>
+        <span className="ml-auto inline-flex items-center gap-1.5 text-[11px] text-slate-500">
+          <span className="metric-num rounded bg-good-50 px-1.5 py-0.5 text-good">#1</span>首推
+          <span className="metric-num ml-1 rounded bg-brand-50 px-1.5 py-0.5 text-brand-700">#2-3</span>Top3
+          <span className="metric-num ml-1 rounded bg-slate-100 px-1.5 py-0.5">#4+</span>靠后
+          <span className="ml-1 rounded bg-bad-50 px-1.5 py-0.5 text-bad">未上榜</span>
+          <span className="ml-1 text-slate-400">综合名次 = 未上榜记 N+1 取中位数</span>
+        </span>
       </div>
 
-      <section className="table-wrap rise-1">
-        <table className="w-full text-sm">
-          <thead className="table-head">
-            <tr>
-              <th className="px-4 py-3">监控问题</th>
+      {/* ===== 全景矩阵 ===== */}
+      <section className="table-wrap overflow-x-auto rounded-xl border border-slate-100">
+        <table className="w-full border-collapse text-[12.5px]" style={{ borderSpacing: 0 }}>
+          <thead>
+            <tr className="bg-slate-50/90 text-[11.5px] font-semibold text-slate-500">
+              <th className="sticky left-0 z-10 border-b border-slate-200 bg-slate-50/95 px-4 py-2.5 text-left backdrop-blur">监控问题</th>
               {visibleEngines.map((eng) => (
-                <th key={eng} className="px-3 py-2.5">
-                  {eng}
-                </th>
+                <th key={eng} className="border-b border-slate-200 px-2.5 py-2.5 text-center">{eng}</th>
               ))}
-              <th className="px-3 py-2.5">综合名次</th>
-              <th className="px-3 py-2.5 text-right">提及率</th>
-              <th className="px-3 py-2.5 text-right">Top3 率</th>
-              <th className="px-3 py-2.5 text-right">首推率</th>
-              <th className="px-3 py-2.5">分层</th>
+              {/* 分组分割线:引擎组 | 综合+三率组 */}
+              <th className="border-b border-l-2 border-l-slate-200 border-slate-200 px-3 py-2.5 text-center">综合名次</th>
+              <th className="border-b border-slate-200 px-3 py-2.5 text-center">提及率</th>
+              <th className="border-b border-slate-200 px-3 py-2.5 text-center">Top3 率</th>
+              <th className="border-b border-slate-200 px-3 py-2.5 text-center">首推率</th>
             </tr>
           </thead>
           <tbody>
             {visibleRows.map((row) => (
-              <tr key={row.questionId} className="border-t">
-                <td className="max-w-72 truncate px-4 py-2.5" title={row.questionText}>
+              <tr key={row.questionId} className="transition-colors hover:bg-brand-50/40">
+                <td
+                  className="sticky left-0 z-10 max-w-72 truncate border-t border-slate-100 bg-white px-4 py-2"
+                  title={row.questionText}
+                >
                   {row.questionText}
                 </td>
                 {visibleEngines.map((eng) => {
                   const cell = row.cells.find((c) => c.engine === eng);
                   return (
-                    <td key={eng} className="px-3 py-2.5">
+                    <td key={eng} className="border-t border-slate-100 px-2.5 py-2 text-center">
                       {!cell ? (
                         <span className="text-slate-300">—</span>
                       ) : (
@@ -181,16 +215,17 @@ export default function RankingsPage() {
                     </td>
                   );
                 })}
-                <td className="metric-num px-3 py-2.5 font-medium">{row.compositeRank ?? '—'}</td>
-                <td className="metric-num px-3 py-2.5 text-right">{pct(row.mentionRate)}</td>
-                <td className="metric-num px-3 py-2.5 text-right">{pct(row.top3Rate)}</td>
-                <td className="metric-num px-3 py-2.5 text-right">{pct(row.top1Rate)}</td>
-                <td className="px-3 py-2.5 text-xs text-slate-500">{row.layer ? LAYER_LABEL[row.layer] : '样本不足'}</td>
+                <td className="metric-num border-l-2 border-slate-200 border-t border-t-slate-100 px-3 py-2 text-center font-semibold">
+                  {row.compositeRank != null ? `第${row.compositeRank}名` : '未上榜'}
+                </td>
+                <td className="metric-num border-t border-slate-100 px-3 py-2 text-center">{pct(row.mentionRate)}</td>
+                <td className="metric-num border-t border-slate-100 px-3 py-2 text-center">{pct(row.top3Rate)}</td>
+                <td className="metric-num border-t border-slate-100 px-3 py-2 text-center">{pct(row.top1Rate)}</td>
               </tr>
             ))}
-            {data.matrix.length === 0 && (
+            {visibleRows.length === 0 && (
               <tr>
-                <td colSpan={data.engineStats.length + 3} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={visibleEngines.length + 5} className="px-4 py-8 text-center text-slate-400">
                   暂无监控问题
                 </td>
               </tr>
@@ -199,61 +234,6 @@ export default function RankingsPage() {
         </table>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2">
-        <div className="card rise-2 p-6">
-          <h2 className="mb-4 font-semibold text-slate-900">可见性漏斗</h2>
-          <div className="space-y-2">
-            {data.funnel.map((s, i) => (
-              <div key={s.key}>
-                <div className="flex items-center justify-between text-xs">
-                  <span>{s.label}</span>
-                  <span className="metric-num text-slate-500">
-                    {s.rate == null ? '—' : `${Math.round(s.rate * 100)}%`} ({s.numerator}/{s.denominator})
-                  </span>
-                </div>
-                <div className="mt-1 h-2 rounded bg-slate-100">
-                  <div
-                    className="h-2 animate-grow-w rounded bg-gradient-to-r from-brand-400 to-brand-600"
-                    style={{ width: `${(s.rate ?? 0) * 100}%` }}
-                  />
-                </div>
-                {i > 0 && <p className="mt-0.5 text-[10px] text-slate-400">分母:{s.denominatorNote}</p>}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="card rise-3 p-6">
-          <h2 className="mb-4 font-semibold text-slate-900">分引擎三率</h2>
-          <table className="w-full text-xs">
-            <thead className="text-left text-slate-400">
-              <tr>
-                <th className="py-1">引擎</th>
-                <th className="py-1">提及</th>
-                <th className="py-1">Top3</th>
-                <th className="py-1">首推</th>
-              </tr>
-            </thead>
-            <tbody className="metric-num">
-              {data.engineStats.map((e) => (
-                <tr key={e.engine} className="border-t">
-                  <td className="py-1.5">{e.engine}</td>
-                  <td>{pct2(e.mentionRate)}</td>
-                  <td>{pct2(e.top3Rate)}</td>
-                  <td>{pct2(e.top1Rate)}</td>
-                </tr>
-              ))}
-              {data.engineStats.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="py-4 text-center text-slate-400">
-                    暂无采集数据
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
       <EvidenceModal runId={evidenceRun} onClose={() => setEvidenceRun(null)} />
     </div>
   );
