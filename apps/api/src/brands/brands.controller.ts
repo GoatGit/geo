@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Req } from '@nestjs/common';
-import { IsInt, IsOptional, IsString, Length, Max, MaxLength, Min } from 'class-validator';
+import { IsInt, IsOptional, IsString, Length, MaxLength, Min } from 'class-validator';
 import type { Request } from 'express';
 import { currentAccount } from '../common/auth';
 import { BrandsService } from './brands.service';

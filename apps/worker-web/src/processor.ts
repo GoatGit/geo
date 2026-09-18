@@ -382,14 +382,23 @@ export class CollectProcessor {
       engine,
       ranAt,
       answerText: ask.answerText,
+      questionText: data.questionText,
       citations: ask.citations,
       subjects,
       ownedDomains: ownedHost ? [ownedHost] : [],
+      redis: this.progressRedis,
     });
 
     await this.db
       .update(queryRuns)
-      .set({ meta: { priority: data.priority, strategy, facts: facts.length } })
+      // jsonb 合并而非覆盖:insert 时的失败 meta、影子判定(insightShadow)等在途字段必须保留
+      .set({
+        meta: sql`coalesce(query_runs.meta, '{}'::jsonb) || ${JSON.stringify({
+          priority: data.priority,
+          strategy,
+          facts: facts.length,
+        })}::jsonb`,
+      })
       .where(eq(queryRuns.id, runId));
 
     // 竞品自动发现(未匹配高频实体,异步低优先;失败只记日志,不影响主链路)

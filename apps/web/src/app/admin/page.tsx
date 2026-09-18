@@ -17,6 +17,13 @@ interface OverviewDto {
   engineHealth: Array<{ engine: string; ok: number; failed: number; total: number; successRate: number | null; tripped: boolean; manuallyPaused: boolean }>;
   recentRuns: Array<{ status: string; engine: string; ranAt: string; brandName: string }>;
   settings: { schedulerEnabled: boolean; globalDailyRunCap: number };
+  /** Insight Agent 观测(docs/09 §10);旧版后端可能缺省,渲染侧容错 */
+  insight?: {
+    enabled: boolean;
+    mode: 'rules' | 'shadow' | 'llm';
+    model: string;
+    today: Record<string, number>;
+  };
   asOf: string;
 }
 
@@ -33,7 +40,16 @@ const STATUS_LABELS: Array<{ key: string; label: string; cls: string }> = [
   { key: 'quota_blocked', label: '配额拦截', cls: 'text-warn' },
 ];
 
-/** 平台后台 · 系统总览:基础设施 / 队列 / 今日任务 / 引擎通道(含手动熔断管控)。 */
+const INSIGHT_TODAY_LABELS: Array<{ key: string; label: string; cls: string }> = [
+  { key: 'calls', label: 'LLM 调用', cls: 'text-slate-900' },
+  { key: 'fallback', label: '回落规则', cls: 'text-warn' },
+  { key: 'invalid_partial', label: '无效/部分', cls: 'text-warn' },
+  { key: 'shadow_disagree', label: '影子分歧', cls: 'text-slate-500' },
+];
+
+const INSIGHT_MODE_TONES: Record<string, 'slate' | 'warn' | 'brand'> = { rules: 'slate', shadow: 'warn', llm: 'brand' };
+
+/** 平台后台 · 系统总览:基础设施 / 队列 / 今日任务 / 引擎通道(含手动熔断管控)/ Insight Agent 观测。 */
 export default function AdminOverviewPage() {
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery({
@@ -46,6 +62,8 @@ export default function AdminOverviewPage() {
 
   const stats = data.stats ?? {};
   const worker = data.infra.worker;
+  const insight = data.insight;
+  const insightToday = insight?.today ?? {};
 
   const toggleEngine = async (engine: string, paused: boolean) => {
     await api(`/admin/engines/${engine}/${paused ? 'resume' : 'pause'}`, { method: 'POST' });
@@ -135,6 +153,41 @@ export default function AdminOverviewPage() {
             ))}
             {(data.accountPool ?? []).length === 0 && <span className="text-xs text-slate-400">账号池为空</span>}
           </div>
+        </div>
+
+        {/* Insight Agent:模式 + 今日 LLM 判定观测(数据缺失时容错显示) */}
+        <div className="card p-6">
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <h2 className="font-semibold text-slate-900">Insight Agent(LLM 判定层)</h2>
+            {insight ? (
+              <>
+                <Badge label={insight.mode} tone={INSIGHT_MODE_TONES[insight.mode] ?? 'slate'} />
+                <Badge label={insight.enabled ? '已启用' : '未启用'} tone={insight.enabled ? 'good' : 'slate'} />
+              </>
+            ) : (
+              <Badge label="暂无数据" tone="slate" />
+            )}
+          </div>
+          {insight ? (
+            <>
+              <p className="mb-3 text-xs text-slate-500">
+                model:<span className="metric-num text-slate-700">{insight.model || '未配置'}</span>
+              </p>
+              <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+                {INSIGHT_TODAY_LABELS.map((s) => (
+                  <div key={s.key} className="rounded-lg bg-slate-50 px-3 py-2">
+                    <p className={`metric-num text-lg font-semibold ${s.cls}`}>{insightToday[s.key] ?? 0}</p>
+                    <p className="text-[11px] text-slate-500">{s.label}</p>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-3 text-[11px] leading-5 text-slate-400">
+                今日 LLM 判定观测:calls=调用;fallback=失败回落规则;invalid_partial=无效/部分解析;shadow_disagree=影子模式与规则口径分歧。配置在全局配置页调整。
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-slate-400">后端未返回 Insight Agent 观测数据。</p>
+          )}
         </div>
       </section>
 

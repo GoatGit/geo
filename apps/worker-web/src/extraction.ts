@@ -1,4 +1,5 @@
 import { sql } from 'drizzle-orm';
+import type { Redis } from 'ioredis';
 import { PARSER_VERSION, type MentionFactDraft } from '@geo/shared';
 import {
   buildMentionFacts,
@@ -9,7 +10,9 @@ import {
   normalizeUrl,
   type SubjectDef,
 } from '@geo/metrics';
-import { citationFacts, competitorCandidates, mentionFacts, type Db } from '@geo/db';
+import { citationFacts, competitorCandidates, loadPlatformSettings, mentionFacts, type Db } from '@geo/db';
+import { toMentionDrafts } from '@geo/insight-agent';
+import { createInsightAgent, incrInsightStat } from './insight';
 export type { SubjectDef } from '@geo/metrics';
 
 export interface SubjectRow {
@@ -40,7 +43,9 @@ export function isPlausibleEntityName(name: string): boolean {
   return trimmed.length >= 2 && trimmed.length <= 16 && !/[。:：;;,，]/.test(trimmed);
 }
 
-/** 即时抽取(docs/05 §2,<2s 同步路径):mention_facts + citation_facts。 */
+/** 即时抽取(docs/05 §2):mention_facts + citation_facts。
+ *  判定层 = Insight Agent(docs/09 §6):mode=llm 时 LLM 判定、失败回落规则(置信度压 0.5 进抽检池);
+ *  mode=shadow 时口径仍走规则、LLM 判定入 query_runs.meta.insightShadow 对比。 */
 export async function runInstantExtraction(input: {
   db: Db;
   runId: number;
@@ -49,13 +54,61 @@ export async function runInstantExtraction(input: {
   engine: string;
   ranAt: Date;
   answerText: string;
+  questionText?: string;
   citations: Array<{ url: string; title?: string }>;
   subjects: SubjectDef[];
   ownedDomains: string[];
+  redis?: Redis | null;
 }): Promise<{ facts: MentionFactDraft[] }> {
   const { db, runId, brandId, questionId, engine, ranAt, answerText, citations, subjects, ownedDomains } = input;
 
-  const facts = buildMentionFacts({ runId: String(runId), brandId, subjects, markdown: answerText });
+  const draftBase = { runId: String(runId), brandId };
+  let facts = buildMentionFacts({ runId: String(runId), brandId, subjects, markdown: answerText });
+
+  // Insight Agent 判定层:仅 ok 回答文本非空时才值得调用;配置经 platform_settings 每 run 读取(切模式即时生效)
+  const insightCfg = (await loadPlatformSettings(db)).insightAgent;
+  if (answerText.trim() && insightCfg.enabled && (insightCfg.mode === 'llm' || insightCfg.mode === 'shadow')) {
+    const agent = createInsightAgent(insightCfg, input.redis ?? null);
+    const judged = await agent.judgeMention({
+      question: input.questionText ?? '',
+      answerMarkdown: answerText,
+      subjects,
+    });
+    if (judged) {
+      const llmFacts = toMentionDrafts(judged, draftBase);
+      if (insightCfg.mode === 'llm') {
+        facts = llmFacts;
+      } else {
+        // 影子:口径保持规则结果,双侧判定差异入 meta 供离线评测(docs/09 §7)
+        const agree =
+          facts.length === llmFacts.length &&
+          facts.every((rf) => {
+            const lf = llmFacts.find((l) => l.subjectKey === rf.subjectKey);
+            return lf && rf.mentioned === lf.mentioned && rf.rank === lf.rank;
+          });
+        if (!agree) void incrInsightStat(input.redis ?? null, 'shadow_disagree');
+        await db
+          .execute(sql`
+            update query_runs
+            set meta = coalesce(meta, '{}'::jsonb) || ${JSON.stringify({
+              insightShadow: {
+                task: 'mention',
+                agree,
+                rule: facts.map((f) => ({ key: f.subjectKey, mentioned: f.mentioned, rank: f.rank })),
+                llm: llmFacts.map((f) => ({ key: f.subjectKey, mentioned: f.mentioned, rank: f.rank })),
+                parserVersion: judged.parserVersion,
+              },
+            })}::jsonb
+            where id = ${runId}
+          `)
+          .catch((err) => console.error(`[insight] shadow write failed run=${runId}:`, err));
+      }
+    } else if (insightCfg.mode === 'llm') {
+      // 降级矩阵(docs/09 §6):规则结果照常入库,置信度压 0.5 → 进人工抽检池
+      facts = facts.map((f) => ({ ...f, confidence: Math.min(f.confidence, 0.5) }));
+    }
+  }
+
   for (const f of facts) {
     await db.insert(mentionFacts).values({
       runId,
@@ -71,7 +124,7 @@ export async function runInstantExtraction(input: {
       surface: 'web',
       questionId,
       evidence: f.evidence as unknown as Record<string, unknown> | null,
-      parserVersion: PARSER_VERSION,
+      parserVersion: f.parserVersion,
       confidence: f.confidence,
     });
   }

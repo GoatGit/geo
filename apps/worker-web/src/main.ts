@@ -47,7 +47,10 @@ async function bootstrap() {
   const loginManager = new LoginManager(db, loginRedis, broker);
   loginManager.start();
 
-  const reputationWorker = startReputationWorker(db);
+  const reputationWorker = startReputationWorker(
+    db,
+    new Redis(bullConnection().url, { maxRetriesPerRequest: 1 }), // Insight Agent 调用统计(docs/09 §10)
+  );
   const reportsWorker = startReportsWorker(db);
   const insightsWorker = startInsightsWorker(db);
   await scheduleWeeklyReports();

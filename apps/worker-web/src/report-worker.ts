@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Queue, Worker } from 'bullmq';
+import type { Redis } from 'ioredis';
 import { reports, type Db } from '@geo/db';
 import { eq } from 'drizzle-orm';
 import { createStorageFromEnv } from '@geo/evidence';
@@ -7,12 +8,16 @@ import { REPUTATION_QUEUE, REPORTS_QUEUE, bullConnection } from './queue';
 import { extractReputation } from './reputation';
 import { buildReportPayload } from './report-builder';
 
-/** 口碑异步抽取消费器(docs/05 §1 管道②):确定性基线,生产替换 LLM。 */
-export function startReputationWorker(db: Db, concurrency = 2): Worker {
+/** 口碑异步抽取消费器(docs/05 §1 管道②):判定层 = Insight Agent(docs/09 §6),redis 供调用统计。 */
+export function startReputationWorker(db: Db, redis?: Redis | null, concurrency = 2): Worker {
   const worker = new Worker(
     REPUTATION_QUEUE,
     async (job) => {
-      await extractReputation(db, job.data as { runId: number; brandId: number; answerText: string; ranAt: string });
+      await extractReputation(
+        db,
+        job.data as { runId: number; brandId: number; answerText: string; ranAt: string },
+        redis,
+      );
     },
     { connection: bullConnection(), concurrency },
   );

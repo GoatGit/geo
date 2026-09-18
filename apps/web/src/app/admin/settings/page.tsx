@@ -4,14 +4,29 @@ import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { PageHeader, Skeleton } from '@/components/ui';
-import { WEB_ENGINES } from '@geo/shared';
+import { WEB_ENGINES, type InsightAgentSettings } from '@geo/shared';
 
 interface SettingsDto {
   schedulerEnabled: boolean;
   globalDailyRunCap: number;
   engineDailyCaps: Record<string, number>;
   proxyPool: { enabled: boolean; key: string };
+  insightAgent: InsightAgentSettings;
 }
+
+/** POST /admin/insight-agent/test 响应:用已保存配置发一次最小调用 */
+interface InsightTestResult {
+  ok: boolean;
+  latencyMs: number;
+  model: string;
+  error?: string;
+}
+
+const INSIGHT_MODES: Array<{ value: InsightAgentSettings['mode']; label: string; desc: string }> = [
+  { value: 'rules', label: 'rules', desc: '现状:纯规则引擎判定,不发起 LLM 调用' },
+  { value: 'shadow', label: 'shadow', desc: '口径走规则,LLM 结果仅存影子对比' },
+  { value: 'llm', label: 'llm', desc: 'LLM 判定,失败自动回落规则' },
+];
 
 interface ProxyPoolStatus {
   settings: { enabled: boolean; key: string };
@@ -24,7 +39,7 @@ interface ProxyPoolStatus {
 }
 
 /**
- * 平台后台 · 全局配置:调度总开关 / 全局每日任务上限 / 每引擎每日上限。
+ * 平台后台 · 全局配置:调度总开关 / 每日预算 / 代理池 / Insight Agent(LLM 判定层)。
  * 保存后下一调度 tick 生效(调度器每分钟读库),无需重启 worker。
  */
 export default function AdminSettingsPage() {
@@ -37,6 +52,10 @@ export default function AdminSettingsPage() {
   const [form, setForm] = useState<SettingsDto | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  // apiKey 掩码回显:仅当用户输入过新 key 才上传新值,否则传 ''(后端语义 = 保留原值)
+  const [insightKeyDirty, setInsightKeyDirty] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<InsightTestResult | null>(null);
 
   const poolStatus = useQuery({
     queryKey: ['admin-proxy-pool'],
@@ -44,10 +63,35 @@ export default function AdminSettingsPage() {
   });
 
   useEffect(() => {
-    if (data?.settings) setForm({ ...data.settings, engineDailyCaps: { ...data.settings.engineDailyCaps } });
+    if (data?.settings) {
+      setForm({
+        ...data.settings,
+        engineDailyCaps: { ...data.settings.engineDailyCaps },
+        insightAgent: { ...data.settings.insightAgent },
+      });
+      setInsightKeyDirty(false);
+    }
   }, [data]);
 
   if (isLoading || !form) return <Skeleton />;
+
+  // 客户端提示(不硬阻断):enabled 且 shadow/llm 时连接三项应填全(后端保存时会强校验)
+  const insightNeedsConfig =
+    form.insightAgent.enabled &&
+    form.insightAgent.mode !== 'rules' &&
+    (!form.insightAgent.endpoint.trim() || !form.insightAgent.model.trim() || !form.insightAgent.apiKey.trim());
+
+  const testInsight = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      setTestResult(await api<InsightTestResult>('/admin/insight-agent/test', { method: 'POST' }));
+    } catch (e) {
+      setTestResult({ ok: false, latencyMs: 0, model: '', error: (e as Error).message });
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const save = async () => {
     setSaving(true);
@@ -61,9 +105,20 @@ export default function AdminSettingsPage() {
           engineDailyCaps: Object.fromEntries(
             WEB_ENGINES.map((e) => [e, Math.max(0, Math.floor(Number(form.engineDailyCaps[e]) || 0))]),
           ),
+          insightAgent: {
+            ...form.insightAgent,
+            // 空 / '***' 掩码形态 = 保留原值;仅用户真正输入过新 key 才传新值
+            apiKey: insightKeyDirty ? form.insightAgent.apiKey : '',
+            timeoutMs: Math.min(Math.max(Math.floor(Number(form.insightAgent.timeoutMs) || 0), 2000), 30000),
+          },
         },
       });
-      setForm({ ...r.settings, engineDailyCaps: { ...r.settings.engineDailyCaps } });
+      setForm({
+        ...r.settings,
+        engineDailyCaps: { ...r.settings.engineDailyCaps },
+        insightAgent: { ...r.settings.insightAgent },
+      });
+      setInsightKeyDirty(false);
       void queryClient.invalidateQueries({ queryKey: ['admin-overview'] });
       void queryClient.invalidateQueries({ queryKey: ['admin-proxy-pool'] });
       setMessage('已保存:调度项下一周期生效,代理池 1 分钟内热加载');
@@ -211,6 +266,147 @@ export default function AdminSettingsPage() {
           <p className="mt-2 text-[10px] text-slate-400">
             注意:沙箱出口 IP 需在青果白名单内;代理 IP 到期后自动提取新 IP,届时需重新登录引擎账号。
           </p>
+        </div>
+      </section>
+
+      {/* Insight Agent:LLM 判定层(连接配置三项在 shadow/llm + enabled 时为必填,客户端仅提示不阻断) */}
+      <section className="card rise p-6">
+        <h2 className="mb-1 font-semibold text-slate-900">Insight Agent(LLM 判定层)</h2>
+        <p className="mb-4 text-xs leading-5 text-slate-500">
+          用 LLM 复核引擎判定结果:关闭后全量走规则引擎(现状行为),不发起任何 LLM 调用。
+        </p>
+        <div className="mb-4 flex items-center">
+          <button
+            onClick={() =>
+              setForm({ ...form, insightAgent: { ...form.insightAgent, enabled: !form.insightAgent.enabled } })
+            }
+            className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${
+              form.insightAgent.enabled ? 'bg-brand-500' : 'bg-slate-300'
+            }`}
+            aria-pressed={form.insightAgent.enabled}
+          >
+            <span
+              className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                form.insightAgent.enabled ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+          <span className={`ml-3 text-sm font-medium ${form.insightAgent.enabled ? 'text-good' : 'text-slate-500'}`}>
+            {form.insightAgent.enabled ? '已启用' : '未启用(全量走规则引擎)'}
+          </span>
+        </div>
+
+        {/* 模式单选 */}
+        <div className="mb-4 grid gap-2 sm:grid-cols-3">
+          {INSIGHT_MODES.map((m) => {
+            const active = form.insightAgent.mode === m.value;
+            return (
+              <button
+                key={m.value}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setForm({ ...form, insightAgent: { ...form.insightAgent, mode: m.value } })}
+                className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                  active ? 'border-brand-400 bg-brand-50' : 'border-slate-200 bg-white hover:border-slate-300'
+                }`}
+              >
+                <span className={`block text-xs font-semibold ${active ? 'text-brand-700' : 'text-slate-700'}`}>
+                  {m.label}
+                </span>
+                <span className="mt-0.5 block text-[11px] leading-4 text-slate-500">{m.desc}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* 连接配置 */}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-slate-600">协议</span>
+            <select
+              className="input h-10"
+              value={form.insightAgent.protocol}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  insightAgent: { ...form.insightAgent, protocol: e.target.value as InsightAgentSettings['protocol'] },
+                })
+              }
+            >
+              <option value="openai">openai(兼容接口)</option>
+              <option value="anthropic">anthropic</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-slate-600">单次调用超时(ms)</span>
+            <input
+              type="number"
+              min={2000}
+              max={30000}
+              step={500}
+              className="input metric-num h-10"
+              value={form.insightAgent.timeoutMs}
+              onChange={(e) =>
+                setForm({ ...form, insightAgent: { ...form.insightAgent, timeoutMs: Number(e.target.value) } })
+              }
+            />
+          </label>
+          <label className="block sm:col-span-2">
+            <span className="mb-1 block text-xs font-medium text-slate-600">Endpoint</span>
+            <input
+              type="text"
+              className="input h-10"
+              placeholder="https://api.example.com/v1(须 https;openai 兼容填到 /v1,anthropic 填网关基址)"
+              value={form.insightAgent.endpoint}
+              onChange={(e) => setForm({ ...form, insightAgent: { ...form.insightAgent, endpoint: e.target.value } })}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-slate-600">API Key</span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              className="input h-10"
+              placeholder="留空保留原 key"
+              value={form.insightAgent.apiKey}
+              onChange={(e) => {
+                setInsightKeyDirty(true);
+                setForm({ ...form, insightAgent: { ...form.insightAgent, apiKey: e.target.value } });
+              }}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-slate-600">Model</span>
+            <input
+              type="text"
+              className="input h-10"
+              placeholder="如 gpt-4o-mini"
+              value={form.insightAgent.model}
+              onChange={(e) => setForm({ ...form, insightAgent: { ...form.insightAgent, model: e.target.value } })}
+            />
+          </label>
+        </div>
+
+        {insightNeedsConfig && (
+          <p className="mt-3 text-xs text-warn">
+            已启用 {form.insightAgent.mode} 模式:endpoint / apiKey / model 应填全,否则保存时后端会拒绝。
+          </p>
+        )}
+
+        {/* 连通性测试(服务端用已保存配置,无需传参) */}
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button className="btn-soft h-9 px-4 text-xs disabled:opacity-50" disabled={testing} onClick={() => void testInsight()}>
+            {testing ? '测试中…' : '测试连接'}
+          </button>
+          {testResult &&
+            (testResult.ok ? (
+              <span className="text-xs text-good">
+                连接正常 · {testResult.latencyMs}ms · {testResult.model || '—'}
+              </span>
+            ) : (
+              <span className="text-xs text-bad">失败:{testResult.error ?? '未知错误'}</span>
+            ))}
+          <span className="text-[10px] text-slate-400">使用已保存的配置测试;未保存的改动需先保存</span>
         </div>
       </section>
 

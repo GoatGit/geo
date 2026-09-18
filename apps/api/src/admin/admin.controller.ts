@@ -20,12 +20,16 @@ import {
   WORKER_HEARTBEAT_STALE_MS,
   breakerManualKey,
   breakerTrippedKey,
+  insightStatKey,
   loginCancelKey,
   loginCmdKey,
   loginFrameKey,
   loginStatusKey,
+  type InsightAgentSettings,
+  type InsightStatEvent,
   type LoginRequest,
 } from '@geo/shared';
+import { maskKey, testConnection } from '@geo/insight-agent';
 import { loadPlatformSettings, savePlatformSettings } from '@geo/db';
 import { currentAccount } from '../common/auth';
 import { DB, REDIS } from '../common/infra.module';
@@ -36,6 +40,46 @@ import { UpdateSettingsDto } from './admin.dto';
 /** db.execute(QueryResult) 取行:drizzle 未知行类型的统一收口。 */
 function rowsOf<T>(res: unknown): T[] {
   return (res as { rows: T[] }).rows;
+}
+
+/** admin 读取侧出口:apiKey 永远掩码,完整 key 不回传前端(docs/09 §4.3)。 */
+export function maskInsightAgent(s: InsightAgentSettings): InsightAgentSettings {
+  return { ...s, apiKey: maskKey(s.apiKey) };
+}
+
+/**
+ * insightAgent 补丁合并(纯函数,便于单测):
+ * apiKey 传空或传掩码形态 = 保留原值;endpoint 强制 https;
+ * 启用 shadow/llm 时三项连接配置必须齐备。
+ */
+export function resolveInsightAgentPatch(
+  current: InsightAgentSettings,
+  incoming: Partial<InsightAgentSettings>,
+): InsightAgentSettings {
+  const merged: InsightAgentSettings = { ...current };
+  if (typeof incoming.enabled === 'boolean') merged.enabled = incoming.enabled;
+  if (incoming.mode === 'rules' || incoming.mode === 'shadow' || incoming.mode === 'llm') merged.mode = incoming.mode;
+  if (incoming.protocol === 'openai' || incoming.protocol === 'anthropic') merged.protocol = incoming.protocol;
+  if (typeof incoming.endpoint === 'string') {
+    const ep = incoming.endpoint.trim();
+    if (ep && !/^https:\/\//i.test(ep)) {
+      throw new HttpException('Insight Agent endpoint 必须 https://', HttpStatus.BAD_REQUEST);
+    }
+    merged.endpoint = ep;
+  }
+  if (typeof incoming.model === 'string') merged.model = incoming.model.trim();
+  if (typeof incoming.timeoutMs === 'number' && Number.isFinite(incoming.timeoutMs)) {
+    merged.timeoutMs = Math.min(Math.max(Math.floor(incoming.timeoutMs), 2_000), 30_000);
+  }
+  if (typeof incoming.apiKey === 'string') {
+    const key = incoming.apiKey.trim();
+    // 空 = 未修改;掩码回显形态 = 未修改(前端整体回传场景的纵深防御)
+    if (key && !key.startsWith('***')) merged.apiKey = key;
+  }
+  if (merged.enabled && merged.mode !== 'rules' && (!merged.endpoint || !merged.apiKey || !merged.model)) {
+    throw new HttpException('Insight Agent 启用 shadow/llm 模式需要完整的 endpoint/apiKey/model', HttpStatus.BAD_REQUEST);
+  }
+  return merged;
 }
 
 /**
@@ -213,6 +257,16 @@ export class AdminController implements OnModuleDestroy {
 
     const settings = await loadPlatformSettings(this.db);
 
+    // Insight Agent 观测(docs/09 §10):模式 + 今日调用/降级计数(Redis 日窗,worker 侧写入)
+    const insightStatEvents: InsightStatEvent[] = ['calls', 'fallback', 'invalid_partial', 'shadow_disagree'];
+    let insightToday: Record<string, number> = {};
+    try {
+      const values = await this.redis.mget(...insightStatEvents.map((e) => insightStatKey(e)));
+      insightToday = Object.fromEntries(insightStatEvents.map((e, i) => [e, Number(values[i] ?? 0)]));
+    } catch {
+      insightToday = {};
+    }
+
     return {
       infra: { dbOk, redisOk, worker },
       queueCounts,
@@ -222,13 +276,20 @@ export class AdminController implements OnModuleDestroy {
       engineHealth,
       recentRuns: recentRunRows,
       settings,
+      insight: {
+        enabled: settings.insightAgent.enabled,
+        mode: settings.insightAgent.mode,
+        model: settings.insightAgent.model,
+        today: insightToday,
+      },
       asOf: new Date().toISOString(),
     };
   }
 
   @Get('settings')
   async getSettings() {
-    return { settings: await loadPlatformSettings(this.db) };
+    const settings = await loadPlatformSettings(this.db);
+    return { settings: { ...settings, insightAgent: maskInsightAgent(settings.insightAgent) } };
   }
 
   @Put('settings')
@@ -244,8 +305,20 @@ export class AdminController implements OnModuleDestroy {
       }
       patch.proxyPool = { enabled: Boolean(dto.proxyPool.enabled), key };
     }
+    if (dto.insightAgent !== undefined) {
+      // 基于库内当前值合并(apiKey 空/掩码 = 保留原值),而非整包覆盖
+      const current = (await loadPlatformSettings(this.db)).insightAgent;
+      patch.insightAgent = resolveInsightAgentPatch(current, dto.insightAgent);
+    }
     const settings = await savePlatformSettings(this.db, patch, currentAccount(req).accountId);
-    return { settings };
+    return { settings: { ...settings, insightAgent: maskInsightAgent(settings.insightAgent) } };
+  }
+
+  /** Insight Agent 连通性测试(docs/09 §4.3):用已保存配置发一次最小补全,不入库。 */
+  @Post('insight-agent/test')
+  async testInsightAgent() {
+    const settings = (await loadPlatformSettings(this.db)).insightAgent;
+    return await testConnection(settings);
   }
 
   /** 代理池实时状态:配置 + 通道/在用租约/白名单(直连青果接口;Key 未配置时仅返回配置)。 */

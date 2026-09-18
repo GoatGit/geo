@@ -2,18 +2,19 @@ import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Redis } from 'ioredis';
-import { brands, collectionPlans, monitoringQuestions, recognitionEntries, subscriptions } from '@geo/db';
+import { brands, collectionPlans, loadPlatformSettings, monitoringQuestions, recognitionEntries, subscriptions } from '@geo/db';
 import { PLAN_LIMITS, type PlanTier, type QuestionType } from '@geo/shared';
+import { InsightAgent } from '@geo/insight-agent';
 import { DB, REDIS } from '../common/infra.module';
 
-/** 问题分类与拓写的确定性基线(生产叠加 LLM,接口不变,docs/01 §3.2)。 */
+/** 问题分类与拓写的确定性基线(Insight Agent 的降级路径,docs/09 §1.2)。 */
 export function classifyQuestion(text: string): QuestionType {
   const t = text.toLowerCase();
   const reputationWords = ['口碑', '质量', '评价', '怎么样', '吐槽', '投诉', '售后', '服务', '靠谱', '踩坑'];
   return reputationWords.some((w) => t.includes(w)) ? 'reputation' : 'ranking';
 }
 
-/** AI 拓写:短词 → 自然问法;保留原文与改写文两份(docs/01 §3.2)。 */
+/** AI 拓写:短词 → 自然问法;保留原文与改写文两份(docs/01 §3.2)。Insight Agent 的降级路径。 */
 export function expandQuestion(text: string, brandName: string): string {
   const t = text.trim();
   if (/[?？]$/.test(t) && t.length >= 14) return t;
@@ -67,8 +68,38 @@ export class QuestionsService {
 
     const used = { ranking: await this.used(input.brandId, 'ranking'), reputation: await this.used(input.brandId, 'reputation') };
 
+    // Insight Agent 判定(docs/09 §5 T3/T4):用户同步路径,预算 min(timeoutMs, 3s);
+    // 未启用/超时/失败自动回落规则基线(classifyQuestion/expandQuestion),整批并行发起
+    const insightCfg = (await loadPlatformSettings(this.db)).insightAgent;
+    const agent = new InsightAgent({
+      settings: insightCfg,
+      onEvent: (e) => {
+        if (e.kind === 'fallback') console.warn(`[questions] insight ${e.task} 降级规则: ${e.error ?? ''}`);
+      },
+    });
+    const syncTimeout = Math.min(insightCfg.timeoutMs, 3_000);
+    const llmTypes = new Map<object, QuestionType>();
+    const llmExpansions = new Map<object, string>();
+    if (insightCfg.enabled) {
+      const year = new Date().getFullYear();
+      await Promise.all([
+        Promise.all(
+          input.items.map(async (item) => {
+            const r = await agent.classify(item.text, syncTimeout);
+            if (r) llmTypes.set(item, r.type);
+          }),
+        ),
+        Promise.all(
+          input.items.map(async (item) => {
+            const r = await agent.expand(item.text, brandName, year, syncTimeout);
+            if (r) llmExpansions.set(item, r.question);
+          }),
+        ),
+      ]).catch(() => undefined); // 兜底已在函数级 null 化,这里只防组合 Promise 异常冒泡
+    }
+
     for (const item of input.items) {
-      const type = item.type ?? classifyQuestion(item.text);
+      const type = item.type ?? llmTypes.get(item) ?? classifyQuestion(item.text);
       const limit = type === 'ranking' ? limits.rankingQuota : limits.reputationQuota;
       if (used[type] >= limit) {
         rejected.push({
@@ -84,7 +115,7 @@ export class QuestionsService {
             brandId: input.brandId,
             type,
             textRaw: item.text,
-            textExpanded: expandQuestion(item.text, brandName),
+            textExpanded: llmExpansions.get(item) ?? expandQuestion(item.text, brandName),
           })
           .returning()
       )[0]!;

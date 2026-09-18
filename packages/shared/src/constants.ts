@@ -194,6 +194,13 @@ export const PLATFORM_SETTING_KEYS = [
 ] as const;
 export type PlatformSettingKey = (typeof PLATFORM_SETTING_KEYS)[number];
 
+/** Insight Agent 调用统计(docs/09 §10):Redis 日窗计数,worker 写 / admin 总览读,前缀单一事实源。 */
+export const INSIGHT_STAT_PREFIX = 'insight:stat:';
+export type InsightStatEvent = 'calls' | 'fallback' | 'invalid_partial' | 'shadow_disagree';
+export function insightStatKey(event: InsightStatEvent, date = new Date()): string {
+  return `${INSIGHT_STAT_PREFIX}${event}:${date.toISOString().slice(0, 10).replace(/-/g, '')}`;
+}
+
 /** 深合并存储值与默认值,并做类型与边界净化(脏数据不致命,回退默认)。 */
 export function mergePlatformSettings(stored: Partial<Record<string, unknown>> | Record<string, unknown>[]): PlatformSettings {
   const byKey = new Map<string, unknown>();
