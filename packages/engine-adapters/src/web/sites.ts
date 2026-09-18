@@ -28,6 +28,12 @@ export interface EngineSiteConfig {
   requireLoginCookie?: boolean;
   /** 游客可提问的站点置 true:未登录不阻断采集,降级为游客态采集(如豆包风控拒绝云端登录) */
   guestAllowed?: boolean;
+  /** 网络引用收割的响应白名单(正则字符串):只扫描携带当前回答来源的接口,
+   *  防止会话列表/历史接口把旧问题的引用串进当前 run;缺省 = 不启用收割。 */
+  netCitationAllow?: string[];
+  /** 有效回答最小字符数:低于此值按失败收口(挡风控拦截时的"猜你想问"推荐位),
+   *  0 = 不设门槛;仅对非超时答案生效。 */
+  minAnswerChars?: number;
   /** 回答文本的站点噪声行(整行匹配移除,如工具调用状态行);正则字符串 */
   answerNoisePatterns: string[];
   /** 回答文本稳定窗口(docs/04 §2.1 完成判定三条件之二) */
@@ -64,6 +70,10 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     stopSelectors: ['[data-testid="stop_button"]', 'button:has-text("停止")'],
     // 登录 Cookie 实测:字节跳动 passport 登录后新增 sessionid/sid_tt
     loggedInCookieHints: ['sessionid', 'sid_tt'],
+    // 引用来源在 chat/completion SSE 流里(正文 DOM 无 <a> 链接,实测 2026-09)
+    netCitationAllow: ['chat/completion', 'alice/search'],
+    // 实测:风控软拦截时唯一新增 DOM 内容是"猜你想问"推荐位(~80 字符)
+    minAnswerChars: 120,
     // 实测:游客态可正常提问;且豆包风控拒绝云端环境的扫码登录,游客采集为兜底
     guestAllowed: true,
     answerNoisePatterns: [],
@@ -132,6 +142,9 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     inputSelectors: ['[contenteditable="true"]', 'textarea'],
     // 游客模式无可见"登录"元素且输入框可用:人工登录成功必须以腾讯登录态 Cookie 为准
     loggedInCookieHints: ['hy_user', 'hy_token'],
+    // 引用来源在会话详情接口与 chat SSE 流里(正文/抽屉 DOM 均无 <a> 链接,实测 2026-09)
+    netCitationAllow: ['conversation/v1/detail', '/api/chat/'],
+    minAnswerChars: 120,
     requireLoginCookie: true,
     submitSelectors: ['button:has-text("发送")', 'button[class*="send"]'],
     // 实测(2026-09,登录态):回答被拆成数十个 markdown 小块,须取整轮对话容器

@@ -133,6 +133,34 @@ export const CREDIT_COSTS = {
 export type AccountRole = 'user' | 'admin';
 
 /**
+ * Insight Agent 配置(docs/09):LLM 判定层。
+ * apiKey 明文存储(与 proxyPool.key 同先例);admin 读取侧掩码,写入"空 = 保留原值"。
+ */
+export interface InsightAgentSettings {
+  /** 总开关:false 时全量走规则引擎(现状行为),不发起任何 LLM 调用 */
+  enabled: boolean;
+  /** rules=现状;shadow=口径走规则、LLM 结果入 query_runs.meta.insightShadow 对比;llm=LLM 判定、失败回落规则 */
+  mode: 'rules' | 'shadow' | 'llm';
+  protocol: 'openai' | 'anthropic';
+  /** https 端点(openai 兼容含 /v1 基址;anthropic 为网关基址) */
+  endpoint: string;
+  apiKey: string;
+  model: string;
+  /** 单次调用超时;API 同步路径(分类/拓写)另受 3s 上限约束 */
+  timeoutMs: number;
+}
+
+export const DEFAULT_INSIGHT_AGENT_SETTINGS: InsightAgentSettings = {
+  enabled: false,
+  mode: 'rules',
+  protocol: 'openai',
+  endpoint: '',
+  apiKey: '',
+  model: '',
+  timeoutMs: 8000,
+};
+
+/**
  * 平台级配置:管理后台的"全局旋钮"。持久化在 platform_settings(key-value),
  * 未写入的键取 DEFAULT_PLATFORM_SETTINGS —— 新增键只需扩展本接口与默认值。
  */
@@ -145,6 +173,8 @@ export interface PlatformSettings {
   engineDailyCaps: Record<string, number>;
   /** 代理池(青果网络长效代理,docs/07 §13 闸门 #2):登录/采集共用稳定出口 IP */
   proxyPool: { enabled: boolean; key: string };
+  /** Insight Agent(docs/09):LLM 判定层(识别/口碑/分类/拓写),规则引擎为降级路径 */
+  insightAgent: InsightAgentSettings;
 }
 
 export const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
@@ -152,9 +182,16 @@ export const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
   globalDailyRunCap: 0,
   engineDailyCaps: {},
   proxyPool: { enabled: false, key: '' },
+  insightAgent: DEFAULT_INSIGHT_AGENT_SETTINGS,
 };
 
-export const PLATFORM_SETTING_KEYS = ['schedulerEnabled', 'globalDailyRunCap', 'engineDailyCaps', 'proxyPool'] as const;
+export const PLATFORM_SETTING_KEYS = [
+  'schedulerEnabled',
+  'globalDailyRunCap',
+  'engineDailyCaps',
+  'proxyPool',
+  'insightAgent',
+] as const;
 export type PlatformSettingKey = (typeof PLATFORM_SETTING_KEYS)[number];
 
 /** 深合并存储值与默认值,并做类型与边界净化(脏数据不致命,回退默认)。 */
@@ -194,6 +231,24 @@ export function mergePlatformSettings(stored: Partial<Record<string, unknown>> |
         return { enabled: bool(r.enabled, false), key: typeof r.key === 'string' ? r.key : '' };
       }
       return { enabled: false, key: '' };
+    })(),
+    insightAgent: (() => {
+      const raw = byKey.get('insightAgent');
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ...DEFAULT_INSIGHT_AGENT_SETTINGS };
+      const r = raw as Record<string, unknown>;
+      // endpoint 强制 https(SSRF 面收敛,docs/09 §9);timeout 限幅 2s..30s
+      const endpoint =
+        typeof r.endpoint === 'string' && /^https:\/\//i.test(r.endpoint.trim()) ? r.endpoint.trim() : '';
+      const timeout = num(r.timeoutMs, DEFAULT_INSIGHT_AGENT_SETTINGS.timeoutMs);
+      return {
+        enabled: bool(r.enabled, false),
+        mode: r.mode === 'shadow' || r.mode === 'llm' ? r.mode : 'rules',
+        protocol: r.protocol === 'anthropic' ? 'anthropic' : 'openai',
+        endpoint,
+        apiKey: typeof r.apiKey === 'string' ? r.apiKey : '',
+        model: typeof r.model === 'string' ? r.model.trim() : '',
+        timeoutMs: Math.min(Math.max(timeout, 2_000), 30_000),
+      };
     })(),
   };
 }

@@ -28,12 +28,30 @@ await ctx.addCookies(profile.cookies);
 const page = ctx.pages()[0] || (await ctx.newPage());
 
 const adapter = new DomWebAdapter(engine);
+// 并行对照捕获(与适配器内置收割器独立,用于诊断 netCites=0)
+const shadow = [];
+page.on('response', (resp) => {
+  const ct = resp.headers()['content-type'] || '';
+  if (!/json|event-stream|text\/plain/i.test(ct)) return;
+  const entry = { url: resp.url().slice(0, 200), ct };
+  shadow.push(entry);
+  resp.body().then((buf) => {
+    entry.size = buf.length;
+    if (/event-stream|chat\/completion|alice\/search|conversation\/v1\/detail|api\/chat\/|conversation\/info|batch_get/i.test(resp.url()) || /event-stream/i.test(ct)) {
+      const name = resp.url().replace(/[^a-z0-9]+/gi, '_').slice(0, 60);
+      writeFileSync(`/tmp/sse-${name}.txt`, buf.subarray(0, 2_000_000));
+      entry.dumped = `/tmp/sse-${name}.txt`;
+    }
+  }).catch(() => {});
+});
 const t0 = Date.now();
 const result = await adapter.ask({ page, profileKey: `probe-${profile.id}` }, question, { timeoutMs: 150_000 });
 console.log(`[probe] ask done in ${Math.round((Date.now() - t0) / 1000)}s`);
 console.log('status:', result.status);
 console.log('engineMeta:', JSON.stringify(result.engineMeta));
 console.log('citations:', result.citations.length, JSON.stringify(result.citations.slice(0, 5), null, 1));
+console.log('shadow captured:', shadow.length);
+writeFileSync(`/tmp/shadow-${engine}.json`, JSON.stringify(shadow, null, 1));
 console.log('answerText head:', (result.answerText || '').slice(0, 200).replace(/\n/g, ' '));
 if (result.rawHtml) {
   writeFileSync(`/tmp/probe-${engine}-raw.html`, result.rawHtml);
@@ -41,6 +59,16 @@ if (result.rawHtml) {
 }
 
 // ask 后原地点开引用抽屉(元宝:引用源在折叠抽屉,DOM 默认无链接)
+// 先关促销弹窗(会挡住点击)
+for (const sel of ['[class*="t-dialog"] [class*="close"]', '.t-icon-close', '[aria-label="关闭"]', 'button:has-text("关闭")']) {
+  const el = page.locator(sel).first();
+  if (await el.isVisible({ timeout: 600 }).catch(() => false)) {
+    await el.click().catch(() => {});
+    console.log('[drawer] dismissed modal via', sel);
+    await page.waitForTimeout(1000);
+    break;
+  }
+}
 const toolSels = ['[data-toolbar-type="citation"]', '#search-guide-tool', '[aria-label*="篇资料"]', '[class*="reference"]', '[class*="source-list"]'];
 let clicked = false;
 for (const sel of toolSels) {

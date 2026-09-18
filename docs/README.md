@@ -15,6 +15,7 @@
 | 6 | [路线图、成本与风险](./06-roadmap-risk.md) | 里程碑、成本模型、合规与风险 | 全员 |
 | 7 | [技术实施方案](./07-tech-plan-nodejs-aliyun.md) | Node.js + PostgreSQL；SAE 部署（web/worker）；AgentBay Browser Use 镜像 + CDP 采集 | 后端 / 架构 / 运维 |
 | 8 | [生产环境接线手册](./08-production-wiring.md) | 生产接线/SAE 部署/短信与证书：生产拓扑、域名与 HTTPS、环境变量与凭据清单 | 后端 / 运维 |
+| 9 | [Insight Agent:LLM 判定层方案](./09-insight-agent.md) | 品牌识别/口碑/分类/拓写替换规则引擎:双协议配置(管理后台)、降级矩阵、影子灰度、口径与审计边界 | 后端 / 产品 |
 
 ## 调研存档（reference-only，禁止复制文案/素材）
 
@@ -43,4 +44,5 @@
 
 ## 修订记录
 
+- 2026-09-18：新增 09 Insight Agent 方案(判定层 LLM 化,规则降级;配置入管理后台 platform_settings;rules/shadow/llm 三模式与发布门禁)。
 - 2026-09-14：新增 07 技术实施方案 v2（SAE + AgentBay Browser Use CDP）；02 补综合名次口径（§1.3）、漏斗嵌套转化口径、阈值 P75 方法论、印象词窗口；01 补功能门控矩阵与报告证据归档；05 补账号/字典/抽检/口径版本表与事实表修正；06 成本模型按 v2 部署形态重算、专业版取消每日 2 轮、补用户侧合规；00/03/04 与 v2 形态对齐；research 03 补 A12。

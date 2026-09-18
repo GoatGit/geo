@@ -60,9 +60,8 @@ const NAV: NavGroup[] = [
     label: '配置',
     icon: <IconConfig />,
     items: [
-      { href: '/config/brand', label: '品牌资料', icon: <IconLogo width={15} height={15} /> },
+      { href: '/config/brand', label: '品牌资产', icon: <IconLogo width={15} height={15} /> },
       { href: '/config/questions', label: '监控问题', icon: <IconList /> },
-      { href: '/config/recognition', label: '识别口径', icon: <IconShield /> },
       { href: '/config/collection', label: '采集状态', icon: <IconPulse /> },
     ],
   },

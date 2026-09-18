@@ -19,6 +19,7 @@
     "@geo/db": "workspace:*",
     "@geo/engine-adapters": "workspace:*",
     "@geo/evidence": "workspace:*",
+    "@geo/insight-agent": "workspace:*",
     "@geo/metrics": "workspace:*",
     "@geo/shared": "workspace:*",
     "bullmq": "^5.28.0",

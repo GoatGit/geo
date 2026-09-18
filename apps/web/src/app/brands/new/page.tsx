@@ -86,7 +86,7 @@ export default function NewBrandPage() {
             >
               下一步:添加监控问题 →
             </button>
-            <button className="rounded border px-4 py-2 text-sm" onClick={() => router.push('/config/recognition')}>
+            <button className="rounded border px-4 py-2 text-sm" onClick={() => router.push('/config/brand')}>
               先核对识别口径
             </button>
           </div>

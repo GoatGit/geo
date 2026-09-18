@@ -55,8 +55,41 @@ describe('平台配置净化(管理后台 ↔ 调度器契约)', () => {
     expect([...PLATFORM_SETTING_KEYS].sort()).toEqual([
       'engineDailyCaps',
       'globalDailyRunCap',
+      'insightAgent',
       'proxyPool',
       'schedulerEnabled',
     ]);
+  });
+
+  it('insightAgent 净化:非法形态回默认,endpoint 强制 https,timeout 限幅', () => {
+    expect(mergePlatformSettings([{ key: 'insightAgent', value: 'oops' }]).insightAgent).toEqual({
+      enabled: false,
+      mode: 'rules',
+      protocol: 'openai',
+      endpoint: '',
+      apiKey: '',
+      model: '',
+      timeoutMs: 8000,
+    });
+    const s = mergePlatformSettings([
+      {
+        key: 'insightAgent',
+        value: {
+          enabled: 'true',
+          mode: 'llm',
+          protocol: 'anthropic',
+          endpoint: 'http://insecure.example.com/v1', // 非 https 被拒
+          apiKey: 'sk-test',
+          model: ' claude-sonnet-x ',
+          timeoutMs: 99_000, // 超上限
+        },
+      },
+    ]).insightAgent;
+    expect(s.enabled).toBe(true);
+    expect(s.mode).toBe('llm');
+    expect(s.protocol).toBe('anthropic');
+    expect(s.endpoint).toBe(''); // http 被拒
+    expect(s.model).toBe('claude-sonnet-x');
+    expect(s.timeoutMs).toBe(30_000);
   });
 });

@@ -13,6 +13,7 @@
     "@geo/db": "workspace:*",
     "@geo/engine-adapters": "workspace:*",
     "@geo/evidence": "workspace:*",
+    "@geo/insight-agent": "workspace:*",
     "@geo/metrics": "workspace:*",
     "@geo/shared": "workspace:*",
     "@nestjs/common": "^10.4.6",

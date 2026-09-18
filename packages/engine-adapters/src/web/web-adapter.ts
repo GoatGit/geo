@@ -2,7 +2,7 @@ import type { Page, Locator } from 'playwright-core';
 
 import type { AskStatus, EngineId, RawCitation } from '@geo/shared';
 import type { AskOptions, AskResult, EngineAdapter, SessionContext } from '../types';
-import { siteConfigOf, type EngineSiteConfig } from './sites';
+import { ENGINE_SITES, siteConfigOf, type EngineSiteConfig } from './sites';
 
 export type { EngineSiteConfig } from './sites';
 export { ENGINE_SITES, siteConfigOf } from './sites';
@@ -119,6 +119,9 @@ export class DomWebAdapter implements EngineAdapter {
       return this.fail('browser 模式需要 SessionHandle.page(connectOverCDP 或本地代理注入)', queuedAt);
     }
     const timeoutMs = opts?.timeoutMs ?? 120_000;
+    // 网络引用收割器(docs/04 §2.1 补充通路):挂到整个 ask 生命周期,
+    // 从 JSON/SSE 响应载荷中提取引用来源(元宝/豆包正文不渲染引用链接,实测教训)
+    const netHarvest = attachNetCitationHarvester(page, this.engine);
     try {
       await page.goto(this.site.chatUrl, {
         waitUntil: 'domcontentloaded',
@@ -191,6 +194,12 @@ export class DomWebAdapter implements EngineAdapter {
       if (!cleaned) {
         return this.fail(timedOut ? '完成判定超时且无答案文本' : '回答容器为空(页面改版?需校准 answerSelectors)', queuedAt);
       }
+      // 最短回答门槛(豆包实测:风控软拦截时"猜你想问"推荐位是唯一新增 DOM 内容,
+      // 会被基线门控当回答收录;真实回答远长于此,按失败收口可被重采)
+      const minChars = this.site.minAnswerChars ?? 0;
+      if (!timedOut && minChars > 0 && cleaned.length < minChars) {
+        return this.fail(`回答仅 ${cleaned.length} 字符,低于最小门槛 ${minChars}(疑似推荐位/风控拦截)`, queuedAt);
+      }
       // 回声防污染(docs/04 §2.1):回答≈问题原文 = 输入回显被当回答(游客态被静默拦截的实测形态)
       if (isEchoOfQuestion(cleaned, question)) {
         return {
@@ -215,16 +224,38 @@ export class DomWebAdapter implements EngineAdapter {
         .then((html) => (html.length > 512 * 1024 ? Buffer.from(html.slice(0, 512 * 1024)).toString('utf8') : html))
         .catch(() => null);
 
+      const domCitations = await this.extractCitations(page, main);
+      // 网络收割收尾:轮询等待来源落地(豆包 SSE 带心跳,流关闭可能晚于答案稳定;
+      // 元宝 detail 接口也在答案后 ~1-2s 才到)。拿到≥3条早退,最长 NET_CITATION_MAX_WAIT。
+      if (this.site.netCitationAllow?.length) {
+        const deadline = Date.now() + NET_CITATION_MAX_WAIT;
+        while (Date.now() < deadline && netHarvest.citations.length < 3) {
+          await page.waitForTimeout(1_000);
+        }
+      }
+      const netCitations = netHarvest.citations;
+      const merged: RawCitation[] = [];
+      const seenUrls = new Set<string>();
+      for (const c of [...domCitations, ...netCitations]) {
+        const key = c.url.replace(/[?#].*$/, '');
+        if (seenUrls.has(key)) continue;
+        seenUrls.add(key);
+        merged.push(c);
+        if (merged.length >= MAX_CITATIONS) break;
+      }
+
       return {
         status: 'ok_with_answer' as AskStatus,
         answerText: cleaned,
         rawHtml,
-        citations: await this.extractCitations(page, main),
+        citations: merged,
         timing: this.timing(queuedAt),
-        engineMeta: { mode: 'dom', profileKey: ctx.profileKey, timedOut, guest: asGuest },
+        engineMeta: { mode: 'dom', profileKey: ctx.profileKey, timedOut, guest: asGuest, netCites: netCitations.length },
       };
     } catch (err) {
       return this.fail((err as Error).message, queuedAt);
+    } finally {
+      netHarvest.detach();
     }
   }
 
@@ -486,4 +517,164 @@ function safeHost(url: string): string | null {
 
 function isEngineHost(host: string): boolean {
   return /doubao\.com|deepseek\.com|baidu\.com|aliyun\.com|tongyi\.com|tencent\.com|qq\.com/.test(host);
+}
+
+// ============ 网络引用收割(docs/04 §2.1 补充通路) ============
+// 元宝/豆包实测:引用来源只出现在 API/SSE 载荷(文档对象带 url+title 字段),
+// 页面 DOM 全程无 <a href>。收割器与站点解耦:对载荷做扁平 JSON 对象正则,
+// 不绑定具体接口路径/结构,引擎改版只要字段名不换就持续有效。
+
+const NET_CITATION_GRACE_MS = 2_500;
+const NET_CITATION_MAX_WAIT = 12_000;
+const MAX_CITATIONS = 10;
+const MAX_NET_CITATIONS = 15;
+const MAX_SNIFF_BYTES = 1_500_000;
+
+/** 载荷级噪声:遥测/监控接口直接整包跳过(省文本读取开销)。 */
+const RESPONSE_URL_SKIP = /monitor|beacon|telemetry|analytics|\/list\?|webid|tobid|abtest|settings\/v3|token/i;
+/** 引用对象里可作来源 URL 的字段名(容忍 JSON-in-JSON 的 \" 转义残留)。 */
+const NET_URL_KEY = /\\?"(?:url|web_url|jump_url|jumpUrl|open_url|link)\\?"\s*:\s*\\?"((?:https?)[^"\\]+)\\?"/i;
+/** 站内资产/CDN(域名后缀匹配,mp.weixin.qq.com 等真实内容源不受影响)。 */
+const NET_DENY_HOST_SUFFIX = [
+  'bytedance.com', 'zijieapi.com', 'douyinpic.com', 'douyinvod.com', 'snssdk.com', 'feishucdn.com',
+  'byteimg.com', 'bytetos.com', 'pstatp.com', 'zjcdn.com', 'yhgfb-cn-static.com', 'toutiaostatic.com',
+  'bdstatic.com', 'bdimg.com',
+  'myqcloud.com', 'beacon.qq.com', 'aida.qq.com', 'lizhicdn.search.qq.com', 'cdn-yb.icon.qq.com',
+  'wxqcloud.qq.com.cn', 'wuying.com', 'aliyuncs.com',
+];
+const NET_ASSET_EXT = /\.(js|css|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|mp4|mp3|m3u8|ts|zip)([?#].*)?$/i;
+
+interface NetCitationHarvester {
+  citations: RawCitation[];
+  detach(): void;
+}
+
+/** 在 ask 期间挂 response 监听,从 JSON/SSE 载荷提取引用来源;ask 结束必须 detach()。
+ *  仅扫描 site.netCitationAllow 命中的接口(会话历史接口可能携带旧问题引用,必须隔离)。 */
+function attachNetCitationHarvester(page: Page, engine: EngineId): NetCitationHarvester {
+  const citations: RawCitation[] = [];
+  const seen = new Set<string>();
+  const allow = (ENGINE_SITES[engine]?.netCitationAllow ?? []).map((p) => new RegExp(p));
+  const chatHost = safeHost(ENGINE_SITES[engine]?.chatUrl ?? '') ?? '';
+  if (allow.length === 0) return { citations, detach: () => {} };
+  const onResponse = (resp: { url(): string; headers(): Record<string, string>; body(): Promise<Buffer> }) => {
+    try {
+      const url = resp.url();
+      if (!allow.some((re) => re.test(url))) return;
+      const ct = resp.headers()['content-type'] ?? '';
+      if (!/json|event-stream|text\/plain/i.test(ct)) return;
+      if (RESPONSE_URL_SKIP.test(url)) return;
+      if (citations.length >= MAX_NET_CITATIONS) return;
+      // 不用 text():SSE 响应常缺 charset 声明,按默认 latin1 解码会把 UTF-8 中文变乱码
+      void resp
+        .body()
+        .then((buf) => harvestCitationsFromPayload(buf.subarray(0, MAX_SNIFF_BYTES).toString('utf8'), citations, seen, chatHost))
+        .catch(() => undefined);
+    } catch {
+      // 单个响应失败不影响整体收割
+    }
+  };
+  page.on('response', onResponse as never);
+  return {
+    citations,
+    detach: () => {
+      try {
+        page.off('response', onResponse as never);
+      } catch {
+        // 页面已关闭场景
+      }
+    },
+  };
+}
+
+/** 从载荷提取引用对:JSON 直接树遍历(精确);SSE/文本用 URL-邻域窗口配对(兜底)。 */
+function harvestCitationsFromPayload(
+  body: string,
+  out: RawCitation[],
+  seen: Set<string>,
+  chatHost: string,
+): void {
+  if (!body || out.length >= MAX_NET_CITATIONS) return;
+  try {
+    const parsed = JSON.parse(body);
+    walkJsonForCitations(parsed, out, seen, chatHost);
+    return;
+  } catch {
+    // 非完整 JSON(SSE 流/截断):走窗口兜底
+  }
+  // JSON-in-JSON(SSE data 行内嵌转义)先还原引号,再统一 unicode 转义的 &
+  const text = body.replace(/\\"/g, '"').replace(/\\u0026/g, '&').replace(/\\\//g, '/');
+  for (const m of text.matchAll(new RegExp(NET_URL_KEY.source, 'gi'))) {
+    if (out.length >= MAX_NET_CITATIONS) return;
+    const window = text.slice(Math.max(0, m.index! - 300), (m.index ?? 0) + m[0].length + 300);
+    pushNetCitation(m[1], window, out, seen, chatHost);
+  }
+}
+
+/** 递归遍历已解析的 JSON,收集"对象里 url 类字段指向外部 http 页面"的引用对。 */
+function walkJsonForCitations(node: unknown, out: RawCitation[], seen: Set<string>, chatHost: string): void {
+  if (out.length >= MAX_NET_CITATIONS) return;
+  if (Array.isArray(node)) {
+    for (const item of node) walkJsonForCitations(item, out, seen, chatHost);
+    return;
+  }
+  if (!node || typeof node !== 'object') return;
+  const obj = node as Record<string, unknown>;
+  for (const key of ['url', 'web_url', 'jump_url', 'jumpUrl', 'open_url', 'link']) {
+    const v = obj[key];
+    if (typeof v === 'string' && /^https?:\/\//.test(v)) {
+      pushNetCitation(v, obj as Record<string, string>, out, seen, chatHost);
+      break;
+    }
+  }
+  for (const v of Object.values(obj)) walkJsonForCitations(v, out, seen, chatHost);
+}
+
+/** 校验并收录一条候选引用;window 用于 SSE 兜底路径上提取相邻 title。 */
+function pushNetCitation(
+  rawUrl: string,
+  window: Record<string, unknown> | string,
+  out: RawCitation[],
+  seen: Set<string>,
+  chatHost: string,
+): void {
+  if (out.length >= MAX_NET_CITATIONS) return;
+  let host: string | null = null;
+  try {
+    host = new URL(rawUrl).host;
+  } catch {
+    return;
+  }
+  if (!host || !host.includes('.')) return;
+  if (host === chatHost) return;
+  if (isEngineHost(host) && !host.endsWith('weixin.qq.com')) return; // 微信文章是元宝真实引用源
+  if (NET_DENY_HOST_SUFFIX.some((d) => host === d || host.endsWith('.' + d))) return;
+  if (NET_ASSET_EXT.test(rawUrl)) return;
+  const key = rawUrl.replace(/[?#].*$/, '');
+  if (seen.has(key)) return;
+  seen.add(key);
+  let title: string | undefined;
+  if (typeof window === 'string') {
+    title = window.match(/"(?:title|source|name)"\s*:\s*"([^"\\]{2,80})"/)?.[1];
+  } else {
+    for (const k of ['title', 'source', 'name']) {
+      const v = window[k];
+      if (typeof v === 'string' && v.length >= 2 && v.length <= 80) {
+        title = v;
+        break;
+      }
+    }
+  }
+  if (title) {
+    // 豆包 SSE 经 CDP 常被 latin1 转码(UTF-8 字节被逐字节映射),URL 不受影响,标题需还原
+    if (/[\u00c0-\u00ff][\u0080-\u00bf]/.test(title)) {
+      try {
+        const fixed = Buffer.from(title, 'latin1').toString('utf8');
+        if (!fixed.includes('\uFFFD')) title = fixed;
+      } catch {
+        // 保留原标题
+      }
+    }
+  }
+  out.push({ url: rawUrl, title: title || undefined });
 }
