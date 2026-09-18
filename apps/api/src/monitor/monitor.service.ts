@@ -19,7 +19,7 @@ import {
   type MetricCard,
   type MetricSource,
 } from '@geo/shared';
-import { evaluateHealth, generateActionList } from '@geo/metrics';
+import { evaluateHealth, generateActionList, sentimentScore as sentimentScoreOf } from '@geo/metrics';
 import Redis from 'ioredis';
 import { chatCompletion } from '@geo/insight-agent';
 import { loadPlatformSettings } from '@geo/db';
@@ -510,7 +510,7 @@ export class MonitorService {
       }
     }
     const all = [...terms.values()].sort((a, b) => b.runs - a.runs);
-    const sentimentScore = rows.length > 0 ? Math.round((pos / rows.length) * 100) : null;
+    const sentimentScore = sentimentScoreOf(pos, neu, neg, rows.length);
 
     // 证据样本补充引擎信息(reputation_facts 不落引擎,从 query_runs 关联)
     const sampleRunIds = [...new Set(rows.slice(0, MonitorService.REPUTATION_SAMPLE_LIMIT).map((r) => r.runId))];
@@ -623,7 +623,7 @@ export class MonitorService {
       const user = JSON.stringify({ 品牌画像: ctx.intro.slice(0, 800), 规则检测事实: ctx.facts }, null, 0);
       const raw = await chatCompletion(
         { protocol: cfg.protocol as 'openai' | 'anthropic', endpoint: cfg.endpoint, apiKey: cfg.apiKey, model: cfg.model, timeoutMs: 60_000 },
-        { system, user, maxTokens: 900 },
+        { system, user, maxTokens: 2500 },
       );
       const m = raw.text.match(/\[[\s\S]*\]/);
       if (!m) return;
