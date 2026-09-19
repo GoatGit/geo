@@ -142,21 +142,40 @@ function BarRankChart({ total, unit, items }: Extract<InsightBlock, { type: 'bar
 
 function FunnelChart({ stages }: Extract<InsightBlock, { type: 'funnel' }>) {
   const base = stages[0]?.count || 1;
-  // 逐层色相推进(藏青→蓝→青绿→橙):漏斗收口的稀缺感由色相对比表达,而非单色渐变
+  // 逐层色相推进(藏青→蓝→青绿→橙):漏斗收口的稀缺感由色相对比表达
   const fills = ['#16298f', '#2544b8', TEAL, ORANGE, GRAY];
   return (
-    <div className="space-y-2.5">
+    <div className="space-y-1">
       {stages.map((s, i) => {
         const pct = Math.round((s.count / base) * 1000) / 10;
+        const w = (s.count / base) * 100;
+        const inside = w >= 30; // 数值放条内(白字)或条外(深字)
         return (
-          <div key={s.label} className="flex items-center gap-4">
-            <div className="flex h-14 flex-[3] items-center justify-between rounded-lg px-4" style={{ width: `${Math.max(28, (s.count / base) * 100)}%`, backgroundColor: fills[i % fills.length] }}>
-              <span className="metric-num text-xl font-bold text-white">{s.count}</span>
-              {i > 0 && <span className="metric-num text-xs font-medium text-white/85">{pct}%</span>}
+          <div key={s.label} className="flex items-center gap-3">
+            {/* 标签列:层级名 + 说明,固定宽度对齐 */}
+            <div className="w-44 shrink-0 text-right">
+              <p className="text-xs font-semibold leading-4 text-slate-800">{s.label}</p>
+              <p className="text-[10px] leading-3 text-slate-400">{s.note}</p>
             </div>
-            <div className="flex-[2]">
-              <p className="text-[13px] font-semibold text-slate-800">{s.label}</p>
-              <p className="text-xs leading-4 text-slate-500">{s.note}</p>
+            {/* 比例轨道:宽度=真实占比(flex 子项不能带 grow,否则等长),细条兜底可读 */}
+            <div className="relative h-7 flex-1 overflow-hidden rounded-md bg-slate-100/80">
+              <div
+                className="absolute inset-y-0 left-0 flex items-center justify-end rounded-md px-2"
+                style={{ width: `${Math.max(w, 2)}%`, backgroundColor: fills[i % fills.length] }}
+              >
+                {inside && (
+                  <span className="metric-num text-xs font-bold text-white">
+                    {s.count}
+                    {i > 0 && <span className="ml-1 font-medium text-white/80">{pct}%</span>}
+                  </span>
+                )}
+              </div>
+              {!inside && (
+                <span className="metric-num absolute top-1/2 -translate-y-1/2 text-xs font-bold text-slate-700" style={{ left: `calc(${Math.max(w, 2)}% + 6px)` }}>
+                  {s.count}
+                  <span className="ml-1 font-medium text-slate-400">{pct}%</span>
+                </span>
+              )}
             </div>
           </div>
         );
@@ -164,6 +183,7 @@ function FunnelChart({ stages }: Extract<InsightBlock, { type: 'funnel' }>) {
     </div>
   );
 }
+
 
 /* ===== 品牌 × 维度命中热力图 ===== */
 
