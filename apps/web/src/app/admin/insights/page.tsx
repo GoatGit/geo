@@ -22,22 +22,24 @@ interface IndustryRow {
 }
 
 interface IndustryBrandRow {
-  id: string;
+  id: number;
   name: string;
-  questions: number;
-  recent_answers: number;
+  aliases: string[];
+  website: string | null;
+  positioning: string | null;
 }
 
 interface BrandSuggestion {
   name: string;
   website: string;
-  description: string;
+  aliases: string[];
+  positioning: string;
 }
 
 interface IndustryQuestionRow {
-  text: string;
+  id: number;
+  textRaw: string;
   type: 'ranking' | 'reputation';
-  brands: number;
 }
 
 interface AdminInsightDto {
@@ -81,6 +83,7 @@ export default function AdminInsightsPage() {
   const [manualQ, setManualQ] = useState('');
   const [manualQType, setManualQType] = useState<'ranking' | 'reputation'>('ranking');
   const [qSuggest, setQSuggest] = useState<Array<{ type: string; text: string }> | null>(null);
+  const [createErrors, setCreateErrors] = useState<string[]>([]);
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['admin-insights'] });
@@ -281,17 +284,37 @@ function IndustryWizard(props: {
     }
   };
 
-  const createBrands = async (descriptions: string[]) => {
+  const createBrands = async (list: BrandSuggestion[]) => {
     setBusy('create-brands');
     try {
-      const r = await api<{ created: Array<{ id: number; name: string }>; errors: string[] }>(`/admin/insights/industries/${industryId}/brands`, {
+      const r = await api<{ created: Array<{ id: number; name: string }> }>(`/admin/insights/industries/${industryId}/brands`, {
         method: 'POST',
-        json: { brands: descriptions.map((description) => ({ description })) },
+        json: { brands: list },
       });
-      toast(`已创建 ${r.created.length} 个品牌${r.errors.length ? `;${r.errors.length} 个失败(${r.errors[0]})` : ''}`);
+      toast(`已收录 ${r.created.length} 个行业品牌`);
       setBrandSuggest(null);
-      setManualBrandDesc('');
       refreshWizard(industryId);
+    } catch (err) {
+      toast((err as Error).message, 'err');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const removeBrand = async (brandId: number) => {
+    try {
+      await api(`/admin/insights/industries/${industryId}/brands/${brandId}`, { method: 'DELETE' });
+      refreshWizard(industryId);
+    } catch (err) {
+      toast((err as Error).message, 'err');
+    }
+  };
+
+  const collectNow = async () => {
+    setBusy('collect');
+    try {
+      await api(`/admin/insights/industries/${industryId}/collect`, { method: 'POST' });
+      toast('采集已触发:行业品牌+问题已同步,约 20-60 分钟出数');
     } catch (err) {
       toast((err as Error).message, 'err');
     } finally {
@@ -335,9 +358,9 @@ function IndustryWizard(props: {
     }
   };
 
-  const removeQ = async (text: string) => {
+  const removeQ = async (qid: number) => {
     try {
-      await api(`/admin/insights/industries/${industryId}/questions?text=${encodeURIComponent(text)}`, { method: 'DELETE' });
+      await api(`/admin/insights/industries/${industryId}/questions/${qid}`, { method: 'DELETE' });
       refreshWizard(industryId);
     } catch (err) {
       toast((err as Error).message, 'err');
@@ -360,17 +383,24 @@ function IndustryWizard(props: {
         </div>
         <div className="flex flex-wrap gap-2">
           {(brands.data ?? []).map((b) => (
-            <span key={b.id} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1 text-xs">
+            <span key={b.id} className="group inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1 text-xs">
               <b className="text-slate-800">{b.name}</b>
-              <span className="text-slate-400">{b.questions} 题 · 近7天 {b.recent_answers} 答</span>
+              {b.aliases?.length > 0 && <span className="text-slate-400">({b.aliases.join('/')})</span>}
+              <button
+                className="text-slate-300 transition-colors hover:text-bad group-hover:text-slate-400"
+                title="移除行业品牌"
+                onClick={() => void removeBrand(b.id)}
+              >
+                ×
+              </button>
             </span>
           ))}
-          {(brands.data ?? []).length === 0 && <p className="text-sm text-slate-400">还没有监测品牌——用 AI 推荐或手动添加</p>}
+          {(brands.data ?? []).length === 0 && <p className="text-sm text-slate-400">还没有行业品牌——用 AI 推荐或手动添加</p>}
         </div>
 
         {brandSuggest && (
           <div className="mt-3 rounded-lg bg-slate-50 p-3">
-            <p className="mb-2 text-xs font-medium text-slate-600">AI 推荐(勾选后创建,自动建订阅/采集计划/识别口径):</p>
+            <p className="mb-2 text-xs font-medium text-slate-600">AI 推荐(勾选后收录为报告主体):</p>
             <div className="space-y-1.5">
               {brandSuggest.map((s) => (
                 <label key={s.name} className="flex cursor-pointer items-start gap-2 text-xs">
@@ -388,7 +418,7 @@ function IndustryWizard(props: {
                   <span>
                     <b>{s.name}</b>
                     {s.website && <span className="ml-1 text-slate-400">{s.website}</span>}
-                    <span className="block text-slate-500">{s.description.slice(0, 90)}…</span>
+                    {s.positioning && <span className="block text-slate-500">{s.positioning}</span>}
                   </span>
                 </label>
               ))}
@@ -397,9 +427,9 @@ function IndustryWizard(props: {
               <button
                 className="h-8 rounded bg-brand px-3 text-xs font-semibold text-white disabled:opacity-50"
                 disabled={busy === 'create-brands' || brandPicked.size === 0}
-                onClick={() => void createBrands(brandSuggest.filter((s) => brandPicked.has(s.name)).map((s) => s.description))}
+                onClick={() => void createBrands(brandSuggest.filter((s) => brandPicked.has(s.name)))}
               >
-                {busy === 'create-brands' ? '创建中…' : `创建选中 ${brandPicked.size} 个`}
+                {busy === 'create-brands' ? '收录中…' : `收录选中 ${brandPicked.size} 个`}
               </button>
               <button className="h-8 px-2 text-xs text-slate-400" onClick={() => setBrandSuggest(null)}>取消</button>
             </div>
@@ -408,15 +438,24 @@ function IndustryWizard(props: {
 
         <div className="mt-3 flex gap-2">
           <input
-            placeholder="手动添加:品牌叫X,行业…,主要竞品是…(60字以上描述)"
+            placeholder="手动添加品牌名(回车收录)"
             className="flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs"
             value={manualBrandDesc}
             onChange={(e) => setManualBrandDesc(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && manualBrandDesc.trim().length >= 2) {
+                void createBrands([{ name: manualBrandDesc.trim(), website: '', aliases: [], positioning: '' }]);
+                setManualBrandDesc('');
+              }
+            }}
           />
           <button
             className="h-8 rounded-lg border bg-white px-3 text-xs font-medium text-slate-600 disabled:opacity-40"
-            disabled={manualBrandDesc.trim().length < 30}
-            onClick={() => void createBrands([manualBrandDesc.trim()])}
+            disabled={manualBrandDesc.trim().length < 2}
+            onClick={() => {
+              void createBrands([{ name: manualBrandDesc.trim(), website: '', aliases: [], positioning: '' }]);
+              setManualBrandDesc('');
+            }}
           >
             添加品牌
           </button>
@@ -438,17 +477,29 @@ function IndustryWizard(props: {
         <p className="mb-2 text-xs text-slate-400">行业视角的问题(AI 回答中自然出现多品牌),自动挂到该行业全部品牌。</p>
         <ul className="space-y-1">
           {(questions.data ?? []).map((q) => (
-            <li key={q.text} className="flex items-center gap-2 rounded-lg border border-slate-100 px-3 py-1.5 text-sm">
+            <li key={q.id} className="flex items-center gap-2 rounded-lg border border-slate-100 px-3 py-1.5 text-sm">
               <span className={`rounded px-1.5 py-0.5 text-[10px] ${q.type === 'reputation' ? 'bg-warn-50 text-warn' : 'bg-brand-50 text-brand-700'}`}>
                 {q.type === 'reputation' ? '口碑' : '排名'}
               </span>
-              <span className="min-w-0 flex-1 truncate" title={q.text}>{q.text}</span>
-              <span className="text-[10px] text-slate-400">{q.brands} 品牌</span>
-              <button className="px-1.5 text-xs text-slate-400 hover:text-slate-800" onClick={() => void removeQ(q.text)}>删除</button>
+              <span className="min-w-0 flex-1 truncate" title={q.textRaw}>{q.textRaw}</span>
+              <button className="px-1.5 text-xs text-slate-400 hover:text-slate-800" onClick={() => void removeQ(q.id)}>删除</button>
             </li>
           ))}
           {(questions.data ?? []).length === 0 && <li className="text-sm text-slate-400">还没有行业问题</li>}
         </ul>
+
+        {(questions.data ?? []).length > 0 && (
+          <div className="mt-3 flex items-center gap-3">
+            <button
+              className="h-9 rounded-lg bg-good px-4 text-xs font-semibold text-white disabled:opacity-50"
+              disabled={busy === 'collect'}
+              onClick={() => void collectNow()}
+            >
+              {busy === 'collect' ? '触发中…' : '▶ 立即采集(品牌+问题已同步)'}
+            </button>
+            <span className="text-[11px] text-slate-400">采集完成后回报表区点「④ 生成」;之后每周一自动更新</span>
+          </div>
+        )}
 
         {qSuggest && (
           <div className="mt-3 rounded-lg bg-slate-50 p-3">

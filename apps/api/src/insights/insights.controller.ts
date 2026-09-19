@@ -19,7 +19,6 @@ import { IsArray, IsBoolean, IsIn, IsInt, IsObject, IsOptional, IsString, Max, M
 import { AdminGuard } from '../admin/admin.guard';
 import { currentAccount, Public } from '../common/auth';
 import { InsightsService, type UpsertInsightInput } from './insights.service';
-import { BrandsService } from '../brands/brands.service';
 import { renderInsightPdf, type PdfInsight } from './insight-pdf';
 
 /** 生成并以下载形式回送 PDF(两个控制器共用)。 */
@@ -156,10 +155,7 @@ export class InsightsController {
 @Controller('admin/insights')
 @UseGuards(AdminGuard)
 export class AdminInsightsController {
-  constructor(
-    private readonly insights: InsightsService,
-    private readonly brandsService: BrandsService,
-  ) {}
+  constructor(private readonly insights: InsightsService) {}
 
   @Get('industries')
   industries() {
@@ -181,44 +177,32 @@ export class AdminInsightsController {
     return this.insights.deleteIndustry(id);
   }
 
-  // ===== 向导步骤②:监测品牌 =====
+  // ===== 向导步骤②:行业品牌(独立模型) =====
 
-  /** 行业现有监测品牌(含问题数/近7天回答数)。 */
   @Get('industries/:id/brands')
   industryBrands(@Param('id', ParseIntPipe) id: number) {
     return this.insights.listIndustryBrands(id);
   }
 
-  /** AI 推荐行业监测品牌(LLM 生成建号描述,前端勾选后调 create)。 */
   @Post('industries/:id/suggest-brands')
   suggestBrands(@Param('id', ParseIntPipe) id: number) {
     return this.insights.suggestIndustryBrands(id);
   }
 
-  /** 批量建号:复用品牌初始化全链路(订阅/采集计划/识别口径),挂在当前管理员账号;
-   *  套餐品牌数上限由 BrandsService 强校验。 */
+  /** 收录行业品牌(勾选的 AI 建议/手动):写 insight_brands,不占租户配额。 */
   @Post('industries/:id/brands')
-  async createIndustryBrands(
-    @Req() req: Request,
-    @Param('id', ParseIntPipe) id: number,
-    @Body() dto: { brands?: Array<{ description: string }> },
-  ) {
-    const list = (dto?.brands ?? []).map((b) => String(b.description ?? '').trim()).filter((d) => d.length >= 30).slice(0, 8);
-    if (list.length === 0) throw new HttpException('未提供有效的品牌描述', HttpStatus.BAD_REQUEST);
-    const created: Array<{ id: number; name: string }> = [];
-    const errors: string[] = [];
-    for (const description of list) {
-      try {
-        const b = await this.brandsService.create({ accountId: currentAccount(req).accountId, description });
-        created.push({ id: b.brand.id, name: b.brand.name });
-      } catch (err) {
-        errors.push((err as Error).message.slice(0, 80));
-      }
-    }
-    return { created, errors };
+  createBrands(@Param('id', ParseIntPipe) id: number, @Body() dto: { brands?: Array<{ name: string; website?: string; aliases?: string[]; positioning?: string }> }) {
+    const list = (dto?.brands ?? []).filter((b) => b && String(b.name ?? '').trim().length >= 2).slice(0, 8);
+    if (list.length === 0) throw new HttpException('未提供有效品牌', HttpStatus.BAD_REQUEST);
+    return this.insights.createIndustryBrands(id, list);
   }
 
-  // ===== 向导步骤③:行业问题 =====
+  @Delete('industries/:id/brands/:brandId')
+  removeBrand(@Param('id', ParseIntPipe) id: number, @Param('brandId', ParseIntPipe) brandId: number) {
+    return this.insights.removeIndustryBrand(id, brandId);
+  }
+
+  // ===== 向导步骤③:行业问题(单份) =====
 
   @Get('industries/:id/questions')
   industryQuestions(@Param('id', ParseIntPipe) id: number) {
@@ -230,9 +214,15 @@ export class AdminInsightsController {
     return this.insights.addIndustryQuestion(id, dto.text, dto.type === 'reputation' ? 'reputation' : 'ranking');
   }
 
-  @Delete('industries/:id/questions')
-  removeQuestion(@Param('id', ParseIntPipe) id: number, @Query('text') text: string) {
-    return this.insights.removeIndustryQuestion(id, text ?? '');
+  @Delete('industries/:id/questions/:qid')
+  removeQuestion(@Param('id', ParseIntPipe) id: number, @Param('qid', ParseIntPipe) qid: number) {
+    return this.insights.removeIndustryQuestionRow(id, qid);
+  }
+
+  /** 「立即采集」:同步影子品牌(识别口径=行业品牌/问题=行业问题)并触发一轮采集。 */
+  @Post('industries/:id/collect')
+  collectNow(@Param('id', ParseIntPipe) id: number) {
+    return this.insights.collectNow(id);
   }
 
   /** 行业级监测问题生成器:LLM 生成行业视角问题(格局/对比/口碑),apply=下发到行业全部品牌。 */

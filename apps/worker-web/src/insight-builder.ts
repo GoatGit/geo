@@ -320,19 +320,31 @@ export async function collectIndustryAggregates(
   const winRf = since != null ? sql` and rf.ran_at >= ${since.toISOString()}` : sql``;
   const winQr = since != null ? sql` and r.ran_at >= ${since.toISOString()}` : sql``;
 
+  // 独立模型(docs/01 IA ⑤):行业品牌来自 insight_brands;采集数据全部挂在
+  // 影子品牌(哨兵账号名下 industry 同名)名下,按 mention_facts.subject_name 分组还原各品牌
   const brandRows = rowsOf<{ id: string; name: string }>(
     await db.execute(sql`
-      select id::bigint as id, name from brands
-      where industry = ${industry} and status = 'active'
-      order by id
+      select ib.id::bigint as id, ib.name
+      from insight_brands ib
+      join insight_industries ii on ii.id = ib.industry_id
+      where ii.name = ${industry} and ib.active
+      order by ib.id
     `),
   );
-  if (brandRows.length === 0) throw new Error(`行业「${industry}」下没有监测品牌,无法聚合`);
-  const ids = brandRows.map((b) => Number(b.id));
-  const idList = sql.join(ids.map((i) => sql`${i}`), sql`, `);
+  if (brandRows.length === 0) throw new Error(`行业「${industry}」未收录行业品牌,请先在向导完成步骤②`);
+  const shadow = rowsOf<{ id: string }>(
+    await db.execute(sql`
+      select b.id::bigint as id from brands b
+      join accounts a on a.id = b.account_id
+      where b.industry = ${industry} and a.phone = '10000000000'
+      limit 1
+    `),
+  );
+  if (shadow.length === 0) throw new Error(`行业「${industry}」还没有采集数据(影子品牌不存在,请先执行「立即采集」)`);
+  const shadowId = Number(shadow[0]!.id);
 
   const perBrand = await db.execute(sql`
-    select mf.brand_id::bigint as brand_id,
+    select mf.subject_name::text as brand_id,
            count(*)                                                       as valid,
            count(*) filter (where mf.mentioned)                            as mentioned,
            count(*) filter (where mf.mentioned and mf.rank is not null)    as ranked,
@@ -340,27 +352,25 @@ export async function collectIndustryAggregates(
            count(*) filter (where mf.mentioned and mf.rank = 1)            as top1,
            avg(mf.rank) filter (where mf.rank is not null)                 as avg_rank
     from mention_facts mf
-    where mf.brand_id in (${idList}) and mf.subject_kind = 'self'${winMf}
-    group by mf.brand_id
+    where mf.brand_id = ${shadowId}${winMf}
+    group by mf.subject_name
   `);
 
   const collect = await db.execute(sql`
-    select b.id::bigint as brand_id,
-      (select count(*) from monitoring_questions q where q.brand_id = b.id and q.status = 'active') as questions,
-      (select count(*) from query_runs r where r.brand_id = b.id and r.status in ('ok_with_answer','ok_empty')${winQr}) as answers,
-      (select count(*) from query_runs r where r.brand_id = b.id and r.status = 'failed'${winQr}) as failed,
-      (select count(*) from query_runs r where r.brand_id = b.id and r.status = 'quota_blocked'${winQr}) as quota_blocked
-    from brands b
-    where b.id in (${idList})
+    select ${shadowId}::bigint as brand_id,
+      (select count(*) from monitoring_questions q where q.brand_id = ${shadowId} and q.status = 'active') as questions,
+      (select count(*) from query_runs r where r.brand_id = ${shadowId} and r.status in ('ok_with_answer','ok_empty')${winQr}) as answers,
+      (select count(*) from query_runs r where r.brand_id = ${shadowId} and r.status = 'failed'${winQr}) as failed,
+      (select count(*) from query_runs r where r.brand_id = ${shadowId} and r.status = 'quota_blocked'${winQr}) as quota_blocked
   `);
 
   const engineRows = await db.execute(sql`
-    select mf.brand_id::bigint as brand_id, mf.engine,
+    select mf.subject_name::text as brand_id, mf.engine,
            count(*)                            as valid,
            count(*) filter (where mf.mentioned) as mentioned
     from mention_facts mf
-    where mf.brand_id in (${idList}) and mf.subject_kind = 'self'${winMf}
-    group by mf.brand_id, mf.engine
+    where mf.brand_id = ${shadowId}${winMf}
+    group by mf.subject_name, mf.engine
   `);
 
   const landscape = await db.execute(sql`
@@ -369,7 +379,7 @@ export async function collectIndustryAggregates(
            count(*) filter (where mf.mentioned)                   as mentions,
            count(distinct mf.run_id) filter (where mf.mentioned)  as runs
     from mention_facts mf
-    where mf.brand_id in (${idList})${winMf}
+    where mf.brand_id = ${shadowId}${winMf}
     group by mf.subject_name
     having count(*) filter (where mf.mentioned) > 0
     order by mentions desc
@@ -385,7 +395,7 @@ export async function collectIndustryAggregates(
            count(*)                                     as hits,
            count(*) filter (where cf.is_owned)          as owned_hits
     from citation_facts cf
-    where cf.brand_id in (${idList})${winCf}
+    where cf.brand_id = ${shadowId}${winCf}
     group by cf.domain
     order by hits desc
     limit 30
@@ -395,12 +405,12 @@ export async function collectIndustryAggregates(
            count(*) filter (where is_owned)  as owned,
            count(distinct platform_category) as categories
     from citation_facts cf
-    where cf.brand_id in (${idList})${winCf}
+    where cf.brand_id = ${shadowId}${winCf}
   `);
   const citeCategories = await db.execute(sql`
     select platform_category, count(*) as hits
     from citation_facts cf
-    where cf.brand_id in (${idList})${winCf}
+    where cf.brand_id = ${shadowId}${winCf}
     group by platform_category
     order by hits desc
   `);
@@ -410,7 +420,7 @@ export async function collectIndustryAggregates(
     from (
       select rf.sentiment, rf.impression_terms, rf.ran_at
       from reputation_facts rf
-      where rf.brand_id in (${idList})${winRf}
+      where rf.brand_id = ${shadowId}${winRf}
       order by rf.ran_at desc
       limit 2000
     ) rf
@@ -418,7 +428,7 @@ export async function collectIndustryAggregates(
   const repTotal = await db.execute(sql`
     select count(*)::int as total
     from reputation_facts rf
-    where rf.brand_id in (${idList})${winRf}
+    where rf.brand_id = ${shadowId}${winRf}
   `);
 
   const trendRows = await db.execute(sql`
@@ -426,7 +436,7 @@ export async function collectIndustryAggregates(
            count(*)                            as valid,
            count(*) filter (where mf.mentioned) as mentioned
     from mention_facts mf
-    where mf.brand_id in (${idList}) and mf.subject_kind = 'self'${winMf}
+    where mf.brand_id = ${shadowId}${winMf}
     group by 1
     order by 1
   `);
@@ -446,8 +456,8 @@ export async function collectIndustryAggregates(
       top3: string;
       top1: string;
       avg_rank: string | null;
-    }>(perBrand).find((r) => Number(r.brand_id) === Number(b.id));
-    const c = collectBy.get(Number(b.id));
+    }>(perBrand).find((r) => r.brand_id === b.name);
+    const c = collectBy.get(shadowId);
     return {
       brandId: Number(b.id),
       name: b.name,

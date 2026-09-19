@@ -370,6 +370,31 @@ export const industryInsights = pgTable('industry_insights', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+;
+
+/** 行业洞察 · 行业品牌(docs/01 IA ⑤):行业子品牌清单,仅用于报告主体识别;
+ *  不是租户监测品牌,不占套餐配额。 */
+export const insightBrands = pgTable('insight_brands', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  industryId: bigint('industry_id', { mode: 'number' }).notNull(),
+  name: text('name').notNull(),
+  aliases: jsonb('aliases').$type<string[]>().notNull().default([]),
+  website: text('website'),
+  positioning: text('positioning'),
+  active: boolean('active').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** 行业洞察 · 行业问题:行业级监控问题(单份,非按品牌复制);采集经影子品牌执行。 */
+export const insightQuestions = pgTable('insight_questions', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  industryId: bigint('industry_id', { mode: 'number' }).notNull(),
+  textRaw: text('text_raw').notNull(),
+  type: text('type').notNull().default('ranking'),
+  active: boolean('active').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** 品牌资料库(docs/01 IA ④ 对标竞品品牌库):文本/链接资料,AI 写稿/问答/洞察时调用。
  *  kind: 'text' | 'url';source: 'manual'(手动添加)| 'dig'(AI 品牌挖掘产物)。 */
 export const brandMaterials = pgTable('brand_materials', {
