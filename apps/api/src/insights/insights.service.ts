@@ -5,13 +5,17 @@ import { Queue } from 'bullmq';
 import {
   industryInsights, insightIndustries, brands, monitoringQuestions, loadPlatformSettings,
   accounts, orders, insightBrands, insightQuestions, recognitionEntries, subscriptions, collectionPlans,
+  accountIndustrySubs,
 } from '@geo/db';
 import { WEB_ENGINES } from '@geo/shared';
 import { chatCompletion, InsightAgent } from '@geo/insight-agent';
 import { normalizeWebsiteInput, probeWebsite } from './website-discovery';
 import { INSIGHTS_QUEUE, type InsightBuildStatus } from '@geo/shared';
 import type { InsightBlock, InsightCover } from '@geo/shared';
-import { INSIGHT_BLOCK_TYPES, INSIGHT_QUESTION_LAYERS } from '@geo/shared';
+import { INSIGHT_BLOCK_TYPES, INSIGHT_QUESTION_LAYERS, PLAN_LIMITS, type PlanTier } from '@geo/shared';
+
+/** 档位权重(与 billing.PLAN_RANK 同口径,避免循环依赖本地复制)。 */
+const PLAN_RANK: Record<PlanTier, number> = { free: 0, starter: 1, standard: 2, pro: 3, custom: 4 };
 import { DB } from '../common/infra.module';
 import { loadEnv } from '../config/env';
 
@@ -528,7 +532,114 @@ export class InsightsService implements OnModuleDestroy {
     return { deleted: true };
   }
 
-  // ===== 用户侧(行业洞察一等公民:hub / 自建自管 / 生成 / 分享)=====
+  // ===== 用户侧(行业洞察一等公民:hub / 自建自管 / 订阅 / 生成 / 分享)=====
+
+  /** 账号生效档位(账号级订阅取最高,billing 同口径;无订阅=free)。 */
+  private async planOf(accountId: number): Promise<PlanTier> {
+    const rows = await this.db
+      .select({ plan: subscriptions.plan, status: subscriptions.status, periodEnd: subscriptions.periodEnd })
+      .from(subscriptions)
+      .where(eq(subscriptions.accountId, accountId));
+    let best: PlanTier = 'free';
+    let bestRank = -1;
+    for (const r of rows) {
+      if (r.status !== 'active') continue;
+      if (r.periodEnd && r.periodEnd.getTime() < Date.now()) continue;
+      const rank = PLAN_RANK[(r.plan as PlanTier) ?? 'free'] ?? 0;
+      if (rank > bestRank) {
+        bestRank = rank;
+        best = (r.plan as PlanTier) ?? 'free';
+      }
+    }
+    return best;
+  }
+
+  /** 我的行业 id 集 = 自建(account_id=本人) ∪ 订阅(0014)。 */
+  private async myIndustryIds(accountId: number): Promise<Set<number>> {
+    const created = await this.db
+      .select({ id: insightIndustries.id })
+      .from(insightIndustries)
+      .where(eq(insightIndustries.accountId, accountId));
+    const subs = await this.db
+      .select({ id: accountIndustrySubs.industryId })
+      .from(accountIndustrySubs)
+      .where(eq(accountIndustrySubs.accountId, accountId));
+    return new Set([...created.map((c) => c.id), ...subs.map((x) => x.id)]);
+  }
+
+  /** 订阅制守卫:自建/已订阅/管理员(豁免)可执行;其余 403。 */
+  private async assertIndustryAccess(
+    industryId: number,
+    accountId: number,
+    isAdmin: boolean,
+    action = '操作',
+  ) {
+    const ind = (
+      await this.db.select().from(insightIndustries).where(eq(insightIndustries.id, industryId)).limit(1)
+    )[0];
+    if (!ind) throw new HttpException('行业不存在', HttpStatus.NOT_FOUND);
+    if (isAdmin) return ind; // 管理员豁免:平台运营不受归属限制(截图报错即为该 bug)
+    if (ind.accountId === accountId) return ind;
+    const sub = (
+      await this.db
+        .select({ accountId: accountIndustrySubs.accountId })
+        .from(accountIndustrySubs)
+        .where(
+          and(eq(accountIndustrySubs.accountId, accountId), eq(accountIndustrySubs.industryId, industryId)),
+        )
+        .limit(1)
+    );
+    if (sub.length === 0) {
+      throw new HttpException(`尚未开通该行业;在行业洞察页订阅后即可${action}`, HttpStatus.FORBIDDEN);
+    }
+    return ind;
+  }
+
+  /**
+   * 订阅行业(0014 跨行业洞察):公共/他人行业可订阅,生成走自己配额;
+   * 配额 = 自建 ∪ 订阅 总数 ≤ 套餐 insightIndustries;管理员豁免配额。
+   */
+  async subscribeIndustry(accountId: number, industryId: number, isAdmin: boolean) {
+    const ind = (
+      await this.db.select().from(insightIndustries).where(eq(insightIndustries.id, industryId)).limit(1)
+    )[0];
+    if (!ind) throw new HttpException('行业不存在', HttpStatus.NOT_FOUND);
+    const mine = await this.myIndustryIds(accountId);
+    if (mine.has(industryId)) return { industryId, alreadyOpen: true };
+    if (!isAdmin) {
+      const quota = PLAN_LIMITS[await this.planOf(accountId)].insightIndustries;
+      if (mine.size >= quota) {
+        throw new HttpException(
+          `当前套餐最多开通 ${quota} 个行业(${mine.size} 个已用),升级套餐或退订后再试`,
+          HttpStatus.FORBIDDEN,
+        );
+      }
+    }
+    await this.db
+      .insert(accountIndustrySubs)
+      .values({ accountId, industryId })
+      .onConflictDoNothing();
+    return { industryId, alreadyOpen: false };
+  }
+
+  /** 退订(自建行业走删除,订阅行业走退订)。 */
+  async unsubscribeIndustry(accountId: number, industryId: number) {
+    const ind = (
+      await this.db.select().from(insightIndustries).where(eq(insightIndustries.id, industryId)).limit(1)
+    )[0];
+    if (!ind) throw new HttpException('行业不存在', HttpStatus.NOT_FOUND);
+    if (ind.accountId === accountId) {
+      throw new HttpException('自建行业请直接删除(删除即退订)', HttpStatus.BAD_REQUEST);
+    }
+    await this.db
+      .delete(accountIndustrySubs)
+      .where(
+        and(eq(accountIndustrySubs.accountId, accountId), eq(accountIndustrySubs.industryId, industryId)),
+      );
+    return { unsubscribed: true };
+  }
+
+
 
   /** 归属守卫:仅用户自建(account_id=本人)的行业可配置/删除;平台公共行业只能生成/查看。 */
   private async assertIndustryOwner(industryId: number, accountId: number) {
@@ -627,13 +738,13 @@ export class InsightsService implements OnModuleDestroy {
   /**
    * 用户 hub:我的行业洞察(本人行业全部状态的最新一期,含可生成/分享态)+ 官方已发布流。
    */
-  async hub(accountId: number) {
-    const myIndustries = await this.industriesOfAccount(accountId);
+  async hub(accountId: number, isAdmin = false) {
+    const myIds = await this.myIndustryIds(accountId);
     const all = await this.db.select().from(insightIndustries).where(eq(insightIndustries.active, true));
-    // 我的行业 = 平台行业与本品牌行业匹配的 + 本人自建的(0013 自服务)
+    // 我的行业 = 自建 ∪ 订阅(0014);订阅制不再要求与品牌行业一致
     const mine = await Promise.all(
       all
-        .filter((ind) => ind.accountId === accountId || myIndustries.includes(ind.name))
+        .filter((ind) => myIds.has(ind.id))
         .map(async (ind) => {
           // 平台是否已配置监测品牌(未配置时产品页置灰生成按钮,避免必然失败的提交)
           const brandCount = await this.db
@@ -653,6 +764,8 @@ export class InsightsService implements OnModuleDestroy {
             industryId: ind.id,
             industry: ind.name,
             owned: ind.accountId === accountId,
+            /** 订阅的公共/他人行业(0014):可生成可退订,不可配置 */
+            subscribed: ind.accountId !== accountId,
             configured: brandCount.length > 0,
             insight: latest
               ? {
@@ -672,36 +785,41 @@ export class InsightsService implements OnModuleDestroy {
         }),
     );
     const official = await this.publishedList();
-    // 未开通洞察的行业(用户品牌有、行业表没有):产品页展示「申请开通」而非误导性的「创建品牌」
-    const opened = new Set(all.map((i) => i.name));
-    const unopened = [...new Set(myIndustries.filter((n) => !opened.has(n)))];
-    const hasBrands = myIndustries.length > 0;
-    return { mine, official, unopened, hasBrands };
+    // 行业库(0014 跨行业订阅):全部可订阅行业 - 我的 = 可订阅;带最新一期摘要做选择依据
+    const byName = new Map(mine.map((m) => [m.industry, m]));
+    const library = all
+      .filter((ind) => !myIds.has(ind.id))
+      .map((ind) => {
+        const m = byName.get(ind.name); // mine 与 library 互斥,此行仅为类型占位
+        void m;
+        return { industryId: ind.id, industry: ind.name, configured: true };
+      });
+    const quota = isAdmin ? Number.MAX_SAFE_INTEGER : PLAN_LIMITS[await this.planOf(accountId)].insightIndustries;
+    return { mine, official, library, quota, used: mine.length, hasBrands: (await this.industriesOfAccount(accountId)).length > 0 };
   }
 
-  /** 用户申请开通行业洞察:行业须来自本人品牌;行业记录幂等创建,平台随后配置监测品牌与问题。 */
-  async applyIndustry(accountId: number, name: string) {
-    const industries = await this.industriesOfAccount(accountId);
-    if (!industries.includes(name)) {
-      throw new HttpException('该行业不在你的品牌行业范围内', HttpStatus.FORBIDDEN);
-    }
+  /** 开通行业(0014 订阅制):行业库已有 → 订阅;没有 → 自建(自动订阅)。不再要求与品牌行业一致。 */
+  async applyIndustry(accountId: number, name: string, isAdmin = false) {
     const existing = (await this.db.select().from(insightIndustries).where(eq(insightIndustries.name, name)).limit(1))[0];
-    if (existing) return { industryId: existing.id, alreadyOpen: true };
+    if (existing) return this.subscribeIndustry(accountId, existing.id, isAdmin);
+    // 自建:配额同样校验
+    const mine = await this.myIndustryIds(accountId);
+    if (!isAdmin) {
+      const quota = PLAN_LIMITS[await this.planOf(accountId)].insightIndustries;
+      if (mine.size >= quota) {
+        throw new HttpException(`当前套餐最多开通 ${quota} 个行业(${mine.size} 个已用),升级套餐后再试`, HttpStatus.FORBIDDEN);
+      }
+    }
     const created = (
-      await this.db.insert(insightIndustries).values({ name, active: true }).returning({ id: insightIndustries.id })
+      await this.db.insert(insightIndustries).values({ name: name.trim(), active: true, accountId }).returning({ id: insightIndustries.id })
     )[0]!;
+    await this.db.insert(accountIndustrySubs).values({ accountId, industryId: created.id }).onConflictDoNothing();
     return { industryId: created.id, alreadyOpen: false };
   }
 
-  /** 用户触发生成:行业必须属于本人品牌,且距上次生成 ≥12h(频控防刷)。 */
-  async runForAccount(accountId: number, industryId: number, windowDays: number | null) {
-    const industries = await this.industriesOfAccount(accountId);
-    const industry = (
-      await this.db.select().from(insightIndustries).where(eq(insightIndustries.id, industryId)).limit(1)
-    )[0];
-    if (!industry || !industries.includes(industry.name)) {
-      throw new HttpException('该行业不在你的品牌行业范围内', HttpStatus.FORBIDDEN);
-    }
+  /** 用户触发生成(0014 订阅制):自建/已订阅/管理员可触发;每行业 12h 频控。 */
+  async runForAccount(accountId: number, industryId: number, windowDays: number | null, isAdmin = false) {
+    const industry = await this.assertIndustryAccess(industryId, accountId, isAdmin, '生成');
     const latest = (
       await this.db
         .select({ builtAt: industryInsights.builtAt })
@@ -768,11 +886,7 @@ export class InsightsService implements OnModuleDestroy {
   async submitShare(accountId: number, insightId: number, note?: string) {
     const row = (await this.db.select().from(industryInsights).where(eq(industryInsights.id, insightId)).limit(1))[0];
     if (!row) throw new HttpException('报告不存在', HttpStatus.NOT_FOUND);
-    const industries = await this.industriesOfAccount(accountId);
-    const industry = (await this.db.select().from(insightIndustries).where(eq(insightIndustries.id, row.industryId)).limit(1))[0];
-    if (!industry || !industries.includes(industry.name)) {
-      throw new HttpException('只能分享自己行业的洞察', HttpStatus.FORBIDDEN);
-    }
+    await this.assertIndustryAccess(row.industryId, accountId, false, '分享');
     if (row.buildStatus !== 'idle' || !row.builtAt) {
       throw new HttpException('报告尚未生成完成', HttpStatus.CONFLICT);
     }

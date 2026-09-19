@@ -13,6 +13,8 @@ interface MineIndustry {
   industry: string;
   /** 自建行业(0013):可删除/配置品牌与问题 */
   owned: boolean;
+  /** 订阅的公共/他人行业(0014):可生成可退订,不可配置 */
+  subscribed?: boolean;
   /** 已配置监测品牌(未配置时生成按钮置灰,避免必然失败的提交) */
   configured: boolean;
   insight: {
@@ -47,8 +49,11 @@ interface IndustryQuestionRow {
 interface HubDto {
   mine: MineIndustry[];
   official: InsightSummaryDto[];
-  /** 用户品牌存在、但行业洞察尚未开通的行业名 */
-  unopened: string[];
+  /** 可订阅行业库(0014 跨行业洞察) */
+  library: Array<{ industryId: number; industry: string }>;
+  /** 套餐可开通行业数与已用 */
+  quota: number;
+  used: number;
   hasBrands: boolean;
 }
 
@@ -92,6 +97,33 @@ export default function IndustryInsightsPage() {
       });
       toast(r.alreadyOpen ? `「${clean}」已在你的行业列表中` : `行业「${clean}」已创建,展开卡片配置品牌与问题`);
       setNewIndustryName('');
+      void qc.invalidateQueries({ queryKey: ['insights-hub'] });
+    } catch (e) {
+      toast((e as Error).message, 'err');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const subscribe = async (industryId: number, name: string) => {
+    setBusy(`sub-${industryId}`);
+    try {
+      await api(`/insights/industries/${industryId}/subscribe`, { method: 'POST' });
+      toast(`已订阅「${name}」,现在可以生成该行业的洞察报告`);
+      void qc.invalidateQueries({ queryKey: ['insights-hub'] });
+    } catch (e) {
+      toast((e as Error).message, 'err');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const unsubscribe = async (industryId: number, name: string) => {
+    if (!window.confirm(`退订行业「${name}」?报告入口将移除(平台数据不受影响)。`)) return;
+    setBusy(`unsub-${industryId}`);
+    try {
+      await api(`/insights/industries/${industryId}/subscribe`, { method: 'DELETE' });
+      toast('已退订');
       void qc.invalidateQueries({ queryKey: ['insights-hub'] });
     } catch (e) {
       toast((e as Error).message, 'err');
@@ -158,7 +190,12 @@ export default function IndustryInsightsPage() {
       {/* 我的行业洞察 */}
       <section>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="font-semibold text-slate-900">我的行业</h2>
+          <h2 className="flex items-baseline gap-2 font-semibold text-slate-900">
+            我的行业
+            <span className="metric-num text-xs font-normal text-slate-400">
+              {data ? `${data.used}/${data.quota > 1e6 ? '∞' : data.quota} 个行业额度` : ''}
+            </span>
+          </h2>
           <div className="flex items-center gap-2">
             <input
               className="h-8 w-56 rounded-lg border border-slate-200 px-3 text-xs"
@@ -177,11 +214,11 @@ export default function IndustryInsightsPage() {
             </button>
           </div>
         </div>
-        {(data?.mine ?? []).length === 0 && (data?.unopened ?? []).length === 0 ? (
+        {(data?.mine ?? []).length === 0 && (data?.library ?? []).length === 0 ? (
           data?.hasBrands ? (
             <EmptyState
               title="品牌行业暂未收录"
-              text="你品牌的行业在平台行业库中暂未收录,请联系平台运营开通。"
+              text="直接用上方输入框新增行业,或联系平台运营配置公共行业。"
             />
           ) : (
             <EmptyState
@@ -270,6 +307,15 @@ export default function IndustryInsightsPage() {
                         {configFor === m.industryId ? '收起配置' : '配置品牌与问题'}
                       </button>
                     )}
+                    {m.subscribed && (
+                      <button
+                        className="h-8 rounded border border-slate-200 px-3 text-xs text-slate-500 transition-colors hover:border-bad hover:text-bad"
+                        title="退订该行业(报告入口移除,平台数据不受影响)"
+                        onClick={() => void unsubscribe(m.industryId, m.industry)}
+                      >
+                        退订
+                      </button>
+                    )}
                     {ins && ins.buildStatus === 'idle' && ins.status !== 'published' && ins.shareStatus !== 'pending' && (
                       <button
                         className="h-8 rounded border border-slate-200 px-3 text-xs transition-colors hover:border-brand-300 hover:text-brand-700"
@@ -285,30 +331,37 @@ export default function IndustryInsightsPage() {
                 </div>
               );
             })}
-            {(data?.unopened ?? []).map((name) => (
-              <div key={`un-${name}`} className="card rise border-dashed p-5">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-semibold text-slate-900">{name}</h3>
-                  <Badge label="未开通" tone="slate" />
-                </div>
-                <p className="mt-2 text-xs leading-5 text-slate-500">
-                  你的品牌属于该行业;一键新增后即可自行配置行业品牌与问题,生成行业洞察。
-                </p>
-                <button
-                  className="btn-primary mt-4 h-8 px-3 text-xs"
-                  disabled={busy === `apply-${name}`}
-                  onClick={() => {
-                    setBusy(`apply-${name}`);
-                    void createIndustry(name);
-                  }}
-                >
-                  {busy === `apply-${name}` ? '新增中…' : '新增该行业'}
-                </button>
-              </div>
-            ))}
           </div>
         )}
       </section>
+
+      {/* 行业库(跨行业订阅,0014) */}
+      {(data?.library ?? []).length > 0 && (
+        <section>
+          <div className="mb-3 flex items-baseline justify-between">
+            <h2 className="font-semibold text-slate-900">行业库</h2>
+            <span className="text-xs text-slate-400">订阅后即可生成任何行业的洞察报告(计入行业额度)</span>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            {(data?.library ?? []).map((lib) => {
+              const full = (data?.used ?? 0) >= (data?.quota ?? 0);
+              return (
+                <div key={lib.industryId} className="card rise flex items-center justify-between gap-2 p-4">
+                  <span className="text-sm font-medium text-slate-800">{lib.industry}</span>
+                  <button
+                    className="h-8 rounded-lg border bg-white px-3 text-xs font-medium text-slate-600 transition-colors hover:border-brand-300 hover:text-brand-700 disabled:opacity-40"
+                    disabled={busy === `sub-${lib.industryId}` || full}
+                    title={full ? '行业额度已满:升级套餐或退订后再试' : undefined}
+                    onClick={() => void subscribe(lib.industryId, lib.industry)}
+                  >
+                    {busy === `sub-${lib.industryId}` ? '订阅中…' : full ? '额度已满' : '+ 订阅'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* 官方洞察流 */}
       <section>

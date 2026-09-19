@@ -44,6 +44,8 @@ export interface PlanLimits {
   exportAllowed: boolean;
   multiBrand: number;
   apiAccess: boolean;
+  /** 行业洞察可开通行业数(自建+订阅,0014 跨行业订阅制) */
+  insightIndustries: number;
 }
 
 /** 套餐门控(docs/01 §3.10 功能门控矩阵;定价 docs/02 §7.1)。 */
@@ -59,6 +61,7 @@ export const PLAN_LIMITS: Record<PlanTier, PlanLimits> = {
     exportAllowed: false,
     multiBrand: 1,
     apiAccess: false,
+    insightIndustries: 1,
   },
   starter: {
     rankingQuota: 8,
@@ -71,6 +74,7 @@ export const PLAN_LIMITS: Record<PlanTier, PlanLimits> = {
     exportAllowed: true,
     multiBrand: 1,
     apiAccess: false,
+    insightIndustries: 1,
   },
   standard: {
     rankingQuota: 30,
@@ -83,6 +87,7 @@ export const PLAN_LIMITS: Record<PlanTier, PlanLimits> = {
     exportAllowed: true,
     multiBrand: 1,
     apiAccess: false,
+    insightIndustries: 3,
   },
   pro: {
     rankingQuota: 100,
@@ -95,6 +100,7 @@ export const PLAN_LIMITS: Record<PlanTier, PlanLimits> = {
     exportAllowed: true,
     multiBrand: 5,
     apiAccess: false,
+    insightIndustries: 10,
   },
   custom: {
     rankingQuota: Number.MAX_SAFE_INTEGER,
@@ -107,6 +113,7 @@ export const PLAN_LIMITS: Record<PlanTier, PlanLimits> = {
     exportAllowed: true,
     multiBrand: Number.MAX_SAFE_INTEGER,
     apiAccess: true,
+    insightIndustries: Number.MAX_SAFE_INTEGER,
   },
 };
 

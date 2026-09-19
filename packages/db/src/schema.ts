@@ -420,3 +420,14 @@ export const brandMaterials = pgTable('brand_materials', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+
+/** 行业订阅(0014 跨行业洞察):"我的行业" = 自建 ∪ 订阅;配额挂套餐。 */
+export const accountIndustrySubs = pgTable(
+  'account_industry_subs',
+  {
+    accountId: bigint('account_id', { mode: 'number' }).notNull(),
+    industryId: bigint('industry_id', { mode: 'number' }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.accountId, t.industryId] }) }),
+);

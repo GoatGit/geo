@@ -138,7 +138,7 @@ export class InsightsController {
   /** 用户 hub:我的行业洞察(含生成/分享态)+ 官方发布流(我的在前)。 */
   @Get('hub')
   hub(@Req() req: Request) {
-    return this.insights.hub(currentAccount(req).accountId);
+    return this.insights.hub(currentAccount(req).accountId, currentAccount(req).role === 'admin');
   }
 
   /** 用户申请开通自己品牌所在的行业洞察(行业记录幂等创建,平台随后配置监测数据)。 */
@@ -158,7 +158,7 @@ export class InsightsController {
   applyIndustry(@Req() req: Request, @Body() body: { industry?: string }) {
     const name = String(body?.industry ?? '').trim().slice(0, 40);
     if (!name) throw new HttpException('industry is required', HttpStatus.BAD_REQUEST);
-    return this.insights.applyIndustry(currentAccount(req).accountId, name);
+    return this.insights.applyIndustry(currentAccount(req).accountId, name, currentAccount(req).role === 'admin');
   }
 
   /** 用户触发生成(限本人品牌行业,12h 频控)。 */
@@ -243,6 +243,18 @@ export class InsightsController {
     return this.insights.collectNowForAccount(currentAccount(req).accountId, id);
   }
 
+  /** 订阅行业(0014 跨行业洞察):公共/他人行业可订阅,配额挂套餐;管理员豁免。 */
+  @Post('industries/:id/subscribe')
+  subscribe(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
+    return this.insights.subscribeIndustry(currentAccount(req).accountId, id, currentAccount(req).role === 'admin');
+  }
+
+  /** 退订行业(自建行业走删除)。 */
+  @Delete('industries/:id/subscribe')
+  unsubscribe(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
+    return this.insights.unsubscribeIndustry(currentAccount(req).accountId, id);
+  }
+
   @Post('industries/:id/run')
   runForMe(
     @Req() req: Request,
@@ -250,7 +262,7 @@ export class InsightsController {
     @Body() body: { windowDays?: number | null },
   ) {
     const wd = body?.windowDays == null ? null : Math.min(Math.max(Number(body.windowDays), 1), 90);
-    return this.insights.runForAccount(currentAccount(req).accountId, id, wd);
+    return this.insights.runForAccount(currentAccount(req).accountId, id, wd, currentAccount(req).role === 'admin');
   }
 
   /** 用户提交分享:进入平台审核流,通过后发布到官网首页。 */
