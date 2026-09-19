@@ -345,6 +345,8 @@ export const insightIndustries = pgTable('insight_industries', {
   name: text('name').notNull().unique(),
   sort: integer('sort').notNull().default(0),
   active: boolean('active').notNull().default(true),
+  /** 创建者(0013 自服务):null = 平台配置的公共行业;非空 = 用户自建,仅创建者可管 */
+  accountId: bigint('account_id', { mode: 'number' }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

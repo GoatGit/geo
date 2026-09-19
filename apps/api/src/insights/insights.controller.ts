@@ -142,6 +142,18 @@ export class InsightsController {
   }
 
   /** 用户申请开通自己品牌所在的行业洞察(行业记录幂等创建,平台随后配置监测数据)。 */
+  /** 自服务:新增我的行业(不再要求与品牌行业一致,创建即归属本人)。 */
+  @Post('industries')
+  createMine(@Req() req: Request, @Body() body: { name: string }) {
+    return this.insights.createIndustryForAccount(currentAccount(req).accountId, String(body?.name ?? ''));
+  }
+
+  /** 自服务:删除我的自建行业(有报告时需先删报告;平台公共行业不可删)。 */
+  @Delete('industries/:id')
+  removeMine(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
+    return this.insights.removeIndustryForAccount(currentAccount(req).accountId, id);
+  }
+
   @Post('industries/apply')
   applyIndustry(@Req() req: Request, @Body() body: { industry?: string }) {
     const name = String(body?.industry ?? '').trim().slice(0, 40);
@@ -150,6 +162,87 @@ export class InsightsController {
   }
 
   /** 用户触发生成(限本人品牌行业,12h 频控)。 */
+  @Get('industries/:id/brands')
+  myBrands(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
+    return this.insights.assertOwnedThen(id, currentAccount(req).accountId, () => this.insights.listIndustryBrands(id));
+  }
+
+  @Post('industries/:id/suggest-brands')
+  mySuggestBrands(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
+    return this.insights.suggestBrandsForAccount(currentAccount(req).accountId, id);
+  }
+
+  @Post('industries/:id/brands')
+  myCreateBrands(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { brands?: Array<{ name: string; website?: string; aliases?: string[]; positioning?: string }> },
+  ) {
+    const list = (body?.brands ?? []).filter((b) => b && String(b.name ?? '').trim().length >= 2).slice(0, 8);
+    return this.insights.createBrandsForAccount(currentAccount(req).accountId, id, list);
+  }
+
+  @Delete('industries/:id/brands/:brandId')
+  myRemoveBrand(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('brandId', ParseIntPipe) brandId: number,
+  ) {
+    return this.insights.removeBrandForAccount(currentAccount(req).accountId, id, brandId);
+  }
+
+  @Post('industries/:id/brands/:brandId/discover-website')
+  myDiscoverWebsite(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('brandId', ParseIntPipe) brandId: number,
+  ) {
+    return this.insights.discoverWebsiteForAccount(currentAccount(req).accountId, id, brandId);
+  }
+
+  @Get('industries/:id/questions')
+  myQuestions(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
+    return this.insights.assertOwnedThen(id, currentAccount(req).accountId, () => this.insights.listIndustryQuestions(id));
+  }
+
+  @Post('industries/:id/questions/manual')
+  myAddQuestion(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: { text: string; type: 'ranking' | 'reputation'; layer?: string | null },
+  ) {
+    return this.insights.addQuestionForAccount(
+      currentAccount(req).accountId,
+      id,
+      dto.text,
+      dto.type === 'reputation' ? 'reputation' : 'ranking',
+      dto.layer ?? null,
+    );
+  }
+
+  @Post('industries/:id/questions')
+  mySuggestQuestions(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { apply?: boolean },
+  ) {
+    return this.insights.suggestQuestionsForAccount(currentAccount(req).accountId, id, Boolean(body?.apply));
+  }
+
+  @Delete('industries/:id/questions/:qid')
+  myRemoveQuestion(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('qid', ParseIntPipe) qid: number,
+  ) {
+    return this.insights.removeQuestionForAccount(currentAccount(req).accountId, id, qid);
+  }
+
+  @Post('industries/:id/collect')
+  myCollect(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
+    return this.insights.collectNowForAccount(currentAccount(req).accountId, id);
+  }
+
   @Post('industries/:id/run')
   runForMe(
     @Req() req: Request,

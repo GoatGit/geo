@@ -528,7 +528,92 @@ export class InsightsService implements OnModuleDestroy {
     return { deleted: true };
   }
 
-  // ===== 用户侧(行业洞察一等公民:hub / 生成 / 分享)=====
+  // ===== 用户侧(行业洞察一等公民:hub / 自建自管 / 生成 / 分享)=====
+
+  /** 归属守卫:仅用户自建(account_id=本人)的行业可配置/删除;平台公共行业只能生成/查看。 */
+  private async assertIndustryOwner(industryId: number, accountId: number) {
+    const ind = (
+      await this.db.select().from(insightIndustries).where(eq(insightIndustries.id, industryId)).limit(1)
+    )[0];
+    if (!ind) throw new HttpException('行业不存在', HttpStatus.NOT_FOUND);
+    if (ind.accountId !== accountId) {
+      throw new HttpException('平台公共行业由平台配置;仅自建行业可修改', HttpStatus.FORBIDDEN);
+    }
+    return ind;
+  }
+
+  /** 用户自建行业:不再要求与本人品牌行业一致(自服务);同名平台行业视为已开通(公共)。 */
+  async createIndustryForAccount(accountId: number, name: string) {
+    const clean = name.trim();
+    if (clean.length < 2 || clean.length > 20) {
+      throw new HttpException('行业名需在 2-20 字', HttpStatus.BAD_REQUEST);
+    }
+    const existing = (
+      await this.db.select().from(insightIndustries).where(eq(insightIndustries.name, clean)).limit(1)
+    )[0];
+    if (existing) {
+      return { industryId: existing.id, name: existing.name, alreadyOpen: true };
+    }
+    const created = (
+      await this.db
+        .insert(insightIndustries)
+        .values({ name: clean, active: true, accountId })
+        .returning({ id: insightIndustries.id, name: insightIndustries.name })
+    )[0]!;
+    return { industryId: created.id, name: created.name, alreadyOpen: false };
+  }
+
+  /** 用户删除自建行业:有报告时先删报告;影子品牌有采集数据时保留(不可见,无副作用)。 */
+  async removeIndustryForAccount(accountId: number, industryId: number) {
+    const ind = await this.assertIndustryOwner(industryId, accountId);
+    const reports = (
+      await this.db
+        .select({ id: industryInsights.id })
+        .from(industryInsights)
+        .where(eq(industryInsights.industryId, industryId))
+        .limit(1)
+    );
+    // 自服务闭环:本人行业的洞察报告一并删除(blocks 在行内,删行即可)
+    await this.db.delete(industryInsights).where(eq(industryInsights.industryId, industryId));
+
+    // 影子品牌链清理:无采集数据才整链删除;有数据保留孤儿(不可见,避免 FK 级联误删证据)
+    const sentinelId = await this.sentinelAccountId();
+    const shadow = (
+      await this.db
+        .select({ id: brands.id })
+        .from(brands)
+        .where(and(eq(brands.accountId, sentinelId), eq(brands.industry, ind.name)))
+        .limit(1)
+    )[0];
+    if (shadow) {
+      const hasRuns = (
+        await this.db.select({ id: sql`1` }).from(sql`query_runs`).where(sql`brand_id = ${shadow.id} limit 1`)
+      ).length;
+      if (Number(hasRuns) === 0) {
+        await this.db.delete(monitoringQuestions).where(eq(monitoringQuestions.brandId, shadow.id));
+        await this.db.delete(recognitionEntries).where(eq(recognitionEntries.brandId, shadow.id));
+        await this.db.delete(collectionPlans).where(eq(collectionPlans.brandId, shadow.id));
+        await this.db.delete(subscriptions).where(eq(subscriptions.brandId, shadow.id));
+        await this.db.delete(brands).where(eq(brands.id, shadow.id));
+      }
+    }
+    await this.db.delete(insightIndustries).where(eq(insightIndustries.id, industryId));
+    return { deleted: true };
+  }
+
+  /** 用户侧归属校验(配置类操作共用):仅自建行业;读型操作用 assertOwnedThen 包装。 */
+  private async ownedIndustryId(accountId: number, industryId: number): Promise<string> {
+    const ind = await this.assertIndustryOwner(industryId, accountId);
+    return ind.name;
+  }
+
+  /** 读型操作守卫:校验归属后执行委托(避免每个读端点写一遍 try/catch)。 */
+  async assertOwnedThen<T>(industryId: number, accountId: number, fn: () => Promise<T>): Promise<T> {
+    await this.assertIndustryOwner(industryId, accountId);
+    return fn();
+  }
+
+
 
   /** 用户品牌所属的行业名集合(与洞察行业表按名对齐)。 */
   async industriesOfAccount(accountId: number): Promise<string[]> {
@@ -545,9 +630,10 @@ export class InsightsService implements OnModuleDestroy {
   async hub(accountId: number) {
     const myIndustries = await this.industriesOfAccount(accountId);
     const all = await this.db.select().from(insightIndustries).where(eq(insightIndustries.active, true));
+    // 我的行业 = 平台行业与本品牌行业匹配的 + 本人自建的(0013 自服务)
     const mine = await Promise.all(
       all
-        .filter((ind) => myIndustries.includes(ind.name))
+        .filter((ind) => ind.accountId === accountId || myIndustries.includes(ind.name))
         .map(async (ind) => {
           // 平台是否已配置监测品牌(未配置时产品页置灰生成按钮,避免必然失败的提交)
           const brandCount = await this.db
@@ -566,6 +652,7 @@ export class InsightsService implements OnModuleDestroy {
           return {
             industryId: ind.id,
             industry: ind.name,
+            owned: ind.accountId === accountId,
             configured: brandCount.length > 0,
             insight: latest
               ? {
@@ -628,6 +715,53 @@ export class InsightsService implements OnModuleDestroy {
       throw new HttpException(`该行业 ${waitH} 小时内已生成过,稍后再试`, HttpStatus.TOO_MANY_REQUESTS);
     }
     return this.runIndustry(industryId, windowDays);
+  }
+
+  // ===== 自服务配置包装(归属校验后委托既有实现;平台公共行业不可配置)=====
+
+  async suggestBrandsForAccount(accountId: number, industryId: number) {
+    await this.assertIndustryOwner(industryId, accountId);
+    return this.suggestIndustryBrands(industryId);
+  }
+  async createBrandsForAccount(
+    accountId: number,
+    industryId: number,
+    list: Array<{ name: string; website?: string; aliases?: string[]; positioning?: string }>,
+  ) {
+    await this.assertIndustryOwner(industryId, accountId);
+    return this.createIndustryBrands(industryId, list);
+  }
+  async removeBrandForAccount(accountId: number, industryId: number, brandId: number) {
+    await this.assertIndustryOwner(industryId, accountId);
+    return this.removeIndustryBrand(industryId, brandId);
+  }
+  async discoverWebsiteForAccount(accountId: number, industryId: number, brandId: number) {
+    await this.assertIndustryOwner(industryId, accountId);
+    return this.discoverIndustryBrandWebsite(industryId, brandId);
+  }
+  async addQuestionForAccount(
+    accountId: number,
+    industryId: number,
+    text: string,
+    type: 'ranking' | 'reputation',
+    layer?: string | null,
+  ) {
+    await this.assertIndustryOwner(industryId, accountId);
+    return this.addIndustryQuestion(industryId, text, type, layer ?? null);
+  }
+  async removeQuestionForAccount(accountId: number, industryId: number, questionId: number) {
+    await this.assertIndustryOwner(industryId, accountId);
+    return this.removeIndustryQuestionRow(industryId, questionId);
+  }
+  async suggestQuestionsForAccount(accountId: number, industryId: number, apply: boolean) {
+    await this.assertIndustryOwner(industryId, accountId);
+    return this.suggestIndustryQuestions(industryId, apply);
+  }
+  async collectNowForAccount(accountId: number, industryId: number) {
+    await this.assertIndustryOwner(industryId, accountId);
+    const shadowId = await this.syncShadowBrand(industryId);
+    await this.db.update(collectionPlans).set({ nextRunAt: new Date() }).where(eq(collectionPlans.brandId, shadowId));
+    return { triggered: true };
   }
 
   /** 用户提交分享:本人行业报告 → 待审核。 */

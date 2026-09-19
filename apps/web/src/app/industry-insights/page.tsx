@@ -6,12 +6,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Badge, EmptyState, PageHeader, Skeleton } from '@/components/ui';
 import { useToast } from '@/components/toast';
-import type { InsightSummaryDto } from '@geo/shared';
+import { INSIGHT_QUESTION_LAYERS, type InsightSummaryDto } from '@geo/shared';
 
 interface MineIndustry {
   industryId: number;
   industry: string;
-  /** 平台已配置监测品牌(未配置时生成按钮置灰,避免必然失败的提交) */
+  /** 自建行业(0013):可删除/配置品牌与问题 */
+  owned: boolean;
+  /** 已配置监测品牌(未配置时生成按钮置灰,避免必然失败的提交) */
   configured: boolean;
   insight: {
     id: number;
@@ -25,6 +27,21 @@ interface MineIndustry {
     shareStatus: string;
     shareNote: string | null;
   } | null;
+}
+
+interface IndustryBrandRow {
+  id: number;
+  name: string;
+  aliases: string[];
+  website: string | null;
+  positioning: string | null;
+}
+
+interface IndustryQuestionRow {
+  id: number;
+  textRaw: string;
+  type: 'ranking' | 'reputation';
+  layer?: string | null;
 }
 
 interface HubDto {
@@ -57,6 +74,45 @@ export default function IndustryInsightsPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [shareTarget, setShareTarget] = useState<number | null>(null);
   const [shareNote, setShareNote] = useState('');
+  // 自服务:新增行业 + 每行业配置面板开关
+  const [newIndustryName, setNewIndustryName] = useState('');
+  const [configFor, setConfigFor] = useState<number | null>(null);
+
+  const createIndustry = async (name: string) => {
+    const clean = name.trim();
+    if (clean.length < 2) {
+      toast('行业名至少 2 个字', 'err');
+      return;
+    }
+    setBusy('create-industry');
+    try {
+      const r = await api<{ industryId: number; alreadyOpen: boolean }>('/insights/industries', {
+        method: 'POST',
+        json: { name: clean },
+      });
+      toast(r.alreadyOpen ? `「${clean}」已在你的行业列表中` : `行业「${clean}」已创建,展开卡片配置品牌与问题`);
+      setNewIndustryName('');
+      void qc.invalidateQueries({ queryKey: ['insights-hub'] });
+    } catch (e) {
+      toast((e as Error).message, 'err');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const removeIndustry = async (industryId: number, name: string) => {
+    if (!window.confirm(`删除行业「${name}」?其下洞察报告与配置将一并删除。`)) return;
+    setBusy(`remove-${industryId}`);
+    try {
+      await api(`/insights/industries/${industryId}`, { method: 'DELETE' });
+      toast('行业已删除');
+      void qc.invalidateQueries({ queryKey: ['insights-hub'] });
+    } catch (e) {
+      toast((e as Error).message, 'err');
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const runBuild = useMutation({
     mutationFn: (industryId: number) =>
@@ -101,7 +157,26 @@ export default function IndustryInsightsPage() {
 
       {/* 我的行业洞察 */}
       <section>
-        <h2 className="mb-3 font-semibold text-slate-900">我的行业</h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-semibold text-slate-900">我的行业</h2>
+          <div className="flex items-center gap-2">
+            <input
+              className="h-8 w-56 rounded-lg border border-slate-200 px-3 text-xs"
+              placeholder="新增行业,如:新能源汽车"
+              maxLength={20}
+              value={newIndustryName}
+              onChange={(e) => setNewIndustryName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && newIndustryName.trim().length >= 2 && void createIndustry(newIndustryName)}
+            />
+            <button
+              className="h-8 rounded-lg border bg-white px-3 text-xs font-medium text-slate-600 hover:border-brand-300 hover:text-brand-700 disabled:opacity-40"
+              disabled={busy === 'create-industry' || newIndustryName.trim().length < 2}
+              onClick={() => void createIndustry(newIndustryName)}
+            >
+              新增行业
+            </button>
+          </div>
+        </div>
         {(data?.mine ?? []).length === 0 && (data?.unopened ?? []).length === 0 ? (
           data?.hasBrands ? (
             <EmptyState
@@ -126,8 +201,18 @@ export default function IndustryInsightsPage() {
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="font-semibold text-slate-900">{m.industry}</h3>
                     <div className="flex items-center gap-1.5">
+                      {m.owned && <Badge label="自建" tone="brand" />}
                       {buildBadge && <Badge label={buildBadge.label} tone={buildBadge.tone} />}
                       {shareBadge && <Badge label={shareBadge.label} tone={shareBadge.tone} />}
+                      {m.owned && (
+                        <button
+                          className="px-1 text-xs text-slate-300 hover:text-bad"
+                          title="删除该行业(其下报告与配置一并删除)"
+                          onClick={() => void removeIndustry(m.industryId, m.industry)}
+                        >
+                          ×
+                        </button>
+                      )}
                     </div>
                   </div>
                   {ins ? (
@@ -154,15 +239,37 @@ export default function IndustryInsightsPage() {
                     )}
                     <button
                       className="btn-primary h-8 px-3 text-xs"
-                      title={m.configured ? undefined : '平台正在配置该行业的监测品牌与问题,配置完成后即可生成'}
+                      title={
+                        m.configured
+                          ? undefined
+                          : m.owned
+                            ? '先展开「配置品牌与问题」,添加行业品牌与问题后即可生成'
+                            : '平台正在配置该行业的监测品牌与问题,配置完成后即可生成'
+                      }
                       disabled={!m.configured || runBuild.isPending || ins?.buildStatus === 'running' || busy === `run-${m.industryId}`}
                       onClick={() => {
                         setBusy(`run-${m.industryId}`);
                         runBuild.mutate(m.industryId, { onSettled: () => setBusy(null) });
                       }}
                     >
-                      {!m.configured ? '等待平台配置' : ins?.buildStatus === 'running' ? '聚合中…' : ins ? '生成新一期' : '生成第一期'}
+                      {!m.configured
+                        ? m.owned
+                          ? '先配置品牌与问题'
+                          : '等待平台配置'
+                        : ins?.buildStatus === 'running'
+                          ? '聚合中…'
+                          : ins
+                            ? '生成新一期'
+                            : '生成第一期'}
                     </button>
+                    {m.owned && (
+                      <button
+                        className="h-8 rounded border border-slate-200 px-3 text-xs transition-colors hover:border-brand-300 hover:text-brand-700"
+                        onClick={() => setConfigFor(configFor === m.industryId ? null : m.industryId)}
+                      >
+                        {configFor === m.industryId ? '收起配置' : '配置品牌与问题'}
+                      </button>
+                    )}
                     {ins && ins.buildStatus === 'idle' && ins.status !== 'published' && ins.shareStatus !== 'pending' && (
                       <button
                         className="h-8 rounded border border-slate-200 px-3 text-xs transition-colors hover:border-brand-300 hover:text-brand-700"
@@ -172,6 +279,9 @@ export default function IndustryInsightsPage() {
                       </button>
                     )}
                   </div>
+                  {configFor === m.industryId && m.owned && (
+                    <IndustryConfigPanel industryId={m.industryId} />
+                  )}
                 </div>
               );
             })}
@@ -182,17 +292,17 @@ export default function IndustryInsightsPage() {
                   <Badge label="未开通" tone="slate" />
                 </div>
                 <p className="mt-2 text-xs leading-5 text-slate-500">
-                  你的品牌属于该行业;申请开通后,平台会配置行业监测品牌与问题,即可生成行业洞察。
+                  你的品牌属于该行业;一键新增后即可自行配置行业品牌与问题,生成行业洞察。
                 </p>
                 <button
                   className="btn-primary mt-4 h-8 px-3 text-xs"
-                  disabled={apply.isPending || busy === `apply-${name}`}
+                  disabled={busy === `apply-${name}`}
                   onClick={() => {
                     setBusy(`apply-${name}`);
-                    apply.mutate(name, { onSettled: () => setBusy(null) });
+                    void createIndustry(name);
                   }}
                 >
-                  {busy === `apply-${name}` ? '提交中…' : '申请开通'}
+                  {busy === `apply-${name}` ? '新增中…' : '新增该行业'}
                 </button>
               </div>
             ))}
@@ -250,6 +360,244 @@ export default function IndustryInsightsPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ============ 自服务配置面板(行业品牌 + 行业问题 + 立即采集) ============ */
+function IndustryConfigPanel({ industryId }: { industryId: number }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [brandSuggest, setBrandSuggest] = useState<{ name: string; website: string; positioning: string }[] | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [brandName, setBrandName] = useState('');
+  const [qText, setQText] = useState('');
+  const [qType, setQType] = useState<'ranking' | 'reputation'>('ranking');
+  const [qLayer, setQLayer] = useState<string | null>(null);
+  const [qSuggest, setQSuggest] = useState<Array<{ type: string; text: string }> | null>(null);
+
+  const brands = useQuery({
+    queryKey: ['my-industry-brands', industryId],
+    queryFn: () => api<IndustryBrandRow[]>(`/insights/industries/${industryId}/brands`),
+  });
+  const questions = useQuery({
+    queryKey: ['my-industry-questions', industryId],
+    queryFn: () => api<IndustryQuestionRow[]>(`/insights/industries/${industryId}/questions`),
+  });
+
+  const invalidate = () => {
+    void qc.invalidateQueries({ queryKey: ['my-industry-brands', industryId] });
+    void qc.invalidateQueries({ queryKey: ['my-industry-questions', industryId] });
+    void qc.invalidateQueries({ queryKey: ['insights-hub'] });
+  };
+  const run = (key: string, fn: () => Promise<unknown>, done?: () => void) => {
+    setBusy(key);
+    fn()
+      .then(() => {
+        invalidate();
+        done?.();
+      })
+      .catch((e) => toast((e as Error).message, 'err'))
+      .finally(() => setBusy(null));
+  };
+
+  return (
+    <div className="mt-3 space-y-4 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+      {/* 行业品牌 */}
+      <div>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h4 className="text-xs font-semibold text-slate-800">行业品牌({(brands.data ?? []).length})</h4>
+          <button
+            className="h-7 rounded bg-brand px-2.5 text-[11px] font-semibold text-white disabled:opacity-50"
+            disabled={busy === 'suggest-brands'}
+            onClick={() =>
+              run('suggest-brands', async () => {
+                const r = await api<{ suggestions: { name: string; website: string; positioning: string }[] }>(
+                  `/insights/industries/${industryId}/suggest-brands`,
+                  { method: 'POST' },
+                );
+                setBrandSuggest(r.suggestions);
+                setPicked(new Set(r.suggestions.map((x) => x.name)));
+              })
+            }
+          >
+            {busy === 'suggest-brands' ? 'AI 推荐中…' : '✦ AI 推荐品牌'}
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {(brands.data ?? []).map((b) => (
+            <span key={b.id} className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px]">
+              <b className="text-slate-700">{b.name}</b>
+              {b.website && <span className="text-slate-400">{b.website.replace('https://', '')}</span>}
+              <button
+                className="text-slate-300 hover:text-bad"
+                title="移除行业品牌"
+                onClick={() => run(`rm-b-${b.id}`, () => api(`/insights/industries/${industryId}/brands/${b.id}`, { method: 'DELETE' }))}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          {(brands.data ?? []).length === 0 && <span className="text-[11px] text-slate-400">还没有行业品牌</span>}
+        </div>
+
+        {brandSuggest && (
+          <div className="mt-2 rounded border border-slate-200 bg-white p-2.5">
+            {brandSuggest.map((sg) => (
+              <label key={sg.name} className="flex cursor-pointer items-center gap-2 py-0.5 text-[11px]">
+                <input
+                  type="checkbox"
+                  checked={picked.has(sg.name)}
+                  onChange={(e) => {
+                    const next = new Set(picked);
+                    if (e.target.checked) next.add(sg.name);
+                    else next.delete(sg.name);
+                    setPicked(next);
+                  }}
+                />
+                <b>{sg.name}</b>
+                {sg.website && <span className="text-slate-400">{sg.website}</span>}
+                {sg.positioning && <span className="text-slate-500">{sg.positioning}</span>}
+              </label>
+            ))}
+            <div className="mt-2 flex gap-2">
+              <button
+                className="h-7 rounded bg-brand px-2.5 text-[11px] font-semibold text-white disabled:opacity-50"
+                disabled={busy === 'create-brands' || picked.size === 0}
+                onClick={() =>
+                  run('create-brands', () =>
+                    api(`/insights/industries/${industryId}/brands`, {
+                      method: 'POST',
+                      json: { brands: brandSuggest.filter((x) => picked.has(x.name)) },
+                    }),
+                  )
+                }
+              >
+                收录选中 {picked.size} 个
+              </button>
+              <button className="h-7 px-2 text-[11px] text-slate-400" onClick={() => setBrandSuggest(null)}>取消</button>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-2 flex gap-1.5">
+          <input
+            className="flex-1 rounded border border-slate-200 px-2 py-1 text-[11px]"
+            placeholder="手动添加行业品牌名(回车收录)"
+            value={brandName}
+            onChange={(e) => setBrandName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && brandName.trim().length >= 2) {
+                const name = brandName.trim();
+                run('add-brand', () => api(`/insights/industries/${industryId}/brands`, { method: 'POST', json: { brands: [{ name }] } }), () => setBrandName(''));
+              }
+            }}
+          />
+        </div>
+      </div>
+
+      {/* 行业问题 */}
+      <div>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h4 className="text-xs font-semibold text-slate-800">行业问题({(questions.data ?? []).length})</h4>
+          <button
+            className="h-7 rounded bg-brand px-2.5 text-[11px] font-semibold text-white disabled:opacity-50"
+            disabled={busy === 'suggest-q'}
+            onClick={() =>
+              run('suggest-q', async () => {
+                const r = await api<{ questions: Array<{ type: string; text: string }> }>(
+                  `/insights/industries/${industryId}/questions`,
+                  { method: 'POST', json: { apply: false } },
+                );
+                setQSuggest(r.questions);
+              })
+            }
+          >
+            {busy === 'suggest-q' ? 'AI 生成中…' : '✦ AI 生成行业问题'}
+          </button>
+        </div>
+        <ul className="space-y-1">
+          {(questions.data ?? []).map((q) => (
+            <li key={q.id} className="flex items-center gap-2 rounded border border-slate-100 bg-white px-2 py-1 text-[11px]">
+              <span className={`rounded px-1 py-0.5 text-[10px] ${q.type === 'reputation' ? 'bg-warn-50 text-warn' : 'bg-brand-50 text-brand-700'}`}>
+                {q.type === 'reputation' ? '口碑' : '排名'}
+              </span>
+              {q.layer && <span className="rounded bg-slate-100 px-1 py-0.5 text-[10px] text-slate-500">{q.layer}</span>}
+              <span className="min-w-0 flex-1 truncate">{q.textRaw}</span>
+              <button
+                className="px-1 text-slate-300 hover:text-bad"
+                onClick={() => run(`rm-q-${q.id}`, () => api(`/insights/industries/${industryId}/questions/${q.id}`, { method: 'DELETE' }))}
+              >
+                删除
+              </button>
+            </li>
+          ))}
+          {(questions.data ?? []).length === 0 && <li className="text-[11px] text-slate-400">还没有行业问题</li>}
+        </ul>
+
+        {qSuggest && (
+          <div className="mt-2 rounded border border-slate-200 bg-white p-2.5">
+            {qSuggest.map((q) => (
+              <div key={q.text} className="flex items-center gap-2 py-0.5 text-[11px]">
+                <span className={`rounded px-1 py-0.5 text-[10px] ${q.type === 'reputation' ? 'bg-warn-50 text-warn' : 'bg-brand-50 text-brand-700'}`}>
+                  {q.type === 'reputation' ? '口碑' : '排名'}
+                </span>
+                {q.text}
+              </div>
+            ))}
+            <div className="mt-2 flex gap-2">
+              <button
+                className="h-7 rounded bg-brand px-2.5 text-[11px] font-semibold text-white disabled:opacity-50"
+                disabled={busy === 'apply-q'}
+                onClick={() => run('apply-q', () => api(`/insights/industries/${industryId}/questions`, { method: 'POST', json: { apply: true } }))}
+              >
+                下发全部问题
+              </button>
+              <button className="h-7 px-2 text-[11px] text-slate-400" onClick={() => setQSuggest(null)}>取消</button>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <select className="rounded border border-slate-200 px-2 py-1 text-[11px]" value={qType} onChange={(e) => setQType(e.target.value as 'ranking' | 'reputation')}>
+            <option value="ranking">排名</option>
+            <option value="reputation">口碑</option>
+          </select>
+          <select className="rounded border border-slate-200 px-2 py-1 text-[11px]" value={qLayer ?? ''} onChange={(e) => setQLayer(e.target.value || null)}>
+            <option value="">未分层</option>
+            {INSIGHT_QUESTION_LAYERS.map((l) => (
+              <option key={l} value={l}>{l}</option>
+            ))}
+          </select>
+          <input
+            className="flex-1 rounded border border-slate-200 px-2 py-1 text-[11px]"
+            placeholder="手动添加行业问题(8-60 字,回车添加)"
+            value={qText}
+            onChange={(e) => setQText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && qText.trim().length >= 8) {
+                const text = qText.trim();
+                const type = qType;
+                const layer = qLayer;
+                run('add-q', () => api(`/insights/industries/${industryId}/questions/manual`, { method: 'POST', json: { text, type, layer } }), () => setQText(''));
+              }
+            }}
+          />
+        </div>
+      </div>
+
+      {/* 立即采集 */}
+      <button
+        className="h-9 w-full rounded-lg bg-good text-xs font-semibold text-white disabled:opacity-50"
+        disabled={busy === 'collect'}
+        onClick={() => run('collect', () => api(`/insights/industries/${industryId}/collect`, { method: 'POST' }))}
+      >
+        {busy === 'collect' ? '触发中…' : '▶ 立即采集(品牌+问题已同步到采集引擎)'}
+      </button>
+      <p className="text-[10px] leading-4 text-slate-400">
+        配置完成后点「生成第一期」聚合出报告;采集约 20-60 分钟出数,期间可再次采集补充样本。
+      </p>
     </div>
   );
 }
