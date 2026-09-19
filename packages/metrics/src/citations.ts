@@ -86,6 +86,11 @@ export const DEFAULT_DOMAIN_DICT: Record<string, PlatformClassification> = {
   'weibo.com': { platform: '微博', category: 'UGC/社交' },
   'tieba.baidu.com': { platform: '百度贴吧', category: 'UGC/社区' },
   'mp.weixin.qq.com': { platform: '微信公众号', category: 'UGC/社交' },
+  // 长尾但高频的权威/榜单站(实测信源 Top 命中)
+  'cca.org.cn': { platform: '中国消费者协会', category: '权威机构' },
+  'cnpp.cn': { platform: '品牌网', category: '榜单/评测' },
+  'chinapp.com': { platform: '品牌网', category: '榜单/评测' },
+  'haier.com': { platform: '海尔官网', category: '官网' },
   // 技术/知识
   'csdn.net': { platform: 'CSDN', category: '技术社区' },
   'juejin.cn': { platform: '掘金', category: '技术社区' },

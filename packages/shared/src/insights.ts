@@ -145,3 +145,15 @@ export const INSIGHT_WINDOW_CHOICES = [7, 30, 90] as const;
 
 /** 行业档位分类(用于覆盖 PLAN_LIMITS 之外的行业维度,预留)。 */
 export type InsightPlanGate = PlanTier;
+
+/** 问题语义分层(docs/01 IA ⑤ 精品化,对标竞品方法论):
+ *  消费功能层=「XX 有什么功能」 场景人群层=「我该买什么」 品类行业层=「行业格局如何」
+ *  竞品层=「A 和 B 怎么选」 渠道市场层=「哪里买/渠道」。参与分层热力与存在形状图表。 */
+export const INSIGHT_QUESTION_LAYERS = [
+  '消费功能层',
+  '场景人群层',
+  '品类行业层',
+  '竞品层',
+  '渠道市场层',
+] as const;
+export type InsightQuestionLayer = (typeof INSIGHT_QUESTION_LAYERS)[number];

@@ -361,6 +361,8 @@ export const industryInsights = pgTable('industry_insights', {
   featured: boolean('featured').notNull().default(false),
   /** 数据聚合状态(docs/01 §3.10「运行」):idle=就绪 running=聚合中 failed=失败(见 buildError) */
   buildStatus: text('build_status').notNull().default('idle'),
+  /** 披露/偏向说明(报告尾部信任层):利益关系、题目偏向等,可空 */
+  disclosure: text('disclosure'),
   buildError: text('build_error'),
   builtAt: timestamp('built_at', { withTimezone: true }),
   /** 运行参数:聚合窗口天数,null=全量历史 */
@@ -391,6 +393,8 @@ export const insightQuestions = pgTable('insight_questions', {
   industryId: bigint('industry_id', { mode: 'number' }).notNull(),
   textRaw: text('text_raw').notNull(),
   type: text('type').notNull().default('ranking'),
+  /** 问题语义分层(0012):消费功能层/场景人群层/品类行业层/竞品层/渠道市场层,null=未分层 */
+  layer: text('layer'),
   active: boolean('active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -410,5 +414,3 @@ export const brandMaterials = pgTable('brand_materials', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
-/** 行业洞察:问题语义分层标签(对标竞品方法论,参与分层热力/存在形状图表)。 */
-export const INSIGHT_QUESTION_LAYERS = ['消费功能层', '场景人群层', '品类行业层', '竞品层', '渠道市场层'] as const;

@@ -1,4 +1,5 @@
 import { and, desc, eq, ne, sql } from 'drizzle-orm';
+import { INSIGHT_QUESTION_LAYERS } from '@geo/shared';
 import type { Db } from '@geo/db';
 import { insightIndustries, industryInsights, loadPlatformSettings } from '@geo/db';
 import { classifyDomain } from '@geo/metrics';
@@ -13,6 +14,7 @@ import type {
   ScatterBlock,
   TakeawayBlock,
   TrendBlock,
+  INSIGHT_QUESTION_LAYERS,
 } from '@geo/shared';
 
 /**
@@ -91,6 +93,9 @@ export interface IndustryAggregates {
     rate: number;
     valid: number;
   }>;
+  /** 品牌 × 问题层命中率(0012 问题分层;layer=影子问题 group_name) */
+  layerHits: Array<{ layer: string; brand: string; rate: number; valid: number }>;
+  layerQuestionCounts: Array<{ layer: string; count: number }>;
   funnel: { answers: number; mentioned: number; top3: number; top1: number };
   landscape: LandscapeRow[];
   citations: CitationAgg;
@@ -241,6 +246,36 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
     } satisfies FunnelBlock);
   }
 
+  // ③.1 品牌存活漏斗(品牌口径,对标竞品方法论):收录 N 个品牌,能撑到最后一层的才是头部
+  if (agg.brands.length >= 3) {
+    const appeared = sorted.filter((b) => b.mentioned > 0);
+    const rate20 = sorted.filter((b) => b.valid > 0 && rateOf(b.mentioned, b.valid) >= 0.2);
+    const covered3 = sorted.filter((b) => {
+      const hit = new Map<string, number>();
+      for (const e of agg.engineHits) {
+        if (e.valid > 0 && e.rate > 0) {
+          const name = agg.brands.find((x) => x.brandId === e.brandId)?.name;
+          if (name) hit.set(name, (hit.get(name) ?? 0) + 1);
+        }
+      }
+      return (hit.get(b.name) ?? 0) >= 3;
+    });
+    const heads = sorted.filter((b) => b.valid > 0 && rateOf(b.mentioned, b.valid) >= 0.5);
+    blocks.push({
+      type: 'funnel',
+      title: '品牌存活漏斗',
+      summary: `收录 ${agg.brands.length} 个行业品牌,能撑到最后一层的只有 ${heads.length} 个 —— 那才是真正的 AI 可见度头部。`,
+      note: '品牌口径:与上面回答口径的筛选漏斗互为补充',
+      stages: [
+        { label: '收录品牌', note: '行业品牌清单', count: agg.brands.length },
+        { label: '被主动提及', note: '至少出现在一条有效回答里', count: appeared.length },
+        { label: '提及率 ≥ 20%', note: '开始具备存在感', count: rate20.length },
+        { label: '命中 ≥ 3 个引擎', note: '不依赖单一 AI 平台', count: covered3.length },
+        { label: '头部:提及率 ≥ 50%', note: '稳定的 AI 可见度头部', count: heads.length },
+      ],
+    } satisfies FunnelBlock);
+  }
+
   // ④ 品牌 × 引擎命中率热力图(整列无样本的引擎不显示,避免全空表占版面)
   const engines = [...new Set(agg.engineHits.filter((e) => e.valid > 0).map((e) => e.engine))].sort();
   if (engines.length > 0 && agg.brands.length > 0) {
@@ -265,6 +300,41 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
         name: b.name,
         cells: engines.map((e) => {
           const c = cell.get(`${b.name}:${e}`) ?? cell.get(`${b.brandId}:${e}`);
+          return c && c.valid > 0 ? r3(c.rate) : null;
+        }),
+      })),
+    } satisfies HeatmapBlock);
+  }
+
+  // ④.1 品牌 × 问题层热力图(竞品方法论核心:问题语义分层后,按层看存在感)
+  const layerOrder = [...new Set(agg.layerHits.map((h) => h.layer))].sort((a, b) => {
+    const ia = (INSIGHT_QUESTION_LAYERS as readonly string[]).indexOf(a);
+    const ib = (INSIGHT_QUESTION_LAYERS as readonly string[]).indexOf(b);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+  if (layerOrder.length >= 2 && agg.brands.length > 0) {
+    const cell = new Map<string, { rate: number; valid: number }>();
+    for (const h of agg.layerHits) cell.set(`${h.brand}:${h.layer}`, { rate: h.rate, valid: h.valid });
+    let best: { brand: string; layer: string; rate: number } | null = null;
+    for (const h of agg.layerHits) {
+      if (h.valid < MIN_SAMPLE) continue;
+      if (!best || h.rate > best.rate) best = { brand: h.brand, layer: h.layer, rate: h.rate };
+    }
+    const qNote = agg.layerQuestionCounts.length > 0
+      ? `各层题量:${agg.layerQuestionCounts.map((l) => `${l.layer} ${l.count} 题`).join(' / ')}`
+      : undefined;
+    blocks.push({
+      type: 'heatmap',
+      title: '品牌 × 问题层命中率',
+      summary: best
+        ? `${best.brand} 在${best.layer}的存在感全场最强(${pctText(best.rate)}),分层暴露了各品牌打法的差异。`
+        : undefined,
+      note: ['每格 = 该层问题的提及率(命中 ÷ 有效回答);空白 = 无有效样本', qNote].filter(Boolean).join('。'),
+      columns: layerOrder,
+      rows: agg.brands.map((b) => ({
+        name: b.name,
+        cells: layerOrder.map((layer) => {
+          const c = cell.get(`${b.name}:${layer}`);
           return c && c.valid > 0 ? r3(c.rate) : null;
         }),
       })),
@@ -540,6 +610,26 @@ export async function collectIndustryAggregates(
     group by mf.subject_name, mf.engine
   `);
 
+  const layerRows = rowsOf<{ layer: string; brand_name: string; valid: number; mentioned: number }>(
+    await db.execute(sql`
+      select q.group_name as layer, mf.subject_name as brand_name,
+             count(*)::int                             as valid,
+             count(*) filter (where mf.mentioned)::int as mentioned
+      from mention_facts mf
+      join monitoring_questions q on q.id = mf.question_id
+      where mf.brand_id = ${shadowId} and q.group_name is not null${winMf}
+      group by q.group_name, mf.subject_name
+    `),
+  );
+  const layerQuestionCounts = rowsOf<{ layer: string; count: number }>(
+    await db.execute(sql`
+      select group_name as layer, count(*)::int as count
+      from monitoring_questions
+      where brand_id = ${shadowId} and group_name is not null and status = 'active'
+      group by group_name
+    `),
+  );
+
   const landscape = await db.execute(sql`
     select mf.subject_name,
            min(case mf.subject_kind when 'self' then 1 when 'competitor' then 2 else 3 end) as kind_order,
@@ -771,6 +861,13 @@ export async function collectIndustryAggregates(
     to: new Date().toISOString(),
     brands,
     engineHits,
+    layerHits: layerRows.map((r) => ({
+      layer: r.layer,
+      brand: r.brand_name,
+      valid: num(r.valid),
+      rate: num(r.valid) > 0 ? num(r.mentioned) / num(r.valid) : 0,
+    })),
+    layerQuestionCounts,
     funnel,
     landscape: rowsOf<{ subject_name: string; kind_order: number; mentions: string; runs: string }>(landscape).map(
       (r) => ({

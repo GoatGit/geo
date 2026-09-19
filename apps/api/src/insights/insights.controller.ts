@@ -15,7 +15,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { IsArray, IsBoolean, IsIn, IsInt, IsObject, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { AdminGuard } from '../admin/admin.guard';
 import { currentAccount, Public } from '../common/auth';
 import { InsightsService, type UpsertInsightInput } from './insights.service';
@@ -86,6 +86,9 @@ class UpsertInsightDto {
 
   @IsOptional() @IsBoolean()
   featured?: boolean;
+
+  @IsOptional() @IsString() @MaxLength(400)
+  disclosure?: string;
 }
 
 /** PATCH 专用:全字段可选(ValidationPipe 按类元数据校验,Partial<T> 类型别名不生效)。 */
@@ -219,8 +222,11 @@ export class AdminInsightsController {
   }
 
   @Post('industries/:id/questions/manual')
-  addQuestion(@Param('id', ParseIntPipe) id: number, @Body() dto: { text: string; type: 'ranking' | 'reputation' }) {
-    return this.insights.addIndustryQuestion(id, dto.text, dto.type === 'reputation' ? 'reputation' : 'ranking');
+  addQuestion(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: { text: string; type: 'ranking' | 'reputation'; layer?: string | null },
+  ) {
+    return this.insights.addIndustryQuestion(id, dto.text, dto.type === 'reputation' ? 'reputation' : 'ranking', dto.layer ?? null);
   }
 
   @Delete('industries/:id/questions/:qid')

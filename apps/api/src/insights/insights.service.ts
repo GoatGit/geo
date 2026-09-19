@@ -11,7 +11,7 @@ import { chatCompletion, InsightAgent } from '@geo/insight-agent';
 import { normalizeWebsiteInput, probeWebsite } from './website-discovery';
 import { INSIGHTS_QUEUE, type InsightBuildStatus } from '@geo/shared';
 import type { InsightBlock, InsightCover } from '@geo/shared';
-import { INSIGHT_BLOCK_TYPES } from '@geo/shared';
+import { INSIGHT_BLOCK_TYPES, INSIGHT_QUESTION_LAYERS } from '@geo/shared';
 import { DB } from '../common/infra.module';
 import { loadEnv } from '../config/env';
 
@@ -27,6 +27,8 @@ export interface UpsertInsightInput {
   blocks?: InsightBlock[];
   status?: 'draft' | 'published';
   featured?: boolean;
+  /** 披露/偏向说明(报告尾部信任层) */
+  disclosure?: string | null;
 }
 
 /** blocks 结构校验:类型合法 + 必填字段存在(管理员 JSON 编辑的守门员)。 */
@@ -259,13 +261,24 @@ export class InsightsService implements OnModuleDestroy {
       .orderBy(insightQuestions.id);
   }
 
-  async addIndustryQuestion(industryId: number, text: string, type: 'ranking' | 'reputation') {
+  async addIndustryQuestion(
+    industryId: number,
+    text: string,
+    type: 'ranking' | 'reputation',
+    layer?: string | null,
+  ) {
     const clean = text.trim();
     if (clean.length < 8 || clean.length > 60) throw new HttpException('问题长度需在 8-60 字', HttpStatus.BAD_REQUEST);
+    if (layer != null && !(INSIGHT_QUESTION_LAYERS as readonly string[]).includes(layer)) {
+      throw new HttpException(`未知的问题分层: ${layer}`, HttpStatus.BAD_REQUEST);
+    }
     const row = (
-      await this.db.insert(insightQuestions).values({ industryId, textRaw: clean, type: type === 'reputation' ? 'reputation' : 'ranking' }).returning()
+      await this.db
+        .insert(insightQuestions)
+        .values({ industryId, textRaw: clean, type: type === 'reputation' ? 'reputation' : 'ranking', layer: layer ?? null })
+        .returning()
     )[0]!;
-    return { id: row.id, text: row.textRaw };
+    return { id: row.id, text: row.textRaw, layer: row.layer };
   }
 
   async removeIndustryQuestionRow(industryId: number, questionId: number) {
@@ -351,6 +364,8 @@ export class InsightsService implements OnModuleDestroy {
           textRaw: q.textRaw,
           textExpanded: q.textRaw,
           type: q.type === 'reputation' ? 'reputation' : 'ranking',
+          // 分层随问题同步到 group_name:聚合层据此还原品牌 × 问题层命中率
+          groupName: q.layer ?? undefined,
           status: 'active',
         });
       }
@@ -479,6 +494,7 @@ export class InsightsService implements OnModuleDestroy {
           blocks: (input.blocks ?? []) as unknown[],
           status: input.status ?? 'draft',
           featured: input.featured ?? false,
+          disclosure: input.disclosure ?? null,
           publishedAt: input.status === 'published' ? new Date() : null,
         })
         .returning()
@@ -489,7 +505,7 @@ export class InsightsService implements OnModuleDestroy {
   async update(id: number, patch: Partial<UpsertInsightInput>) {
     if (patch.blocks !== undefined) validateBlocks(patch.blocks);
     const next: Record<string, unknown> = { updatedAt: new Date() };
-    for (const key of ['industryId', 'issue', 'title', 'summary', 'cover', 'blocks', 'status', 'featured'] as const) {
+    for (const key of ['industryId', 'issue', 'title', 'summary', 'cover', 'blocks', 'status', 'featured', 'disclosure'] as const) {
       if (patch[key] !== undefined) next[key] = patch[key];
     }
     // 发布态切换时刷新发布时间;featured 只对已发布报告生效
@@ -570,6 +586,7 @@ export class InsightsService implements OnModuleDestroy {
       blocks: r.blocks as InsightBlock[],
       status: r.status as 'draft' | 'published',
       featured: r.featured,
+      disclosure: r.disclosure,
       buildStatus: r.buildStatus as InsightBuildStatus,
       buildError: r.buildError,
       builtAt: r.builtAt,
