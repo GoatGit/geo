@@ -6,7 +6,7 @@ import { api, apiDownload } from '@/lib/api';
 import { useToast } from '@/components/toast';
 import { PageHeader } from '@/components/ui';
 import { InsightBlocks } from '@/components/insight-charts';
-import type { InsightBlock, InsightBuildStatus } from '@geo/shared';
+import { INSIGHT_QUESTION_LAYERS, type InsightBlock, InsightBuildStatus } from '@geo/shared';
 
 /**
  * 平台后台 · 行业洞察生成器(向导式,docs/01 IA ⑤ 市场化):
@@ -55,6 +55,7 @@ interface AdminInsightDto {
   buildError: string | null;
   builtAt: string | null;
   windowDays: number | null;
+  disclosure: string | null;
 }
 
 export default function AdminInsightsPage() {
@@ -75,6 +76,8 @@ export default function AdminInsightsPage() {
   const [editing, setEditing] = useState<number | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editSummary, setEditSummary] = useState('');
+  const [editDisclosure, setEditDisclosure] = useState('');
+  const [disclosureFor, setDisclosureFor] = useState<number | null>(null);
   const [windowDays, setWindowDays] = useState<number | null>(30);
 
   const [brandSuggest, setBrandSuggest] = useState<BrandSuggestion[] | null>(null);
@@ -82,6 +85,7 @@ export default function AdminInsightsPage() {
   const [manualBrandDesc, setManualBrandDesc] = useState('');
   const [manualQ, setManualQ] = useState('');
   const [manualQType, setManualQType] = useState<'ranking' | 'reputation'>('ranking');
+  const [manualQLayer, setManualQLayer] = useState<string | null>(null);
   const [qSuggest, setQSuggest] = useState<Array<{ type: string; text: string }> | null>(null);
 
   const refresh = () => {
@@ -195,6 +199,8 @@ export default function AdminInsightsPage() {
           setManualQ={setManualQ}
           manualQType={manualQType}
           setManualQType={setManualQType}
+          manualQLayer={manualQLayer}
+          setManualQLayer={setManualQLayer}
           qSuggest={qSuggest}
           setQSuggest={setQSuggest}
           refreshWizard={refreshWizard}
@@ -217,6 +223,10 @@ export default function AdminInsightsPage() {
           setEditing={setEditing}
           editTitle={editTitle}
           setEditTitle={setEditTitle}
+          editDisclosure={editDisclosure}
+          setEditDisclosure={setEditDisclosure}
+          disclosureFor={disclosureFor}
+          setDisclosureFor={setDisclosureFor}
           editSummary={editSummary}
           setEditSummary={setEditSummary}
           refresh={refresh}
@@ -243,6 +253,8 @@ function IndustryWizard(props: {
   setManualQ: (v: string) => void;
   manualQType: 'ranking' | 'reputation';
   setManualQType: (v: 'ranking' | 'reputation') => void;
+  manualQLayer: string | null;
+  setManualQLayer: (v: string | null) => void;
   qSuggest: Array<{ type: string; text: string }> | null;
   setQSuggest: (v: Array<{ type: string; text: string }> | null) => void;
   refreshWizard: (id: number) => void;
@@ -252,6 +264,7 @@ function IndustryWizard(props: {
   const {
     industryId, busy, setBusy, brandSuggest, setBrandSuggest, brandPicked, setBrandPicked,
     manualBrandDesc, setManualBrandDesc, manualQ, setManualQ, manualQType, setManualQType,
+    manualQLayer, setManualQLayer,
     qSuggest, setQSuggest, refreshWizard, toast,
   } = props;
 
@@ -594,12 +607,16 @@ function ReportsSection(props: {
   setEditing: (v: number | null) => void;
   editTitle: string;
   setEditTitle: (v: string) => void;
+  editDisclosure: string;
+  setEditDisclosure: (v: string) => void;
+  disclosureFor: number | null;
+  setDisclosureFor: (v: number | null) => void;
   editSummary: string;
   setEditSummary: (v: string) => void;
   refresh: () => void;
   toast: (msg: string, kind?: 'ok' | 'err') => void;
 }) {
-  const { list, industries, windowDays, busy, setBusy, expanded, setExpanded, editing, setEditing, editTitle, setEditTitle, editSummary, setEditSummary, refresh, toast } = props;
+  const { list, industries, windowDays, busy, setBusy, expanded, setExpanded, editing, setEditing, editTitle, setEditTitle, editSummary, setEditSummary, editDisclosure, setEditDisclosure, disclosureFor, setDisclosureFor, refresh, toast } = props;
 
   const run = async (industry: IndustryRow) => {
     setBusy(`run:${industry.id}`);
@@ -638,7 +655,7 @@ function ReportsSection(props: {
 
   const saveEdit = async (row: AdminInsightDto) => {
     try {
-      await api(`/admin/insights/${row.id}`, { method: 'PATCH', json: { status: row.status, featured: row.featured, title: editTitle, summary: editSummary } });
+      await api(`/admin/insights/${row.id}`, { method: 'PATCH', json: { status: row.status, featured: row.featured, title: editTitle, summary: editSummary, disclosure: editDisclosure } });
       toast('已保存');
       setEditing(null);
       refresh();
@@ -688,6 +705,7 @@ function ReportsSection(props: {
                 <div className="mt-2 space-y-2">
                   <input className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} maxLength={60} />
                   <textarea className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs leading-5" rows={2} value={editSummary} onChange={(e) => setEditSummary(e.target.value)} maxLength={160} />
+                  <textarea className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs leading-5" rows={2} value={editDisclosure} onChange={(e) => setEditDisclosure(e.target.value)} maxLength={400} placeholder="披露/偏向说明(报告尾部展示,留空不展示):利益关系、题目偏向等" />
                   <div className="flex gap-2">
                     <button className="btn-primary h-8 px-3 text-xs" onClick={() => void saveEdit(row)}>保存</button>
                     <button className="btn-ghost h-8 px-3 text-xs" onClick={() => setEditing(null)}>取消</button>
@@ -717,6 +735,8 @@ function ReportsSection(props: {
                 className="h-8 rounded-lg border bg-white px-3 text-xs font-medium text-slate-600 hover:border-brand-300"
                 onClick={() => {
                   setExpanded(expanded === row.id ? null : row.id);
+                  setDisclosureFor(expanded === row.id ? null : row.id);
+                  setEditDisclosure(row.disclosure ?? '');
                   if (editing !== row.id) {
                     setEditTitle(row.title);
                     setEditSummary(row.summary);
