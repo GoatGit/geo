@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Badge, EmptyState, Skeleton } from '@/components/ui';
@@ -16,6 +16,7 @@ import type { InsightDetailDto } from '@geo/shared';
  */
 export default function InsightDetailPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const id = Number(params?.id);
   const query = useQuery({
     queryKey: ['insight', id],
@@ -53,14 +54,19 @@ export default function InsightDetailPage() {
             <span>·</span>
             <span>{d.industry} AI 可见度</span>
             {d.featured && <Badge label="官网精选" tone="brand" />}
-            <a
-              href={`/api/insights/${d.id}/pdf`}
-              className="btn-soft ml-auto h-8 px-3 text-xs"
-              download
-              title="下载 PDF 版报告"
-            >
-              下载 PDF
-            </a>
+            <span className="ml-auto flex items-center gap-2">
+              <button className="btn-soft h-8 px-3 text-xs" onClick={() => router.back()} title="返回上一页">
+                ← 返回
+              </button>
+              <a
+                href={`/api/insights/${d.id}/pdf`}
+                className="btn-soft h-8 px-3 text-xs"
+                download
+                title="下载 PDF 版报告"
+              >
+                下载 PDF
+              </a>
+            </span>
           </p>
           <h1 className="mt-3 text-[30px] font-bold leading-tight tracking-tight text-slate-900">{d.title}</h1>
           <div className="mt-3 h-1 rounded bg-slate-900/90" />
