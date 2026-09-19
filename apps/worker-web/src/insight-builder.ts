@@ -14,7 +14,6 @@ import type {
   ScatterBlock,
   TakeawayBlock,
   TrendBlock,
-  INSIGHT_QUESTION_LAYERS,
 } from '@geo/shared';
 
 /**

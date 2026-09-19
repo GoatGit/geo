@@ -35,6 +35,15 @@ function fixture(): IndustryAggregates {
       { brandId: 2, engine: 'doubao', rate: 0.5, valid: 50 },
       { brandId: 2, engine: 'deepseek', valid: 0, rate: 0 },
     ],
+    layerHits: [
+      { layer: '场景人群层', brand: '品牌A', rate: 0.9, valid: 30 },
+      { layer: '场景人群层', brand: '品牌B', rate: 0.3, valid: 30 },
+      { layer: '品类行业层', brand: '品牌A', rate: 0.7, valid: 30 },
+    ],
+    layerQuestionCounts: [
+      { layer: '场景人群层', count: 2 },
+      { layer: '品类行业层', count: 2 },
+    ],
     funnel: { answers: 200, mentioned: 120, top3: 60, top1: 22 },
     landscape: [
       { name: '品牌A', kind: 'self', mentions: 80, runs: 60 },
@@ -118,6 +127,38 @@ describe('行业洞察组稿(运行 → 数据报告)', () => {
     expect(a.values[4]).toBeCloseTo(0.04);
     expect(b.values[3]).toBeCloseTo(0.3);
     expect(b.values[4]).toBe(0);
+  });
+
+  it('品牌 × 问题层热力图:列按分层序,无样本格为 null', () => {
+    const c = composeIndustryInsight(fixture());
+    const heat = c.blocks.find((b) => b.type === 'heatmap' && b.title === '品牌 × 问题层命中率') as HeatmapBlock;
+    expect(heat.columns).toEqual(['场景人群层', '品类行业层']);
+    const b2 = heat.rows.find((r) => r.name === '品牌B')!;
+    expect(b2.cells[0]).toBeCloseTo(0.3);
+    expect(b2.cells[1]).toBeNull();
+  });
+
+  it('品牌存活漏斗:收录→提及→达标→头部收口(≥3 品牌才出块)', () => {
+    const agg = fixture();
+    agg.brands.push({
+      brandId: 3, name: '品牌C', valid: 60, mentioned: 30, ranked: 30, top3: 12, top1: 4,
+      avgRank: 2.5, questions: 10, answers: 60, failed: 0, quotaBlocked: 0,
+      repTotal: 8, repPos: 2, repNeg: 3, ownedHits: 0,
+    });
+    const c = composeIndustryInsight(agg);
+    const funnel = c.blocks.find(
+      (b) => b.type === 'funnel' && b.title === '品牌存活漏斗',
+    ) as FunnelBlock;
+    expect(funnel.stages.map((s) => s.label)).toEqual([
+      '收录品牌', '被主动提及', '提及率 ≥ 20%', '命中 ≥ 3 个引擎', '头部:提及率 ≥ 50%',
+    ]);
+    expect(funnel.stages[0].count).toBe(3);
+    expect(funnel.stages.at(-1)!.count).toBeGreaterThanOrEqual(0);
+    // 两品牌时不产出(存活叙事需要 ≥3)
+    const small = composeIndustryInsight(fixture());
+    expect(
+      small.blocks.find((b) => b.type === 'funnel' && b.title === '品牌存活漏斗'),
+    ).toBeUndefined();
   });
 
   it('品牌口碑正面率排行出块:n 携带口碑回答数', () => {
