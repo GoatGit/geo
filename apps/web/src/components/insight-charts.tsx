@@ -9,6 +9,8 @@ import type { InsightBlock } from '@geo/shared';
 
 const INK = '#0f172a';
 const NAVY = '#1d3fae';
+const BLUE = '#4c6bc6';
+const GROUP_COLORS: Record<string, string> = { domestic: BLUE, intl: '#9aa3af', highlight: '#c2570b', normal: BLUE };
 const GRAY = '#9aa3af';
 const ORANGE = '#c2570b';
 const TEAL = '#1f7a70';
@@ -324,69 +326,82 @@ function TrendChart({ unit, points }: Extract<InsightBlock, { type: 'trend' }>) 
 
 function ScatterChart({ xLabel, yLabel, diagonal, points, groups }: Extract<InsightBlock, { type: 'scatter' }>) {
   const W = 520;
-  const H = 360;
-  const m = { l: 46, r: 24, t: 18, b: 40 };
+  const H = 380;
+  const m = { l: 46, r: 24, t: 20, b: 40 };
   const iw = W - m.l - m.r;
   const ih = H - m.t - m.b;
-  // 比率域固定 0-100%:坐标与刻度同域归一,数据点 clamp 防溢出(此前 axisMax 随数据算出 1.1,
-  // 网格画到负坐标、点越出画布、标签被截断)
-  const axisMax = 1;
-  const clamp01 = (v: number) => Math.min(1, Math.max(0, Number.isFinite(v) ? v : 0));
-  const X = (v: number) => m.l + clamp01(v / axisMax) * iw;
-  const Y = (v: number) => H - m.b - clamp01(v / axisMax) * ih;
+  // 数据最大值再留 12% 头部空间:100% 的点不能贴边/出界
+  const dataMax = Math.max(...points.map((p) => Math.max(p.x, p.y)), 0.5);
+  const axisMax = Math.min(1.2, Math.ceil(dataMax * 1.12 * 10) / 10);
+  const X = (v: number) => m.l + (v / axisMax) * iw;
+  const Y = (v: number) => m.t + (1 - v / axisMax) * ih;
   const maxBySize = Math.max(...points.map((p) => p.size ?? 1), 1);
-  // 品牌点用稳定品牌色(跨图同色);灰组(intl/未监测)保留灰以示区分
   const colorOf = (p: (typeof points)[number]) => {
     const g = groups?.find((x) => x.key === p.group);
     if (g?.color === 'accent') return ORANGE;
     if (g?.color === 'gray') return GRAY;
     if (g?.color === 'brand') return NAVY;
-    if (p.group === 'intl') return GRAY;
-    return nameColor(p.name);
+    return GROUP_COLORS[p.group ?? 'normal'] ?? BLUE;
   };
-  const ticks = [0, 0.25, 0.5, 0.75, 1];
-  // 标签防溢出:点落在右半区时标签翻到点左侧,画布内永远完整
-  const labelLeft = (px: number) => px > W * 0.62;
+  const ticks = [0, 0.25, 0.5, 0.75, 1].filter((t) => t <= axisMax + 1e-9);
+
+  // 标签防重叠:大气泡标签画进气泡内;其余右/左/上依次找空位
+  const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
+  const hits = (x: number, y: number, w: number, h: number) =>
+    placed.some((b) => x < b.x + b.w && x + w > b.x && y < b.y + b.h && y + h > b.y);
+
+  const bubbles = points.map((p) => {
+    const r = 5 + ((p.size ?? 1) / maxBySize) * 9;
+    return { p, r, cx: X(p.x), cy: Y(p.y) };
+  });
+
+  const labels = bubbles.map(({ p, r, cx, cy }) => {
+    const w = Math.min(p.name.length * 11 + 14, 150);
+    const h = 14;
+    const color = colorOf(p);
+    if (r >= 13) {
+      placed.push({ x: cx - w / 2, y: cy - h / 2, w, h });
+      return { key: p.name, x: cx, y: cy + 4, w, text: p.name, anchor: 'middle' as const, color: '#ffffff' };
+    }
+    let lx = cx + r + 4;
+    let ly = cy - 7;
+    if (lx + w > W - m.r || placed.some((b) => lx < b.x + b.w && lx + w > b.x && ly < b.y + h && ly + h > b.y)) {
+      lx = cx - r - 4 - w;
+      ly = cy - 7;
+      if (lx < m.l || placed.some((b) => lx < b.x + b.w && lx + w > b.x && ly < b.y + h && ly + h > b.y)) {
+        lx = Math.max(m.l, cx - w / 2);
+        ly = cy - r - h - 2;
+      }
+    }
+    lx = Math.max(m.l, Math.min(lx, W - m.r - w));
+    placed.push({ x: lx, y: ly, w, h });
+    return { key: p.name, x: lx, y: ly + 10, w, text: p.name, anchor: 'start' as const, color: color === GRAY ? '#64748b' : color };
+  });
+
   return (
     <div>
       <svg width="100%" viewBox={`0 0 ${W} ${H}`} role="img">
         {ticks.map((t) => (
           <g key={t}>
-            <line x1={X(t)} y1={Y(0)} x2={X(t)} y2={Y(1)} stroke="#eef2f7" />
-            <line x1={X(0)} y1={Y(t)} x2={X(1)} y2={Y(t)} stroke="#eef2f7" />
+            <line x1={X(t)} y1={Y(0)} x2={X(t)} y2={Y(axisMax)} stroke="#eef2f7" />
+            <line x1={X(0)} y1={Y(t)} x2={X(axisMax)} y2={Y(t)} stroke="#eef2f7" />
             <text x={X(t)} y={H - m.b + 16} textAnchor="middle" fontSize={10} fill="#94a3b8">{Math.round(t * 100)}%</text>
             <text x={m.l - 8} y={Y(t) + 3} textAnchor="end" fontSize={10} fill="#94a3b8">{Math.round(t * 100)}%</text>
           </g>
         ))}
-        <line x1={X(0)} y1={Y(0)} x2={X(1)} y2={Y(0)} stroke="#cbd5e1" />
-        <line x1={X(0)} y1={Y(0)} x2={X(0)} y2={Y(1)} stroke="#cbd5e1" />
-        {diagonal && (
-          <line x1={X(0)} y1={Y(0)} x2={X(1)} y2={Y(1)} stroke="#94a3b8" strokeDasharray="4 4" />
-        )}
-        {points.map((p) => {
-          const r = 5 + ((p.size ?? 1) / maxBySize) * 9;
-          const px = X(p.x);
-          const py = Y(p.y);
-          const flip = labelLeft(px);
-          return (
-            <g key={p.name}>
-              <circle cx={px} cy={py} r={r} fill={colorOf(p)} fillOpacity={0.92} />
-              <text
-                x={flip ? px - r - 4 : px + r + 4}
-                y={py + 3}
-                textAnchor={flip ? 'end' : 'start'}
-                fontSize={11}
-                fontWeight={600}
-                fill={colorOf(p) === GRAY ? '#64748b' : colorOf(p)}
-              >
-                {p.name}
-                {p.note ? ` ${p.note}` : ''}
-              </text>
-            </g>
-          );
-        })}
+        <line x1={X(0)} y1={Y(0)} x2={X(axisMax)} y2={Y(0)} stroke="#cbd5e1" />
+        <line x1={X(0)} y1={Y(0)} x2={X(0)} y2={Y(axisMax)} stroke="#cbd5e1" />
+        {diagonal && <line x1={X(0)} y1={Y(0)} x2={X(axisMax)} y2={Y(axisMax)} stroke="#94a3b8" strokeDasharray="4 4" />}
+        {bubbles.map(({ p, r, cx, cy }) => (
+          <circle key={`b-${p.name}`} cx={cx} cy={cy} r={r} fill={colorOf(p)} fillOpacity={0.92} />
+        ))}
+        {labels.map((l, i) => (
+          <text key={i} x={l.x} y={l.y} textAnchor={l.anchor} fontSize={11} fontWeight={600} fill={l.color}>
+            {l.text}
+          </text>
+        ))}
         <text x={X(axisMax)} y={H - 6} textAnchor="end" fontSize={11} fill="#475569">{xLabel}</text>
-        <text x={12} y={m.t - 2} fontSize={11} fill="#475569">{yLabel}</text>
+        <text x={12} y={m.t - 6} fontSize={11} fill="#475569">{yLabel}</text>
       </svg>
       {groups && groups.length > 0 && (
         <ul className="mt-1 flex flex-wrap gap-4 text-xs text-slate-600">
@@ -402,3 +417,4 @@ function ScatterChart({ xLabel, yLabel, diagonal, points, groups }: Extract<Insi
     </div>
   );
 }
+

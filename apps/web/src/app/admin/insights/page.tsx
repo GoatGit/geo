@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, apiDownload } from '@/lib/api';
 import { useToast } from '@/components/toast';
@@ -80,6 +80,21 @@ export default function AdminInsightsPage() {
   const [disclosureFor, setDisclosureFor] = useState<number | null>(null);
   const [windowDays, setWindowDays] = useState<number | null>(30);
 
+  // 用户分享审核(分享 → 审核通过 → 官网首页)
+  const shares = useQuery({ queryKey: ['admin-insight-shares'], queryFn: () => api<AdminInsightDto[]>('/admin/insights/shares'), refetchInterval: 30_000 });
+  const review = useMutation({
+    mutationFn: (input: { id: number; approve: boolean; note?: string }) =>
+      api(`/admin/insights/${input.id}/review`, { method: 'POST', json: { approve: input.approve, note: input.note } }),
+    onSuccess: (_d, v) => {
+      toast(v.approve ? '已通过并发布到官网首页' : '已驳回');
+      void queryClient.invalidateQueries({ queryKey: ['admin-insight-shares'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin-insights'] });
+    },
+    onError: (e) => toast((e as Error).message, 'err'),
+  });
+  const [rejectFor, setRejectFor] = useState<number | null>(null);
+  const [rejectNote, setRejectNote] = useState('');
+
   const [brandSuggest, setBrandSuggest] = useState<BrandSuggestion[] | null>(null);
   const [brandPicked, setBrandPicked] = useState<Set<string>>(new Set());
   const [manualBrandDesc, setManualBrandDesc] = useState('');
@@ -126,6 +141,69 @@ export default function AdminInsightsPage() {
         title="行业洞察生成器"
         desc="① 选行业 → ② 监测品牌(AI 推荐+人工) → ③ 行业问题(AI 生成+人工) → ④ AI 生成报告 → ⑤ 预览微调 → ⑥ 发布"
       />
+
+      {/* 用户分享审核(待处理置顶) */}
+      {(shares.data ?? []).length > 0 && (
+        <section className="card mt-4 border-warn/40 p-5">
+          <h2 className="mb-1 font-semibold text-slate-900">
+            分享审核 <span className="ml-1 rounded bg-warn-50 px-1.5 py-0.5 text-[10px] text-warn">{(shares.data ?? []).length} 份待处理</span>
+          </h2>
+          <p className="mb-3 text-xs text-slate-500">用户提交分享的行业洞察;通过即发布到官网首页(公开)。</p>
+          <div className="space-y-2">
+            {(shares.data ?? []).map((r) => (
+              <div key={r.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-100 p-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-slate-800">
+                    <span className="mr-2 text-xs text-brand-700">{r.industry}</span>
+                    {r.title}
+                  </p>
+                  <p className="mt-0.5 line-clamp-1 text-xs text-slate-500">{r.summary}</p>
+                  {(r as { shareNote?: string | null }).shareNote && (
+                    <p className="mt-0.5 text-xs text-slate-400">用户留言:{(r as { shareNote?: string }).shareNote}</p>
+                  )}
+                </div>
+                <a href={`/insights/${r.id}`} target="_blank" rel="noreferrer" className="btn-ghost h-8 px-3 text-xs">
+                  预览
+                </a>
+                <button className="btn-primary h-8 px-3 text-xs" disabled={review.isPending} onClick={() => review.mutate({ id: r.id, approve: true })}>
+                  通过并发布
+                </button>
+                <button
+                  className="h-8 rounded border border-slate-200 px-3 text-xs transition-colors hover:border-bad hover:text-bad"
+                  onClick={() => setRejectFor(r.id)}
+                >
+                  驳回
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* 驳回理由弹窗 */}
+      {rejectFor != null && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink-950/60 p-4" onClick={() => setRejectFor(null)}>
+          <div className="animate-fade-up w-full max-w-sm rounded-xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-semibold text-slate-900">驳回分享</h3>
+            <textarea
+              className="input mt-3 h-20 w-full resize-none"
+              placeholder="驳回理由(会展示给提交用户)"
+              value={rejectNote}
+              onChange={(e) => setRejectNote(e.target.value)}
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button className="btn-ghost" onClick={() => setRejectFor(null)}>取消</button>
+              <button
+                className="btn-primary"
+                disabled={review.isPending}
+                onClick={() => review.mutate({ id: rejectFor, approve: false, note: rejectNote }, { onSuccess: () => { setRejectFor(null); setRejectNote(''); } })}
+              >
+                确认驳回
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ① 行业 */}
       <section className="card rise mt-4 p-6">

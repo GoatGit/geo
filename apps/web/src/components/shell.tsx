@@ -27,6 +27,7 @@ import {
   IconVoice,
   IconSwords,
   IconWallet,
+  IconSpark,
 } from './icons';
 
 interface BrandRow {
@@ -44,7 +45,7 @@ const NAV: NavGroup[] = [
   { kind: 'item', item: { href: '/dashboard', label: '总览', icon: <IconDashboard /> } },
   {
     kind: 'group',
-    label: '监测',
+    label: '品牌洞察',
     icon: <IconRank />,
     items: [
       { href: '/monitor/rankings', label: '排名透视', icon: <IconRank /> },
@@ -53,6 +54,7 @@ const NAV: NavGroup[] = [
       { href: '/reputation', label: '口碑分析', icon: <IconVoice /> },
     ],
   },
+  { kind: 'item', item: { href: '/industry-insights', label: '行业洞察', icon: <IconSpark /> } },
   { kind: 'item', item: { href: '/reports', label: '报告中心', icon: <IconReport /> } },
   { kind: 'item', item: { href: '/billing', label: '套餐与账单', icon: <IconWallet /> } },
   {

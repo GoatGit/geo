@@ -104,7 +104,7 @@ describe('行业洞察组稿(运行 → 数据报告)', () => {
     const heat = c.blocks.find((b) => b.type === 'heatmap') as HeatmapBlock;
     // 列按字典序:deepseek 在前,doubao 在后
     const b2 = heat.rows.find((r) => r.name === '品牌B')!;
-    expect(heat.columns).toEqual(['deepseek', 'doubao']);
+    expect(heat.columns).toEqual(['DeepSeek', '豆包']);
     expect(b2.cells[0]).toBeNull();
     expect(b2.cells[1]).toBeCloseTo(0.5);
   });

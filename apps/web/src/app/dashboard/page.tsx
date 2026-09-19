@@ -450,21 +450,41 @@ function Step({
 }
 
 
-/** 行业洞察板块(docs/01 §3.10 扩展):已发布的行业报告卡片,点击进入印刷风详情页。 */
+/** 行业洞察板块(一等公民):我的行业洞察在前(含生成/分享态),官方发布流在后。 */
 function InsightSection() {
-  const insights = useQuery({
-    queryKey: ['insights-published'],
-    queryFn: () => api<InsightSummaryDto[]>('/insights'),
+  const hub = useQuery({
+    queryKey: ['insights-hub'],
+    queryFn: () => api<{
+      mine: Array<{ industryId: number; industry: string; insight: { id: number; issue: string; title: string; summary: string; status: string; buildStatus: string; shareStatus: string } | null }>;
+      official: InsightSummaryDto[];
+    }>('/insights/hub'),
   });
-  if (!insights.data || insights.data.length === 0) return null;
+  const mine = hub.data?.mine ?? [];
+  const official = hub.data?.official ?? [];
+  if (mine.length === 0 && official.length === 0) return null;
   return (
     <section className="card rise p-6">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="font-semibold text-slate-900">行业洞察</h2>
-        <span className="text-[10px] text-slate-400">各行业在主流 AI 引擎中的可见度实测</span>
+        <Link href="/industry-insights" className="text-[11px] text-brand-700 hover:underline">进入行业洞察 →</Link>
       </div>
       <div className="grid gap-3 md:grid-cols-3">
-        {insights.data.slice(0, 6).map((it) => (
+        {mine.filter((m) => m.insight && m.insight.buildStatus === 'idle').map((m) => (
+          <Link
+            key={`mine-${m.industryId}`}
+            href={`/insights/${m.insight!.id}`}
+            className="group rounded-xl border border-brand-100 bg-brand-50/40 p-4 transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-card-hover"
+          >
+            <p className="flex items-center gap-1.5 text-[10px] font-medium text-slate-400">
+              <Badge label="我的" tone="brand" />
+              <Badge label={m.industry} tone="slate" />
+              {m.insight!.status === 'published' ? <Badge label="已发布" tone="good" /> : m.insight!.shareStatus === 'pending' ? <Badge label="审核中" tone="warn" /> : null}
+            </p>
+            <h3 className="mt-2 text-[13px] font-semibold leading-5 text-slate-800 group-hover:text-brand-700">{m.insight!.title}</h3>
+            <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-slate-500">{m.insight!.summary}</p>
+          </Link>
+        ))}
+        {official.filter((o) => !mine.some((m) => m.insight?.id === o.id)).slice(0, 6).map((it) => (
           <Link
             key={it.id}
             href={`/insights/${it.id}`}

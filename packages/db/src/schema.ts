@@ -368,6 +368,10 @@ export const industryInsights = pgTable('industry_insights', {
   /** 运行参数:聚合窗口天数,null=全量历史 */
   windowDays: integer('window_days'),
   publishedAt: timestamp('published_at', { withTimezone: true }),
+  /** 分享流(用户 → 平台审核 → 官网发布):发起账号 / 状态 / 留言或驳回理由 */
+  submittedBy: bigint('submitted_by', { mode: 'number' }),
+  shareStatus: text('share_status').notNull().default('none'),
+  shareNote: text('share_note'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

@@ -1,5 +1,5 @@
 import { and, desc, eq, ne, sql } from 'drizzle-orm';
-import { INSIGHT_QUESTION_LAYERS } from '@geo/shared';
+import { ENGINE_LABELS, INSIGHT_QUESTION_LAYERS, WEB_ENGINES, engineLabel } from '@geo/shared';
 import type { Db } from '@geo/db';
 import { insightIndustries, industryInsights, loadPlatformSettings } from '@geo/db';
 import { classifyDomain } from '@geo/metrics';
@@ -289,12 +289,18 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
         if (name) best = { brand: name, engine: e.engine, rate: e.rate };
       }
     }
+    // 引擎显示名(slug → 中文);本期无有效样本的引擎要明说(通常是登录态缺失)
+    const missing = (WEB_ENGINES as readonly string[]).filter((e) => !engines.includes(e));
     blocks.push({
       type: 'heatmap',
       title: '品牌 × 引擎命中率',
-      summary: best ? `${best.brand} 在 ${best.engine} 的命中率全场最高(${pctText(best.rate)}),各引擎对品牌的偏好差异明显。` : undefined,
-      note: '空白 = 该引擎对该品牌无有效样本',
-      columns: engines,
+      summary: best ? `${best.brand} 在 ${engineLabel(best.engine)} 的命中率全场最高(${pctText(best.rate)}),各引擎对品牌的偏好差异明显。` : undefined,
+      note:
+        '空白 = 该引擎对该品牌无有效样本' +
+        (missing.length > 0
+          ? `;${missing.map((m) => engineLabel(m)).join('/')} 本轮无有效样本(需在账号池完成该引擎登录后重采)`
+          : ''),
+      columns: engines.map((e) => engineLabel(e)),
       rows: agg.brands.map((b) => ({
         name: b.name,
         cells: engines.map((e) => {

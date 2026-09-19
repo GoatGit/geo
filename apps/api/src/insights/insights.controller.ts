@@ -17,7 +17,8 @@ import {
 import type { Request, Response } from 'express';
 import { IsArray, IsBoolean, IsIn, IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { AdminGuard } from '../admin/admin.guard';
-import { currentAccount, Public } from '../common/auth';
+import { currentAccount, Public, verifyAccessToken } from '../common/auth';
+import { loadEnv } from '../config/env';
 import { InsightsService, type UpsertInsightInput } from './insights.service';
 import { renderInsightPdf, type PdfInsight } from './insight-pdf';
 
@@ -134,10 +135,38 @@ export class InsightsController {
     return this.insights.featured();
   }
 
+  /** 用户 hub:我的行业洞察(含生成/分享态)+ 官方发布流(我的在前)。 */
+  @Get('hub')
+  hub(@Req() req: Request) {
+    return this.insights.hub(currentAccount(req).accountId);
+  }
+
+  /** 用户触发生成(限本人品牌行业,12h 频控)。 */
+  @Post('industries/:id/run')
+  runForMe(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { windowDays?: number | null },
+  ) {
+    const wd = body?.windowDays == null ? null : Math.min(Math.max(Number(body.windowDays), 1), 90);
+    return this.insights.runForAccount(currentAccount(req).accountId, id, wd);
+  }
+
+  /** 用户提交分享:进入平台审核流,通过后发布到官网首页。 */
+  @Post(':id/share')
+  share(@Req() req: Request, @Param('id', ParseIntPipe) id: number, @Body() body: { note?: string }) {
+    return this.insights.submitShare(currentAccount(req).accountId, id, body?.note);
+  }
+
+  /** 详情:已发布公开;未发布的仅本人行业可见(可选 Bearer 手动解析,公开链接匿名可达)。 */
   @Public()
   @Get(':id')
-  detail(@Param('id', ParseIntPipe) id: number) {
-    return this.insights.publishedDetail(id);
+  async detail(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
+    const accountId = optionalAccountId(req);
+    if (accountId == null) return this.insights.publishedDetail(id);
+    const found = await this.insights.detailFor(accountId, id);
+    if (!found) return this.insights.publishedDetail(id);
+    return this.insights.adminGet(id);
   }
 
   @Get()
@@ -146,12 +175,31 @@ export class InsightsController {
     return this.insights.publishedList(industry ? Number(industry) : undefined);
   }
 
-  /** 已发布报告 PDF 下载(公开引流;草稿走 admin 端点)。 */
+  /** PDF:同详情访问控制(已发布公开,草稿本人行业)。 */
   @Public()
   @Get(':id/pdf')
-  async pdf(@Param('id', ParseIntPipe) id: number, @Res() res: Response) {
+  async pdf(@Req() req: Request, @Param('id', ParseIntPipe) id: number, @Res() res: Response) {
+    const accountId = optionalAccountId(req);
+    if (accountId != null) {
+      const found = await this.insights.detailFor(accountId, id);
+      if (found && found.mine) {
+        await sendPdf(res, found.row as never);
+        return;
+      }
+    }
     const detail = await this.insights.publishedDetail(id);
     await sendPdf(res, detail);
+  }
+}
+
+/** 公开路由上的可选身份:无/坏 token 返回 null(不抛 401,公开链接匿名可达)。 */
+function optionalAccountId(req: Request): number | null {
+  const header = req.headers.authorization ?? '';
+  if (!header.startsWith('Bearer ')) return null;
+  try {
+    return verifyAccessToken(loadEnv(), header.slice(7)).accountId;
+  } catch {
+    return null;
   }
 }
 
@@ -284,5 +332,21 @@ export class AdminInsightsController {
   @Delete(':id')
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.insights.remove(id);
+  }
+
+  /** 分享审核:待审列表(用户提交的分享)。 */
+  @Get('shares')
+  shares() {
+    return this.insights.pendingShares();
+  }
+
+  /** 审核动作:approve → 发布上官网首页;reject → 带理由退回。 */
+  @Post(':id/review')
+  review(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { approve?: boolean; note?: string },
+  ) {
+    return this.insights.review(id, Boolean(body?.approve), body?.note, currentAccount(req).accountId);
   }
 }

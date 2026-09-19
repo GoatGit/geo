@@ -528,6 +528,145 @@ export class InsightsService implements OnModuleDestroy {
     return { deleted: true };
   }
 
+  // ===== 用户侧(行业洞察一等公民:hub / 生成 / 分享)=====
+
+  /** 用户品牌所属的行业名集合(与洞察行业表按名对齐)。 */
+  async industriesOfAccount(accountId: number): Promise<string[]> {
+    const rows = await this.db
+      .selectDistinct({ industry: brands.industry })
+      .from(brands)
+      .where(eq(brands.accountId, accountId));
+    return rows.map((r) => r.industry).filter((x): x is string => Boolean(x));
+  }
+
+  /**
+   * 用户 hub:我的行业洞察(本人行业全部状态的最新一期,含可生成/分享态)+ 官方已发布流。
+   */
+  async hub(accountId: number) {
+    const myIndustries = await this.industriesOfAccount(accountId);
+    const all = await this.db.select().from(insightIndustries).where(eq(insightIndustries.active, true));
+    const mine = await Promise.all(
+      all
+        .filter((ind) => myIndustries.includes(ind.name))
+        .map(async (ind) => {
+          const latest = (
+            await this.db
+              .select()
+              .from(industryInsights)
+              .where(eq(industryInsights.industryId, ind.id))
+              .orderBy(desc(industryInsights.updatedAt))
+              .limit(1)
+          )[0];
+          return {
+            industryId: ind.id,
+            industry: ind.name,
+            insight: latest
+              ? {
+                  id: latest.id,
+                  issue: latest.issue,
+                  title: latest.title,
+                  summary: latest.summary,
+                  status: latest.status,
+                  buildStatus: latest.buildStatus,
+                  builtAt: latest.builtAt,
+                  windowDays: latest.windowDays,
+                  shareStatus: latest.shareStatus,
+                  shareNote: latest.shareNote,
+                }
+              : null,
+          };
+        }),
+    );
+    const official = await this.publishedList();
+    return { mine: mine.filter((m) => m.insight || true), official };
+  }
+
+  /** 用户触发生成:行业必须属于本人品牌,且距上次生成 ≥12h(频控防刷)。 */
+  async runForAccount(accountId: number, industryId: number, windowDays: number | null) {
+    const industries = await this.industriesOfAccount(accountId);
+    const industry = (
+      await this.db.select().from(insightIndustries).where(eq(insightIndustries.id, industryId)).limit(1)
+    )[0];
+    if (!industry || !industries.includes(industry.name)) {
+      throw new HttpException('该行业不在你的品牌行业范围内', HttpStatus.FORBIDDEN);
+    }
+    const latest = (
+      await this.db
+        .select({ builtAt: industryInsights.builtAt })
+        .from(industryInsights)
+        .where(eq(industryInsights.industryId, industryId))
+        .orderBy(desc(industryInsights.builtAt))
+        .limit(1)
+    )[0];
+    if (latest?.builtAt && Date.now() - latest.builtAt.getTime() < 12 * 3600 * 1000) {
+      const waitH = Math.ceil((12 * 3600 * 1000 - (Date.now() - latest.builtAt.getTime())) / 3600_000);
+      throw new HttpException(`该行业 ${waitH} 小时内已生成过,稍后再试`, HttpStatus.TOO_MANY_REQUESTS);
+    }
+    return this.runIndustry(industryId, windowDays);
+  }
+
+  /** 用户提交分享:本人行业报告 → 待审核。 */
+  async submitShare(accountId: number, insightId: number, note?: string) {
+    const row = (await this.db.select().from(industryInsights).where(eq(industryInsights.id, insightId)).limit(1))[0];
+    if (!row) throw new HttpException('报告不存在', HttpStatus.NOT_FOUND);
+    const industries = await this.industriesOfAccount(accountId);
+    const industry = (await this.db.select().from(insightIndustries).where(eq(insightIndustries.id, row.industryId)).limit(1))[0];
+    if (!industry || !industries.includes(industry.name)) {
+      throw new HttpException('只能分享自己行业的洞察', HttpStatus.FORBIDDEN);
+    }
+    if (row.buildStatus !== 'idle' || !row.builtAt) {
+      throw new HttpException('报告尚未生成完成', HttpStatus.CONFLICT);
+    }
+    if (row.shareStatus === 'pending') throw new HttpException('已提交审核,请等待平台处理', HttpStatus.CONFLICT);
+    if (row.status === 'published') throw new HttpException('该报告已在官网发布', HttpStatus.CONFLICT);
+    await this.db
+      .update(industryInsights)
+      .set({ shareStatus: 'pending', submittedBy: accountId, shareNote: note?.slice(0, 300) ?? null, updatedAt: new Date() })
+      .where(eq(industryInsights.id, insightId));
+    return { submitted: true };
+  }
+
+  /** 管理端:待审核分享列表。 */
+  async pendingShares() {
+    const rows = await this.db
+      .select()
+      .from(industryInsights)
+      .where(eq(industryInsights.shareStatus, 'pending'))
+      .orderBy(desc(industryInsights.updatedAt));
+    return this.attachIndustry(rows);
+  }
+
+  /** 管理端审核:通过 → 发布(进官网首页流);驳回 → 带理由回到可再分享态。 */
+  async review(id: number, approve: boolean, note?: string, reviewerAccount?: number) {
+    const row = (await this.db.select().from(industryInsights).where(eq(industryInsights.id, id)).limit(1))[0];
+    if (!row) throw new HttpException('报告不存在', HttpStatus.NOT_FOUND);
+    if (row.shareStatus !== 'pending') throw new HttpException('该报告不在待审核状态', HttpStatus.CONFLICT);
+    await this.db
+      .update(industryInsights)
+      .set(
+        approve
+          ? { shareStatus: 'approved', status: 'published', publishedAt: new Date(), updatedAt: new Date() }
+          : { shareStatus: 'rejected', shareNote: note?.slice(0, 300) ?? row.shareNote, updatedAt: new Date() },
+      )
+      .where(eq(industryInsights.id, id));
+    void reviewerAccount;
+    return this.adminGet(id);
+  }
+
+  /** 详情访问控制:已发布公开;否则须是本人行业的报告(付费用户的产品能力)。 */
+  async detailFor(accountId: number | null, id: number): Promise<{ row: InsightRow; mine: boolean } | null> {
+    const row = (await this.db.select().from(industryInsights).where(eq(industryInsights.id, id)).limit(1))[0];
+    if (!row) return null;
+    if (row.status === 'published') return { row, mine: false };
+    if (!accountId) return null;
+    const industries = await this.industriesOfAccount(accountId);
+    const industry = (
+      await this.db.select().from(insightIndustries).where(eq(insightIndustries.id, row.industryId)).limit(1)
+    )[0];
+    if (industry && industries.includes(industry.name)) return { row, mine: true };
+    return null;
+  }
+
   // ===== 展示侧 =====
 
   /**
