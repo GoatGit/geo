@@ -28,6 +28,9 @@ interface MineIndustry {
 interface HubDto {
   mine: MineIndustry[];
   official: InsightSummaryDto[];
+  /** 用户品牌存在、但行业洞察尚未开通的行业名 */
+  unopened: string[];
+  hasBrands: boolean;
 }
 
 const SHARE_META: Record<string, { label: string; tone: 'good' | 'warn' | 'bad' | 'slate' }> = {
@@ -63,6 +66,16 @@ export default function IndustryInsightsPage() {
     onError: (e) => toast((e as Error).message, 'err'),
   });
 
+  const apply = useMutation({
+    mutationFn: (industry: string) =>
+      api(`/insights/industries/apply`, { method: 'POST', json: { industry } }),
+    onSuccess: () => {
+      toast('已申请开通,平台配置监测品牌后即可生成洞察');
+      void qc.invalidateQueries({ queryKey: ['insights-hub'] });
+    },
+    onError: (e) => toast((e as Error).message, 'err'),
+  });
+
   const share = useMutation({
     mutationFn: (id: number) => api(`/insights/${id}/share`, { method: 'POST', json: { note: shareNote || undefined } }),
     onSuccess: () => {
@@ -87,12 +100,19 @@ export default function IndustryInsightsPage() {
       {/* 我的行业洞察 */}
       <section>
         <h2 className="mb-3 font-semibold text-slate-900">我的行业</h2>
-        {(data?.mine ?? []).length === 0 ? (
-          <EmptyState
-            title="还没有可洞察的行业"
-            text="创建品牌后,系统会按品牌所在行业自动匹配;行业数据积累完成后即可生成行业洞察。"
-            action={<Link href="/brands/new" className="btn-primary">创建品牌</Link>}
-          />
+        {(data?.mine ?? []).length === 0 && (data?.unopened ?? []).length === 0 ? (
+          data?.hasBrands ? (
+            <EmptyState
+              title="品牌行业暂未收录"
+              text="你品牌的行业在平台行业库中暂未收录,请联系平台运营开通。"
+            />
+          ) : (
+            <EmptyState
+              title="还没有可洞察的行业"
+              text="创建品牌后,系统会按品牌所在行业自动匹配;行业数据积累完成后即可生成行业洞察。"
+              action={<Link href="/brands/new" className="btn-primary">创建品牌</Link>}
+            />
+          )
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
             {(data?.mine ?? []).map((m) => {
@@ -152,6 +172,27 @@ export default function IndustryInsightsPage() {
                 </div>
               );
             })}
+            {(data?.unopened ?? []).map((name) => (
+              <div key={`un-${name}`} className="card rise border-dashed p-5">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-slate-900">{name}</h3>
+                  <Badge label="未开通" tone="slate" />
+                </div>
+                <p className="mt-2 text-xs leading-5 text-slate-500">
+                  你的品牌属于该行业;申请开通后,平台会配置行业监测品牌与问题,即可生成行业洞察。
+                </p>
+                <button
+                  className="btn-primary mt-4 h-8 px-3 text-xs"
+                  disabled={apply.isPending || busy === `apply-${name}`}
+                  onClick={() => {
+                    setBusy(`apply-${name}`);
+                    apply.mutate(name, { onSettled: () => setBusy(null) });
+                  }}
+                >
+                  {busy === `apply-${name}` ? '提交中…' : '申请开通'}
+                </button>
+              </div>
+            ))}
           </div>
         )}
       </section>

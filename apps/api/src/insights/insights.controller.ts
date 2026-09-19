@@ -141,6 +141,14 @@ export class InsightsController {
     return this.insights.hub(currentAccount(req).accountId);
   }
 
+  /** 用户申请开通自己品牌所在的行业洞察(行业记录幂等创建,平台随后配置监测数据)。 */
+  @Post('industries/apply')
+  applyIndustry(@Req() req: Request, @Body() body: { industry?: string }) {
+    const name = String(body?.industry ?? '').trim().slice(0, 40);
+    if (!name) throw new HttpException('industry is required', HttpStatus.BAD_REQUEST);
+    return this.insights.applyIndustry(currentAccount(req).accountId, name);
+  }
+
   /** 用户触发生成(限本人品牌行业,12h 频控)。 */
   @Post('industries/:id/run')
   runForMe(

@@ -578,7 +578,25 @@ export class InsightsService implements OnModuleDestroy {
         }),
     );
     const official = await this.publishedList();
-    return { mine: mine.filter((m) => m.insight || true), official };
+    // 未开通洞察的行业(用户品牌有、行业表没有):产品页展示「申请开通」而非误导性的「创建品牌」
+    const opened = new Set(all.map((i) => i.name));
+    const unopened = [...new Set(myIndustries.filter((n) => !opened.has(n)))];
+    const hasBrands = myIndustries.length > 0;
+    return { mine, official, unopened, hasBrands };
+  }
+
+  /** 用户申请开通行业洞察:行业须来自本人品牌;行业记录幂等创建,平台随后配置监测品牌与问题。 */
+  async applyIndustry(accountId: number, name: string) {
+    const industries = await this.industriesOfAccount(accountId);
+    if (!industries.includes(name)) {
+      throw new HttpException('该行业不在你的品牌行业范围内', HttpStatus.FORBIDDEN);
+    }
+    const existing = (await this.db.select().from(insightIndustries).where(eq(insightIndustries.name, name)).limit(1))[0];
+    if (existing) return { industryId: existing.id, alreadyOpen: true };
+    const created = (
+      await this.db.insert(insightIndustries).values({ name, active: true }).returning({ id: insightIndustries.id })
+    )[0]!;
+    return { industryId: created.id, alreadyOpen: false };
   }
 
   /** 用户触发生成:行业必须属于本人品牌,且距上次生成 ≥12h(频控防刷)。 */
