@@ -131,7 +131,7 @@ export default function LandingPage() {
         </div>
       </header>
 
-      {/* ===== Hero(签名效果:雾被光标吹散——"让品牌可见性显形",整站唯一 canvas 效果) ===== */}
+      {/* ===== Hero(签名效果:底部氛围雾带,光标扫过散雾——不遮任何文字,整站唯一 canvas 效果) ===== */}
       <section className="relative overflow-hidden bg-ink-950">
         <div className="pointer-events-none absolute -left-40 -top-40 h-[30rem] w-[30rem] animate-float-slow rounded-full bg-brand-500/20 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-52 right-0 h-[34rem] w-[34rem] rounded-full bg-sand/10 blur-3xl" />
@@ -144,16 +144,24 @@ export default function LandingPage() {
             maskImage: 'radial-gradient(ellipse 90% 70% at 50% 0%, black 40%, transparent 100%)',
           }}
         />
-        <Clouds
-          density={1.6}
-          speed={0.45}
-          wind={0.65}
-          windRadius={320}
-          opacity={0.5}
-          cover={0.1}
-          color={[0.68, 0.78, 0.52]}
-        >
-          <div className="relative mx-auto max-w-6xl px-6 pb-24 pt-20 text-center md:pt-28">
+        {/* 底部雾带:只落在 hero 底部留白区(z-0,内容 z-10),稀薄到只是背景纹理;
+            光标掠过时雾被吹散——"让可见性显形"的隐喻,文字对比度不受任何影响 */}
+        <div className="absolute inset-x-0 bottom-0 z-0 h-44">
+          <Clouds
+            density={0.7}
+            scale={2.6}
+            speed={0.25}
+            wind={0.75}
+            windRadius={300}
+            opacity={0.32}
+            cover={0.05}
+            shading={0.05}
+            color="auto"
+          >
+            <div className="h-full w-full" />
+          </Clouds>
+        </div>
+        <div className="relative z-10 mx-auto max-w-6xl px-6 pb-24 pt-20 text-center md:pt-28">
           <div className="rise mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-brand-400/20 bg-brand-400/10 px-3.5 py-1.5 text-xs text-brand-200">
             <IconSpark width={13} height={13} />
             每日 5 大引擎中立监测 · 每个数字可回溯
@@ -205,8 +213,7 @@ export default function LandingPage() {
               ))}
             </div>
           </div>
-          </div>
-        </Clouds>
+        </div>
       </section>
 
       {/* ===== 三大价值 ===== */}

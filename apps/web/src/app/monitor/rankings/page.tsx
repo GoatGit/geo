@@ -140,12 +140,22 @@ export default function RankingsPage() {
         >
           导出 CSV
         </button>
-        <span className="ml-auto inline-flex items-center gap-1.5 text-[11px] text-slate-500">
-          <span className="metric-num rounded bg-good-50 px-1.5 py-0.5 text-good">#1</span>首推
-          <span className="metric-num ml-1 rounded bg-brand-50 px-1.5 py-0.5 text-brand-700">#2-3</span>Top3
-          <span className="metric-num ml-1 rounded bg-slate-100 px-1.5 py-0.5">#4+</span>靠后
-          <span className="ml-1 rounded bg-bad-50 px-1.5 py-0.5 text-bad">未上榜</span>
-          <span className="ml-1 text-slate-400">综合名次 = 未上榜记 N+1 取中位数</span>
+        {/* 图例收进「?」提示:悬停/聚焦展开,单行呈现位次色标 + 综合名次口径 */}
+        <span className="group relative ml-auto inline-flex">
+          <button
+            type="button"
+            aria-label="矩阵图例与综合名次口径说明"
+            className="flex h-[18px] w-[18px] cursor-help items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-400 transition-colors hover:bg-brand-100 hover:text-brand-600"
+          >
+            ?
+          </button>
+          <span className="pointer-events-none absolute right-0 top-6 z-20 hidden items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-100 bg-white px-3 py-2 text-[11px] text-slate-500 shadow-lg group-hover:flex group-focus-within:flex">
+            <span className="metric-num rounded bg-good-50 px-1.5 py-0.5 text-good">#1</span>首推
+            <span className="metric-num ml-1 rounded bg-brand-50 px-1.5 py-0.5 text-brand-700">#2-3</span>Top3
+            <span className="metric-num ml-1 rounded bg-slate-100 px-1.5 py-0.5">#4+</span>靠后
+            <span className="ml-1 rounded bg-bad-50 px-1.5 py-0.5 text-bad">未上榜</span>
+            <span className="ml-1.5 border-l border-slate-100 pl-1.5 text-slate-400">综合名次 = 未上榜记 N+1 取中位数</span>
+          </span>
         </span>
       </div>
 

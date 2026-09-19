@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { LAYER_TEXTS, type QuestionLayer } from '@geo/metrics';
 
 /**
  * 报告模板与 HTML 渲染(docs/01 §3.8、docs/03 §3.6):
