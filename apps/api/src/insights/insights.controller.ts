@@ -305,6 +305,12 @@ export class AdminInsightsController {
     return this.insights.adminList();
   }
 
+
+  /** 分享审核:待审列表(用户提交的分享)。 */
+  @Get('shares')
+  shares() {
+    return this.insights.pendingShares();
+  }
   @Get(':id')
   detail(@Param('id', ParseIntPipe) id: number) {
     return this.insights.adminGet(id);
@@ -332,12 +338,6 @@ export class AdminInsightsController {
   @Delete(':id')
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.insights.remove(id);
-  }
-
-  /** 分享审核:待审列表(用户提交的分享)。 */
-  @Get('shares')
-  shares() {
-    return this.insights.pendingShares();
   }
 
   /** 审核动作:approve → 发布上官网首页;reject → 带理由退回。 */
