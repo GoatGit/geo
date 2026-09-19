@@ -107,7 +107,7 @@ export class InsightsService implements OnModuleDestroy {
         product: 'plan',
         plan: 'custom',
         period: 'yearly',
-        channel: 'manual',
+        channel: 'mock',
         amountCents: 0,
         status: 'paid',
         paidAt: new Date(),
