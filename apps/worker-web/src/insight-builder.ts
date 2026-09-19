@@ -41,6 +41,12 @@ export interface BrandAgg {
   answers: number;
   failed: number;
   quotaBlocked: number;
+  /** 口碑归属(口碑回答按提及归属到品牌):该品牌口碑回答数与正面/负面数 */
+  repTotal: number;
+  repPos: number;
+  repNeg: number;
+  /** 官网域名被引次数(自有信源的硬证据) */
+  ownedHits: number;
 }
 
 export interface LandscapeRow {
@@ -251,17 +257,47 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
     ];
     if (topPos.length > 0) parts.push(`被 AI 复述最多的好评是「${topPos.map((t) => t.term).join('」「')}」。`);
     if (topNeg.length > 0) parts.push(`拖后腿的负面印象集中在「${topNeg.map((t) => t.term).join('」「')}」。`);
+    // 品牌归属叙述:样本充足的品牌里找正面率最高/最低者
+    const repBrands = sorted
+      .map((b) => ({ name: b.name, share: b.repTotal > 0 ? b.repPos / b.repTotal : null, n: b.repTotal }))
+      .filter((r) => r.n >= MIN_SAMPLE);
+    if (repBrands.length >= 2) {
+      const bestB = repBrands.reduce((a, r) => (r.share! >= a.share! ? r : a));
+      const worstB = repBrands.reduce((a, r) => (r.share! <= a.share! ? r : a));
+      if (bestB.share !== worstB.share) {
+        parts.push(
+          `品牌间分化明显:${bestB.name} 正面率 ${pctText(bestB.share)} 最高,${worstB.name} 仅 ${pctText(worstB.share)}。`,
+        );
+      }
+    }
     blocks.push({
       type: 'takeaway',
       title: '口碑与印象',
       text: parts.join(''),
       tone: agg.reputation.negTerms.length > 0 ? 'warn' : 'good',
     } satisfies TakeawayBlock);
+
+    // ⑤.1 品牌口碑正面率排行(口碑回答按提及归属到品牌)
+    const repRank = repBrands.sort((a, b) => b.share! - a.share!);
+    if (repRank.length >= 2) {
+      blocks.push({
+        type: 'barRank',
+        title: '品牌口碑正面率排行',
+        summary: repRank[0]!.share! > (repRank[repRank.length - 1]!.share ?? 0)
+          ? `正面率差距最大 ${(Math.round((repRank[0]!.share! - repRank[repRank.length - 1]!.share!) * 1000) / 10)} 个百分点,口碑是 AI 推荐倾向的直接输入。`
+          : undefined,
+        note: '口碑回答按"回答里提到了谁"归属到品牌;n = 该品牌口碑回答数',
+        total: 100,
+        unit: '%',
+        items: repRank.map((r) => ({ name: r.name, value: Math.round(r.share! * 1000) / 10, n: r.n })),
+      } satisfies BarRankBlock);
+    }
   }
 
   // ⑥ 引用信源格局
   if (agg.citations.total > 0) {
     const top3 = agg.citations.top.slice(0, 3).reduce((a, c) => a + c.hits, 0);
+    const ownedTotal = agg.brands.reduce((a, b) => a + b.ownedHits, 0);
     blocks.push({
       type: 'barRank',
       title: 'AI 引用信源 Top 8',
@@ -269,7 +305,10 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
         top3 > 0
           ? `前三大信源吃掉了 ${Math.round((top3 / agg.citations.total) * 100)}% 的被引次数 —— 想被 AI 提及,先进入这些阵地。`
           : undefined,
-      note: `行业合计被引 ${agg.citations.total} 次,自有域名占比 ${pctText(agg.citations.ownedShare)}`,
+      note:
+        ownedTotal > 0
+          ? `行业合计被引 ${agg.citations.total} 次,品牌官网被引 ${ownedTotal} 次(占比 ${pctText(ownedTotal / agg.citations.total)})`
+          : `行业合计被引 ${agg.citations.total} 次`,
       total: agg.citations.total,
       items: agg.citations.top.map((d) => ({ name: d.domain, value: d.hits })),
     } satisfies BarRankBlock);
@@ -279,32 +318,29 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
   const radarBrands = sorted
     .filter((b) => b.valid > 0)
     .slice(0, 5)
-    .map((b) => {
-      const ownedShare = ownedShareOf(agg, b.brandId);
-      return {
-        name: b.name,
-        values: [
-          r3(rateOf(b.mentioned, b.valid)) ?? 0,
-          r3(rateOf(b.top3, b.ranked)) ?? 0,
-          r3(rateOf(b.top1, b.ranked)) ?? 0,
-          posShareOf(agg) ?? 0,
-          ownedShare ?? 0,
-        ],
-      };
-    });
+    .map((b) => ({
+      name: b.name,
+      values: [
+        r3(rateOf(b.mentioned, b.valid)) ?? 0,
+        r3(rateOf(b.top3, b.ranked)) ?? 0,
+        r3(rateOf(b.top1, b.ranked)) ?? 0,
+        b.repTotal > 0 ? r3(b.repPos / b.repTotal) ?? 0 : 0,
+        agg.citations.total > 0 ? r3(b.ownedHits / agg.citations.total) ?? 0 : 0,
+      ],
+    }));
   if (radarBrands.length >= 2) {
     const avg = (v: number[]) => v.reduce((a, b) => a + b, 0) / v.length;
     const top5 = [...radarBrands].sort((a, b) => avg(b.values) - avg(a.values));
     const laggard = top5[top5.length - 1]!;
-    const laggardAxis = ['提及率', 'Top3率', '首位率', '口碑正面', '自有引用'][
+    const laggardAxis = ['提及率', 'Top3率', '首位率', '口碑正面', '官网被引'][
       laggard.values.indexOf(Math.min(...laggard.values))
     ];
     blocks.push({
       type: 'radar',
       title: '头部品牌五维形状',
       summary: `${top5[0]!.name} 五维均值全场最高;${laggard.name} 的短板在${laggardAxis ?? '多个维度'}。`,
-      note: '提及率 / Top3 率 / 首位率 / 行业口碑正面率 / 自有信源引用率(归一 0-1,后两项为行业共享值)',
-      axes: ['提及率', 'Top3率', '首位率', '口碑正面', '自有引用'],
+      note: '提及率 / Top3 率 / 首位率 / 口碑正面率(口碑回答按提及归属) / 官网被引占比(官网域名被引 ÷ 行业总被引),全部为品牌归属真实值',
+      axes: ['提及率', 'Top3率', '首位率', '口碑正面', '官网被引'],
       series: radarBrands,
     } satisfies RadarBlock);
   }
@@ -319,7 +355,9 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
       title: '行业每日提及率',
       summary:
         first != null && lastT != null
-          ? `行业提及率从 ${pctText(first)} 走到 ${pctText(lastT)},${lastT >= first ? '整体抬升' : '有所回落'}。`
+          ? Math.abs(lastT - first) >= 0.5
+            ? `行业提及率从 ${pctText(first)} 走到 ${pctText(lastT)},${lastT >= first ? '整体抬升' : '有所回落'}。`
+            : `行业提及率整体走平(${pctText(first)} → ${pctText(lastT)}),格局稳定。`
           : undefined,
       note: '全行业按日聚合;断点表示当日无有效样本',
       unit: '%',
@@ -392,7 +430,9 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
       (head.valid >= MIN_SAMPLE
         ? `${head.name} 以有效提及率 ${pctText(rateOf(head.mentioned, head.valid))}、Top3 率 ${pctText(rateOf(head.top3, head.ranked))} 领跑`
         : '头部品牌样本尚少,格局待更多数据确认') +
-      (agg.citations.total > 0 ? `;AI 引用合计 ${agg.citations.total} 次,自有信源占比 ${pctText(agg.citations.ownedShare)}` : '') +
+      (agg.citations.total > 0 && agg.brands.some((b) => b.ownedHits > 0)
+        ? `;AI 引用合计 ${agg.citations.total} 次,品牌官网被引 ${agg.brands.reduce((a, b) => a + b.ownedHits, 0)} 次`
+        : '') +
       '。'
     : `${agg.industry} 行业暂无可聚合的监测数据。`;
 
@@ -406,14 +446,6 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
 
 const rateOf = (n: number, d: number) => (d > 0 ? n / d : 0);
 
-function ownedShareOf(agg: IndustryAggregates, brandId: number): number | null {
-  // 行业级自有引用率为共享值(引用事实不区分品牌主体);留品牌维度接口
-  void brandId;
-  return agg.citations.ownedShare;
-}
-function posShareOf(agg: IndustryAggregates): number | null {
-  return agg.reputation.total > 0 ? r3(agg.reputation.pos / agg.reputation.total) : null;
-}
 
 // ===== 取数(SQL) =====
 
@@ -714,7 +746,7 @@ export async function runInsightBuild(db: Db, job: InsightBuildJob): Promise<voi
 
   try {
     const agg = await collectIndustryAggregates(db, industry?.name ?? '', job.windowDays);
-    // 上期环比基线:同行业最近一份已构建报告(排除自身)排行图的品牌提及率
+    // 上期环比基线:优先同行业其他报告行(多期并存);报告行复用制下,取自身被覆盖前的旧内容
     const prevRow = (
       await db
         .select({ blocks: industryInsights.blocks })
@@ -726,7 +758,8 @@ export async function runInsightBuild(db: Db, job: InsightBuildJob): Promise<voi
       .filter((r) => r.blocks != null)
       .map((r) => extractRankItems(r.blocks as InsightBlock[]))
       .find((m) => m != null);
-    const prev = prevRow ?? undefined;
+    const prevSelf = row.blocks ? extractRankItems(row.blocks as InsightBlock[]) : undefined;
+    const prev = prevRow ?? prevSelf ?? undefined;
     let composed = composeIndustryInsight(agg, prev);
     // LLM 撰稿层:标题/摘要/核心洞察由 GLM 基于聚合事实撰写;失败保留模板稿(降级可复现)
     try {
@@ -847,13 +880,20 @@ async function polishWithLlm(
 
   // 数字自检(防幻觉):LLM 文中的百分比必须能在事实摘要中找到(±1 容差覆盖舍入)。
   // 违例说明模型编造了比率 → 整篇降级模板稿,宁可朴素不可失实。
-  const legalPct = new Set<number>();
+  // 白名单覆盖报告中合法出现的全部比率族:品牌三率 + 口碑正面率 + 趋势值 + 引用占比 + 0/100 边界
+  const legalPct = new Set<number>([0, 100]);
   for (const b of digest.品牌提及率 ?? []) {
     for (const v of [b.提及率, b.Top3率, b.首推率]) {
       const n = parseFloat(String(v ?? ''));
       if (Number.isFinite(n)) legalPct.add(n);
     }
   }
+  if (agg.reputation.total > 0) legalPct.add(Math.round((agg.reputation.pos / agg.reputation.total) * 100));
+  for (const t of agg.trend) if (t.rate != null) legalPct.add(Math.round(t.rate * 100));
+  for (const c of agg.citations.top) {
+    if (agg.citations.total > 0) legalPct.add(Math.round((c.hits / agg.citations.total) * 100));
+  }
+  if (agg.citations.ownedShare != null) legalPct.add(Math.round(agg.citations.ownedShare * 100));
   const texts = [parsed.title, parsed.summary, ...takeaways.map((t) => t.text), parsed.sections?.landscape, parsed.sections?.drivers, parsed.sections?.actions]
     .filter(Boolean)
     .join(' ');
