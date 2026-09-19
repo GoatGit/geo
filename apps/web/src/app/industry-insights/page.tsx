@@ -11,6 +11,8 @@ import type { InsightSummaryDto } from '@geo/shared';
 interface MineIndustry {
   industryId: number;
   industry: string;
+  /** 平台已配置监测品牌(未配置时生成按钮置灰,避免必然失败的提交) */
+  configured: boolean;
   insight: {
     id: number;
     issue: string;
@@ -152,13 +154,14 @@ export default function IndustryInsightsPage() {
                     )}
                     <button
                       className="btn-primary h-8 px-3 text-xs"
-                      disabled={runBuild.isPending || ins?.buildStatus === 'running' || busy === `run-${m.industryId}`}
+                      title={m.configured ? undefined : '平台正在配置该行业的监测品牌与问题,配置完成后即可生成'}
+                      disabled={!m.configured || runBuild.isPending || ins?.buildStatus === 'running' || busy === `run-${m.industryId}`}
                       onClick={() => {
                         setBusy(`run-${m.industryId}`);
                         runBuild.mutate(m.industryId, { onSettled: () => setBusy(null) });
                       }}
                     >
-                      {ins?.buildStatus === 'running' ? '聚合中…' : ins ? '生成新一期' : '生成第一期'}
+                      {!m.configured ? '等待平台配置' : ins?.buildStatus === 'running' ? '聚合中…' : ins ? '生成新一期' : '生成第一期'}
                     </button>
                     {ins && ins.buildStatus === 'idle' && ins.status !== 'published' && ins.shareStatus !== 'pending' && (
                       <button

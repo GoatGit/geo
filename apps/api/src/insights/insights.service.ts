@@ -549,6 +549,12 @@ export class InsightsService implements OnModuleDestroy {
       all
         .filter((ind) => myIndustries.includes(ind.name))
         .map(async (ind) => {
+          // 平台是否已配置监测品牌(未配置时产品页置灰生成按钮,避免必然失败的提交)
+          const brandCount = await this.db
+            .select({ id: insightBrands.id })
+            .from(insightBrands)
+            .where(eq(insightBrands.industryId, ind.id))
+            .limit(1);
           const latest = (
             await this.db
               .select()
@@ -560,6 +566,7 @@ export class InsightsService implements OnModuleDestroy {
           return {
             industryId: ind.id,
             industry: ind.name,
+            configured: brandCount.length > 0,
             insight: latest
               ? {
                   id: latest.id,
