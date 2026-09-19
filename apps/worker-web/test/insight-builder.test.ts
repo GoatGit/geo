@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { HeatmapBlock, TrendBlock } from '@geo/shared';
+import type { BarRankBlock, FunnelBlock, HeatmapBlock, TrendBlock } from '@geo/shared';
 import { composeIndustryInsight, type IndustryAggregates } from '../src/insight-builder';
 
 /** 合成聚合输入:2 品牌、2 引擎、完整漏斗/信源/口碑/趋势。 */
@@ -115,5 +115,41 @@ describe('行业洞察组稿(运行 → 数据报告)', () => {
     const c = composeIndustryInsight(empty);
     expect(c.blocks.length).toBe(0);
     expect(c.summary).toContain('暂无可聚合');
+  });
+
+  it('精品化组稿:每图带图上总结,无内部枚举与散落口径公式', () => {
+    const c = composeIndustryInsight(fixture());
+    const dump = JSON.stringify(c.blocks);
+    // 内部枚举与口径公式不得出现在报告内容中(口径统一收进页脚)
+    expect(dump).not.toContain('ok_with_answer');
+    expect(dump).not.toContain('提及率 =');
+    // 每个图表块都有图上总结
+    const charts = c.blocks.filter((b) => b.type !== 'takeaway');
+    for (const chart of charts) {
+      expect((chart as { summary?: string }).summary?.length ?? 0).toBeGreaterThan(8);
+    }
+    // 漏斗层标签用自然语言
+    const funnel = c.blocks.find((b) => b.type === 'funnel') as FunnelBlock;
+    expect(funnel.stages[0]!.note).toBe('返回了实质内容的回答');
+    expect(funnel.summary).toContain('1 次把监测品牌推上首位');
+  });
+
+  it('图上总结是数据驱动的:排行/趋势/象限/信源各不相同', () => {
+    const c = composeIndustryInsight(fixture());
+    const summaries = c.blocks
+      .filter((b) => b.type !== 'takeaway')
+      .map((b) => (b as { summary?: string }).summary ?? '');
+    expect(new Set(summaries).size).toBe(summaries.length); // 互不相同
+    const rank = c.blocks.find((b) => b.type === 'barRank') as BarRankBlock;
+    expect(rank.summary).toContain('品牌A');
+    const trend = c.blocks.find((b) => b.type === 'trend') as TrendBlock;
+    expect(trend.summary).toContain('抬升');
+  });
+
+  it('口碑文案:自然语言引用印象词,而非 ×N 罗列', () => {
+    const c = composeIndustryInsight(fixture());
+    const rep = c.blocks.find((b) => b.title === '口碑与印象')!;
+    expect(JSON.stringify(rep)).toContain('性价比高');
+    expect(JSON.stringify(rep)).not.toContain('×12');
   });
 });

@@ -469,13 +469,17 @@ export class InsightsService implements OnModuleDestroy {
 
   // ===== 展示侧 =====
 
-  /** 官网首页:已发布 + 精选(公开,无需登录)。 */
+  /**
+   * 官网首页(公开,无需登录):所有已发布报告进首页精选流(发布即上首页),
+   * 人工精选(featured)置顶,其余按发布时间。此前要求 featured=true 才展示,
+   * 导致「发布」后首页始终为空。
+   */
   async featured() {
     const rows = await this.db
       .select()
       .from(industryInsights)
-      .where(and(eq(industryInsights.status, 'published'), eq(industryInsights.featured, true)))
-      .orderBy(desc(industryInsights.publishedAt))
+      .where(eq(industryInsights.status, 'published'))
+      .orderBy(desc(industryInsights.featured), desc(industryInsights.publishedAt))
       .limit(6);
     return this.attachIndustry(rows);
   }

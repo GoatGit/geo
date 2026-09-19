@@ -51,6 +51,8 @@ RUN pnpm install --prod --frozen-lockfile
 # 从 build 阶段只拷贝运行产物,放回各自包目录(symlink 目标)
 COPY --from=build /app/packages/shared/dist packages/shared/dist/
 COPY --from=build /app/packages/db/dist packages/db/dist/
+# 迁移 SQL 随镜像:worker 启动自迁移(runMigrations 按 __dirname/../migrations 定位)
+COPY --from=build /app/packages/db/migrations packages/db/migrations/
 COPY --from=build /app/packages/metrics/dist packages/metrics/dist/
 COPY --from=build /app/packages/engine-adapters/dist packages/engine-adapters/dist/
 COPY --from=build /app/packages/browser-session/dist packages/browser-session/dist/

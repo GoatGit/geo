@@ -122,10 +122,17 @@ export function composeIndustryInsight(agg: IndustryAggregates): ComposedInsight
 
   // ② 品牌有效提及率排行
   if (agg.brands.length > 0) {
+    const headRate = rateOf(head.mentioned, head.valid);
+    const tailRate = last && last !== head ? rateOf(last.mentioned, last.valid) : null;
     blocks.push({
       type: 'barRank',
       title: '品牌有效提及率排行',
-      note: `提及率 = 提及该品牌的回答数 ÷ 有效回答数${agg.windowDays ? `(近 ${agg.windowDays} 天)` : '(全量历史)'},失败与配额拦截不计入分母`,
+      summary:
+        tailRate != null && tailRate < headRate
+          ? `${head.name} 以 ${pctText(headRate)} 领跑,${last!.name} 仅 ${pctText(tailRate)} —— 首尾相差 ${Math.round((headRate - tailRate) * 100)} 个百分点。`
+          : head
+            ? `${head.name} 以 ${pctText(headRate)} 领跑监测品牌。`
+            : undefined,
       total: 100,
       unit: '%',
       items: sorted.map((b) => ({
@@ -137,15 +144,20 @@ export function composeIndustryInsight(agg: IndustryAggregates): ComposedInsight
 
   // ③ 行业筛选漏斗
   if (agg.funnel.answers > 0) {
+    const { answers, mentioned, top3, top1 } = agg.funnel;
     blocks.push({
       type: 'funnel',
       title: '行业 AI 筛选漏斗',
-      note: '从有效回答到首位推荐的逐层收口(全行业 self 事实合计)',
+      summary:
+        top1 > 0
+          ? `平均每 ${Math.max(1, Math.round(answers / top1))} 次有效回答,才有 1 次把监测品牌推上首位。`
+          : '本轮尚无回答把监测品牌推上首位推荐。',
+      note: '从有效回答到首位推荐的逐层收口(全行业合计)',
       stages: [
-        { label: '有效回答', note: 'ok_with_answer + ok_empty', count: agg.funnel.answers },
-        { label: '被提及', note: '回答中主动提及任一监测品牌', count: agg.funnel.mentioned },
-        { label: '进入 Top3', note: '推荐位次 ≤ 3', count: agg.funnel.top3 },
-        { label: '首位推荐', note: '推荐位次 = 1', count: agg.funnel.top1 },
+        { label: '有效回答', note: '返回了实质内容的回答', count: answers },
+        { label: '被提及', note: '回答中主动提到任一监测品牌', count: mentioned },
+        { label: '进入 Top3', note: '出现在推荐前三', count: top3 },
+        { label: '首位推荐', note: '排在推荐第一位', count: top1 },
       ],
     } satisfies FunnelBlock);
   }
@@ -155,10 +167,19 @@ export function composeIndustryInsight(agg: IndustryAggregates): ComposedInsight
   if (engines.length > 0 && agg.brands.length > 0) {
     const cell = new Map<string, { rate: number; valid: number }>();
     for (const e of agg.engineHits) cell.set(`${e.brandId}:${e.engine}`, { rate: e.rate, valid: e.valid });
+    let best: { brand: string; engine: string; rate: number } | null = null;
+    for (const e of agg.engineHits) {
+      if (e.valid <= 0) continue;
+      if (!best || e.rate > best.rate) {
+        const name = agg.brands.find((b) => b.brandId === e.brandId)?.name;
+        if (name) best = { brand: name, engine: e.engine, rate: e.rate };
+      }
+    }
     blocks.push({
       type: 'heatmap',
       title: '品牌 × 引擎命中率',
-      note: '单元格 = 该引擎回答中提及该品牌的比例;空白 = 该引擎无有效样本',
+      summary: best ? `${best.brand} 在 ${best.engine} 的命中率全场最高(${pctText(best.rate)}),各引擎对品牌的偏好差异明显。` : undefined,
+      note: '空白 = 该引擎对该品牌无有效样本',
       columns: engines,
       rows: agg.brands.map((b) => ({
         name: b.name,
@@ -173,26 +194,32 @@ export function composeIndustryInsight(agg: IndustryAggregates): ComposedInsight
   // ⑤ 行业口碑印象(正/负高频印象词)
   if (agg.reputation.total > 0) {
     const posShare = r3(agg.reputation.pos / agg.reputation.total);
+    const topPos = agg.reputation.posTerms.slice(0, 3);
+    const topNeg = agg.reputation.negTerms.slice(0, 3);
+    const parts: string[] = [
+      `${agg.reputation.total} 条口碑回答里,正面 ${agg.reputation.pos} 条、负面 ${agg.reputation.neg} 条(正面率 ${pctText(posShare)})。`,
+    ];
+    if (topPos.length > 0) parts.push(`被 AI 复述最多的好评是「${topPos.map((t) => t.term).join('」「')}」。`);
+    if (topNeg.length > 0) parts.push(`拖后腿的负面印象集中在「${topNeg.map((t) => t.term).join('」「')}」。`);
     blocks.push({
       type: 'takeaway',
       title: '口碑与印象',
-      text: `口碑词回答 ${agg.reputation.total} 条,正面 ${agg.reputation.pos} / 中性 ${agg.reputation.neu} / 负面 ${agg.reputation.neg}(正面率 ${pctText(posShare)})。` +
-        (agg.reputation.posTerms.length > 0
-          ? `高频正面印象:${agg.reputation.posTerms.slice(0, 5).map((t) => `${t.term}×${t.count}`).join('、')}。`
-          : '') +
-        (agg.reputation.negTerms.length > 0
-          ? `待攻负面印象:${agg.reputation.negTerms.slice(0, 5).map((t) => `${t.term}×${t.count}`).join('、')}。`
-          : ''),
+      text: parts.join(''),
       tone: agg.reputation.negTerms.length > 0 ? 'warn' : 'good',
     } satisfies TakeawayBlock);
   }
 
   // ⑥ 引用信源格局
   if (agg.citations.total > 0) {
+    const top3 = agg.citations.top.slice(0, 3).reduce((a, c) => a + c.hits, 0);
     blocks.push({
       type: 'barRank',
       title: 'AI 引用信源 Top 8',
-      note: `行业合计被引 ${agg.citations.total} 次,自有域名占比 ${pctText(agg.citations.ownedShare)} —— 决定内容投放的优先阵地`,
+      summary:
+        top3 > 0
+          ? `前三大信源吃掉了 ${Math.round((top3 / agg.citations.total) * 100)}% 的被引次数 —— 想被 AI 提及,先进入这些阵地。`
+          : undefined,
+      note: `行业合计被引 ${agg.citations.total} 次,自有域名占比 ${pctText(agg.citations.ownedShare)}`,
       total: agg.citations.total,
       items: agg.citations.top.map((d) => ({ name: d.domain, value: d.hits })),
     } satisfies BarRankBlock);
@@ -216,9 +243,16 @@ export function composeIndustryInsight(agg: IndustryAggregates): ComposedInsight
       };
     });
   if (radarBrands.length >= 2) {
+    const avg = (v: number[]) => v.reduce((a, b) => a + b, 0) / v.length;
+    const top5 = [...radarBrands].sort((a, b) => avg(b.values) - avg(a.values));
+    const laggard = top5[top5.length - 1]!;
+    const laggardAxis = ['提及率', 'Top3率', '首位率', '口碑正面', '自有引用'][
+      laggard.values.indexOf(Math.min(...laggard.values))
+    ];
     blocks.push({
       type: 'radar',
       title: '头部品牌五维形状',
+      summary: `${top5[0]!.name} 五维均值全场最高;${laggard.name} 的短板在${laggardAxis ?? '多个维度'}。`,
       note: '提及率 / Top3 率 / 首位率 / 行业口碑正面率 / 自有信源引用率(归一 0-1,后两项为行业共享值)',
       axes: ['提及率', 'Top3率', '首位率', '口碑正面', '自有引用'],
       series: radarBrands,
@@ -227,10 +261,17 @@ export function composeIndustryInsight(agg: IndustryAggregates): ComposedInsight
 
   // ⑧ 每日提及率趋势
   if (agg.trend.length >= 3) {
+    const valid = agg.trend.filter((t) => t.rate != null);
+    const first = valid[0]?.rate ?? null;
+    const lastT = valid[valid.length - 1]?.rate ?? null;
     blocks.push({
       type: 'trend',
       title: '行业每日提及率',
-      note: '全行业 self 事实按日聚合;断点表示当日无有效样本',
+      summary:
+        first != null && lastT != null
+          ? `行业提及率从 ${pctText(first)} 走到 ${pctText(lastT)},${lastT >= first ? '整体抬升' : '有所回落'}。`
+          : undefined,
+      note: '全行业按日聚合;断点表示当日无有效样本',
       unit: '%',
       points: agg.trend.map((t) => ({ label: t.date.slice(5), value: t.rate == null ? null : Math.round(t.rate * 1000) / 10 })),
     } satisfies TrendBlock);
@@ -238,10 +279,15 @@ export function composeIndustryInsight(agg: IndustryAggregates): ComposedInsight
 
   // ⑨ 品牌象限(提及率 × Top3 率)
   if (sorted.length >= 2 && agg.funnel.answers > 0) {
+    const dual = sorted.filter((b) => rateOf(b.mentioned, b.valid) >= 0.5 && rateOf(b.top3, b.ranked) >= 0.5);
+    const weak = sorted.filter((b) => rateOf(b.mentioned, b.valid) < 0.3);
     blocks.push({
       type: 'scatter',
       title: '品牌可见度象限',
-      note: '横轴=有效提及率,纵轴=Top3 率,气泡=有效回答量;右上=双强,左下=待补量',
+      summary: dual.length > 0
+        ? `${dual.map((b) => b.name).join('、')} 落在「提及+推荐」双强区${weak.length > 0 ? `,${weak.map((b) => b.name).join('、')} 仍在待补量区` : ''}。`
+        : '暂无品牌同时跨过提及与推荐双线,格局尚未固化。',
+      note: '横轴=有效提及率,纵轴=Top3 率,气泡=有效回答量',
       xLabel: '有效提及率',
       yLabel: 'Top3 率',
       diagonal: true,
@@ -257,10 +303,15 @@ export function composeIndustryInsight(agg: IndustryAggregates): ComposedInsight
 
   // ⑩ 行业实体格局(AI 主动提及的头部实体,含未监测品牌)
   if (agg.landscape.length > 0) {
+    const unmonitored = agg.landscape.filter((l) => l.kind === 'discovered').length;
     blocks.push({
       type: 'barRank',
       title: 'AI 提及实体 Top 10',
-      note: '按被提及回答数排序,含监测品牌、其配置竞品与 AI 主动发现的未监测实体 —— 反映真实竞争声场',
+      summary:
+        unmonitored > 0
+          ? `有 ${unmonitored} 个被 AI 频繁提及的实体还不在监测名单里 —— 真实竞争声场比监测范围更大。`
+          : undefined,
+      note: '按被提及的回答数排序;橙色 = 监测品牌',
       total: agg.funnel.answers,
       items: agg.landscape.slice(0, 10).map((l) => ({
         name: l.name,
@@ -680,38 +731,76 @@ async function polishWithLlm(
 
   const digest = { ...factsDigest(agg, windowDays), 行业: industryName, 品牌资料库: materials };
   const system =
-    '你是行业分析主编,为一份"行业 AI 可见度监测报告"撰写深度洞察。只输出一个 JSON 对象。' +
-    'schema: {"title":"报告标题(≤24字,点明行业与AI可见度,可带锐评)","summary":"摘要(≤90字,给出最有信息量的结论,禁止空话)","takeaways":["核心洞察(≤60字):现象+数据+成因,必须引用具体品牌名与数字","…×3"],"narrative":"主编综述(350-500字):①行业格局与成因(谁强谁弱、为什么——结合品牌资料库里的品牌定位解释)②AI 引用的信源偏好意味着什么内容策略 ③口碑情绪对可见度的影响 ④给排名靠后品牌的 1-2 条立即可执行建议。要求:每个论断带数字;揭示因果而非复述;语气专业锐利像分析报告,禁止营销腔。"}。' +
-    '所有论断必须基于给定事实,禁止编造数据;品牌资料库仅作背景语境,其中的主观描述不要照抄。';
+    '你是行业分析主编,为一份面向行业从业者公开发布的「行业 AI 可见度监测报告」撰稿。只输出一个 JSON 对象。' +
+    '报告的主题是「一个行业的 AI 可见度生态」,不是某个品牌的软文:先对行业整体下判断,品牌数据只是论据。' +
+    'schema: {' +
+    '"title":"报告标题(≤24字,点明行业与 AI 可见度,可有锐评)",' +
+    '"summary":"摘要(≤90字,行业层面最有信息量的结论,禁止空话)",' +
+    '"takeaways":[{"label":"洞察标签(≤6字,如 信源集中","text":"≤70字:现象+数据+成因,引用具体品牌名与数字")}×3],' +
+    '"landscape":"行业格局段(120-180字):先给行业整体判断(AI 对该行业的整体态度、可见度分化程度),再用品牌数据佐证;解释分化成因时要结合品牌资料库里的定位信息",' +
+    '"drivers":"信源与成因段(120-180字):AI 引用的信源偏好说明了什么,内容策略应如何调整;口碑情绪如何影响可见度",' +
+    '"actions":"行动建议段(100-150字):给行业参与者(尤其落后者)的可执行动作,要具体到平台与内容形态,可带量化目标"}。' +
+    '写作要求:每个论断必须带给定事实中的数字;揭示因果而非复述数据;语气像资深行业分析师的笔记,克制、具体、不用感叹号;' +
+    '禁止「其一其二」式罗列、禁止「值得注意的是」「综上所述」等 AI 腔;品牌资料库仅作背景语境,主观描述不要照抄。';
   const raw = await chatCompletion(
     { protocol: cfg.protocol as 'openai' | 'anthropic', endpoint: cfg.endpoint, apiKey: cfg.apiKey, model: cfg.model, timeoutMs: 90_000 },
     { system, user: JSON.stringify(digest), maxTokens: 2500 },
   );
   const m = raw.text.match(/\{[\s\S]*\}/);
   if (!m) return composed;
-  const parsed = JSON.parse(m[0]) as { title?: string; summary?: string; takeaways?: string[]; narrative?: string };
-  const takeaways = (parsed.takeaways ?? []).filter((t) => typeof t === 'string' && t.length >= 8).slice(0, 3);
+  const parsed = JSON.parse(m[0]) as {
+    title?: string;
+    summary?: string;
+    takeaways?: Array<{ label?: string; text?: string } | string>;
+    narrative?: string;
+    sections?: { landscape?: string; drivers?: string; actions?: string };
+  };
+  const takeaways = (Array.isArray(parsed.takeaways) ? parsed.takeaways : [])
+    .map((t) => (typeof t === 'string' ? { label: '', text: t } : { label: String(t.label ?? '').slice(0, 8), text: String(t.text ?? '') }))
+    .filter((t) => t.text.length >= 8)
+    .slice(0, 3);
   if (!parsed.title || !parsed.summary || takeaways.length === 0) return composed;
 
   const blocks = [...composed.blocks];
+  // 洞察条目 → 独立带标签卡片(替代一条塞三句的旧形态)
   const idx = blocks.findIndex((b) => b.type === 'takeaway');
-  if (idx >= 0) {
-    blocks[idx] = {
-      type: 'takeaway',
-      title: 'AI 主编洞察',
-      text: takeaways.join('  '),
-      tone: 'brand',
-    };
+  const insightBlocks: InsightBlock[] = takeaways.map((t) => ({
+    type: 'takeaway',
+    title: t.label || '核心洞察',
+    text: t.text,
+    tone: 'brand',
+  }));
+  if (idx >= 0) blocks.splice(idx, 1, ...insightBlocks);
+  else blocks.unshift(...insightBlocks);
+
+  // 撰稿正文 → 三段结构块(格局 / 成因与信源 / 建议),拒绝 500 字文字墙
+  const sec = parsed.sections;
+  const sectionBlocks: InsightBlock[] = [];
+  if (sec?.landscape && sec.landscape.length >= 60) {
+    sectionBlocks.push({ type: 'takeaway', title: '行业格局', text: sec.landscape.trim(), tone: 'brand' });
   }
-  const narrative = String(parsed.narrative ?? '').trim();
-  if (narrative.length >= 100) {
-    // 综述块插在主编洞察之后(数据块之前),是精品报告的深度核心
-    blocks.splice(idx >= 0 ? idx + 1 : 0, 0, {
-      type: 'takeaway',
-      title: '主编综述:格局、成因与建议',
-      text: narrative,
-      tone: 'warn',
-    });
+  if (sec?.drivers && sec.drivers.length >= 60) {
+    sectionBlocks.push({ type: 'takeaway', title: '成因与信源逻辑', text: sec.drivers.trim(), tone: 'brand' });
+  }
+  if (sec?.actions && sec.actions.length >= 50) {
+    sectionBlocks.push({ type: 'takeaway', title: '可执行建议', text: sec.actions.trim(), tone: 'warn' });
+  }
+  if (sectionBlocks.length > 0) {
+    blocks.splice(Math.max(idx, 0) + insightBlocks.length, 0, ...sectionBlocks);
+  } else {
+    // 兼容旧输出:只有 narrative 时按段落拆分为多块,消除文字墙
+    const narrative = String(parsed.narrative ?? '').trim();
+    if (narrative.length >= 100) {
+      const paras = narrative.split(/(?<=。”)|(?<=。)(?=[^\d])/).filter((p) => p.trim().length >= 60).slice(0, 3);
+      paras.forEach((p, i) =>
+        blocks.splice(Math.max(idx, 0) + insightBlocks.length + i, 0, {
+          type: 'takeaway',
+          title: ['行业格局', '成因与信源逻辑', '可执行建议'][i] ?? '综述',
+          text: p.trim(),
+          tone: i === 2 ? 'warn' : 'brand',
+        }),
+      );
+    }
   }
   return {
     title: parsed.title.slice(0, 60),

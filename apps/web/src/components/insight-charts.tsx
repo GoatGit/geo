@@ -57,33 +57,35 @@ export function InsightBlockView({ block: b }: { block: InsightBlock }) {
           }`}
         >
           <p className="text-[11px] font-medium uppercase tracking-widest text-slate-500">{b.title}</p>
-          <p className={`mt-1.5 text-[15px] font-semibold leading-7 ${b.tone === 'warn' ? 'text-warn' : b.tone === 'good' ? 'text-good' : 'text-brand-700'}`}>
+          <p className={`mt-1.5 whitespace-pre-line text-[15px] font-semibold leading-7 ${b.tone === 'warn' ? 'text-warn' : b.tone === 'good' ? 'text-good' : 'text-brand-700'}`}>
             {b.text}
           </p>
         </div>
       );
     case 'barRank':
-      return <ChartCard title={b.title} note={b.note}><BarRankChart {...b} /></ChartCard>;
+      return <ChartCard title={b.title} summary={b.summary} note={b.note}><BarRankChart {...b} /></ChartCard>;
     case 'funnel':
-      return <ChartCard title={b.title} note={b.note}><FunnelChart {...b} /></ChartCard>;
+      return <ChartCard title={b.title} summary={b.summary} note={b.note}><FunnelChart {...b} /></ChartCard>;
     case 'heatmap':
-      return <ChartCard title={b.title} note={b.note}><HeatmapChart {...b} /></ChartCard>;
+      return <ChartCard title={b.title} summary={b.summary} note={b.note}><HeatmapChart {...b} /></ChartCard>;
     case 'radar':
-      return <ChartCard title={b.title} note={b.note}><RadarChart {...b} /></ChartCard>;
+      return <ChartCard title={b.title} summary={b.summary} note={b.note}><RadarChart {...b} /></ChartCard>;
     case 'trend':
-      return <ChartCard title={b.title} note={b.note}><TrendChart {...b} /></ChartCard>;
+      return <ChartCard title={b.title} summary={b.summary} note={b.note}><TrendChart {...b} /></ChartCard>;
     case 'scatter':
-      return <ChartCard title={b.title} note={b.note}><ScatterChart {...b} /></ChartCard>;
+      return <ChartCard title={b.title} summary={b.summary} note={b.note}><ScatterChart {...b} /></ChartCard>;
     default:
       return null;
   }
 }
 
-function ChartCard({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {
+function ChartCard({ title, summary, note, children }: { title: string; summary?: string; note?: string; children: React.ReactNode }) {
   return (
     <figure className="card p-6">
       <figcaption>
         <h3 className="text-[17px] font-bold leading-6 text-slate-900">{title}</h3>
+        {/* 图上总结:先给「所以呢」,再给图表;数据口径统一收进页脚,不在各图重复 */}
+        {summary && <p className="mt-2 text-[13.5px] font-medium leading-6 text-slate-800">{summary}</p>}
         {note && <p className="mt-1 text-xs leading-5 text-slate-500">{note}</p>}
         <div className="mt-2 mb-4 h-0.5 rounded bg-brand-700" />
       </figcaption>

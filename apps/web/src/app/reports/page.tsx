@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, useBrandId } from '@/lib/queries';
+import { apiDownload } from '@/lib/api';
 import { PageHeader, Skeleton } from '@/components/ui';
 import { useToast } from '@/components/toast';
 
@@ -57,6 +58,7 @@ export default function ReportsPage() {
 
   const [preview, setPreview] = useState<{ id: number | null; title: string; html: string } | null>(null);
   const [previewBusy, setPreviewBusy] = useState<string | null>(null);
+  const [pdfBusy, setPdfBusy] = useState<number | null>(null);
 
   const openPreview = async (id: number) => {
     setPreviewBusy(`r${id}`);
@@ -94,6 +96,18 @@ export default function ReportsPage() {
       toast('已开始下载(浏览器打印即可另存为 PDF)');
     } catch (e) {
       toast((e as Error).message, 'err');
+    }
+  };
+
+  const downloadPdf = async (r: ReportRow) => {
+    setPdfBusy(r.id);
+    try {
+      await apiDownload(`/reports/${r.id}/pdf`, `青柠GEO-${TYPE_LABEL[r.type] ?? r.type}-${r.period}-${r.id}.pdf`);
+      toast('PDF 已开始下载');
+    } catch (e) {
+      toast((e as Error).message, 'err');
+    } finally {
+      setPdfBusy(null);
     }
   };
 
@@ -174,8 +188,17 @@ export default function ReportsPage() {
                         </button>
                       )}
                       {canUse && (
+                        <button
+                          className="rounded border border-slate-200 px-2.5 py-1 transition-colors hover:border-brand-300 hover:text-brand-700"
+                          disabled={pdfBusy === r.id}
+                          onClick={() => void downloadPdf(r)}
+                        >
+                          {pdfBusy === r.id ? '导出中…' : 'PDF'}
+                        </button>
+                      )}
+                      {canUse && (
                         <button className="rounded border border-slate-200 px-2.5 py-1 transition-colors hover:border-brand-300 hover:text-brand-700" onClick={() => download(r.id)}>
-                          下载
+                          HTML
                         </button>
                       )}
                       {!canUse && r.status !== 'generating' && (

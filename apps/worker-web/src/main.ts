@@ -1,7 +1,7 @@
 import { Queue, Worker } from 'bullmq';
 import Redis from 'ioredis';
 import { sql } from 'drizzle-orm';
-import { createDb, ensurePartitions, reports } from '@geo/db';
+import { createDb, ensurePartitions, reports, runMigrations } from '@geo/db';
 import { PLAN_LIMITS, type PlanTier } from '@geo/shared';
 import { REPORTS_QUEUE, REPUTATION_QUEUE, bullConnection } from './queue';
 import { envInt } from './config';
@@ -16,22 +16,28 @@ import { createBrokerFromEnv } from '@geo/browser-session';
 
 /**
  * Worker 启动(docs/07 §3):
- * 分区预建(幂等)→ 调度器(轮次触发)→ 采集 Worker 池 → 口碑/报告消费器 → 优雅退出。
- * 迁移在生产由发布流水线执行(db:migrate),此处仅保障分区存在。
+ * 幂等迁移(只加不改)→ 分区预建 → 调度器 → 采集/口碑/报告/洞察消费器 → 优雅退出。
+ * 启动自迁移是生产的标准迁移通道(RDS 公网不可达,本地无法直连执行 db:migrate);
+ * 多实例同时启动时迁移各自串行加锁执行,幂等无冲突。
  */
 async function bootstrap() {
   const { pool, db } = createDb(process.env.DATABASE_URL ?? 'postgres://geo:geo_dev@localhost:5432/geo');
   const logger = console;
 
+  const applied = await runMigrations(pool);
+  if (applied.length > 0) logger.log(`[worker-web] applied migrations: ${applied.join(', ')}`);
   await ensurePartitions(pool, 2);
 
   const scheduler = new RoundScheduler(db);
   const concurrency = envInt('WORKER_CONCURRENCY', 4, 1, 64);
   scheduler.start(undefined, concurrency); // 间隔经 SCHEDULER_INTERVAL_MS 配置(默认 60s);并发数随心跳上报
 
-  // mock 采集模式下确保账号池非空:池空会导致任务无限延迟重排、采集静默空转
+  // mock 采集模式下确保账号池非空:池空会导致任务无限延迟重排、采集静默空转。
+  // 补种失败(如 DB 缺列且迁移未跑)不阻塞启动——采集与登录主链路不依赖它
   if ((process.env.BROWSER_MODE ?? 'mock') === 'mock') {
-    await new AccountPoolService(db).ensureMockProfiles(2);
+    await new AccountPoolService(db)
+      .ensureMockProfiles(2)
+      .catch((err) => logger.error('[worker-web] mock 档案补种失败(不阻塞启动):', (err as Error).message));
   }
 
   // 全进程共享一个 broker:采集与人工登录(refcount 复用本地浏览器进程/登录态)

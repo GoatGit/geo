@@ -81,9 +81,13 @@ export default function InsightDetailPage() {
           <InsightBlocks blocks={d.blocks} />
         </section>
 
-        {/* 口径页脚 */}
+        {/* 口径页脚(全报告唯一口径出处;各图表不再重复) */}
         <footer className="mt-8 border-t border-slate-200 pt-4 text-[11px] leading-5 text-slate-400">
-          <p>口径说明:仅限可见度 —— 命中高 ≠ 评价好,量的是被 AI 主动提及;题目不含品牌名,避免提示偏差。</p>
+          <p>
+            口径说明:提及率 = 提及该品牌的回答数 ÷ 有效回答数;Top3 率与首位率的分母 = 有效且有名次;
+            采集失败与配额拦截不计入任何分母。有效回答指 AI 返回了实质内容的作答。
+          </p>
+          <p className="mt-1">口径提醒:命中率高 ≠ 评价好,本报告度量的是「被 AI 主动提及」;监测题目不含品牌名,避免提示偏差。</p>
           <p className="mt-1">
             <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer" className="hover:text-slate-600">
               京ICP备2024074563号-9

@@ -17,6 +17,8 @@ export interface BarRankBlock {
   type: 'barRank';
   title: string;
   note?: string;
+  /** 图表上方的一句话结论(数据驱动的「所以呢」),由组稿器生成 */
+  summary?: string;
   total: number;
   unit?: string;
   items: Array<{ name: string; value: number; group?: 'domestic' | 'intl' | 'highlight' | 'normal' }>;
@@ -27,6 +29,8 @@ export interface FunnelBlock {
   type: 'funnel';
   title: string;
   note?: string;
+  /** 图表上方的一句话结论(数据驱动的「所以呢」),由组稿器生成 */
+  summary?: string;
   stages: Array<{ label: string; note: string; count: number }>;
 }
 
@@ -35,6 +39,8 @@ export interface HeatmapBlock {
   type: 'heatmap';
   title: string;
   note?: string;
+  /** 图表上方的一句话结论(数据驱动的「所以呢」),由组稿器生成 */
+  summary?: string;
   columns: string[];
   rows: Array<{ name: string; cells: Array<number | null> }>;
 }
@@ -44,6 +50,8 @@ export interface RadarBlock {
   type: 'radar';
   title: string;
   note?: string;
+  /** 图表上方的一句话结论(数据驱动的「所以呢」),由组稿器生成 */
+  summary?: string;
   axes: string[];
   series: Array<{ name: string; values: number[] }>;
 }
@@ -53,6 +61,8 @@ export interface TrendBlock {
   type: 'trend';
   title: string;
   note?: string;
+  /** 图表上方的一句话结论(数据驱动的「所以呢」),由组稿器生成 */
+  summary?: string;
   /** 值域提示:'%' 时坐标轴按 0-100 处理,否则按数据范围自适应 */
   unit?: string;
   points: Array<{ label: string; value: number | null }>;
@@ -63,6 +73,8 @@ export interface ScatterBlock {
   type: 'scatter';
   title: string;
   note?: string;
+  /** 图表上方的一句话结论(数据驱动的「所以呢」),由组稿器生成 */
+  summary?: string;
   xLabel: string;
   yLabel: string;
   diagonal?: boolean;

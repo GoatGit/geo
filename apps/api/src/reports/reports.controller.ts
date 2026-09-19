@@ -10,10 +10,11 @@ import {
   ParseIntPipe,
   Post,
   Req,
+  Res,
 } from '@nestjs/common';
 import { and, desc, eq, gte, inArray } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { IsIn, IsInt } from 'class-validator';
 import { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
@@ -24,7 +25,8 @@ import { currentAccount } from '../common/auth';
 import { DB, REDIS } from '../common/infra.module';
 import { BrandsService } from '../brands/brands.service';
 import { BillingService } from '../billing/billing.service';
-import { ReportRenderService } from './render.service';
+import { ReportRenderService, REPORT_TEMPLATES, type ReportPayload } from './render.service';
+import { renderReportPdf } from './report-pdf';
 import { loadEnv } from '../config/env';
 
 class GenerateReportDto {
@@ -169,6 +171,17 @@ export class ReportsController implements OnModuleDestroy {
       contentBase64: Buffer.from(html, 'utf8').toString('base64'),
       contentType: 'text/html; charset=utf-8',
     };
+  }
+
+  /** PDF 下载:payload → pdfkit 矢量 PDF(中文字体内嵌,分节与 HTML 模板一致)。 */
+  @Get(':id/pdf')
+  async pdf(@Req() req: Request, @Param('id', ParseIntPipe) id: number, @Res() res: Response) {
+    const { row, payload } = await this.loadPayload(req, id);
+    const buf = await renderReportPdf(payload as unknown as ReportPayload, row.type as ReportType);
+    const utf8Name = encodeURIComponent(`青柠GEO-${REPORT_TEMPLATES[row.type as ReportType]?.name ?? row.type}-${row.period}-${id}.pdf`);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="geo-report-${id}.pdf"; filename*=UTF-8''${utf8Name}`);
+    res.end(buf);
   }
 
   private async ownedRow(req: Request, id: number) {
