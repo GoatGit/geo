@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import type { Db } from '@geo/db';
 import { insightIndustries, industryInsights, loadPlatformSettings } from '@geo/db';
 import { chatCompletion } from '@geo/insight-agent';
@@ -84,6 +84,9 @@ export interface IndustryAggregates {
   trend: Array<{ date: string; valid: number; rate: number | null }>;
 }
 
+/** 单品牌比率可信的最低样本量:低于此值不进入 headline/环比叙述,图表仅展示并标注样本量。 */
+export const MIN_SAMPLE = 5;
+
 export interface ComposedInsight {
   title: string;
   summary: string;
@@ -96,15 +99,36 @@ const r3 = (v: number | null) => (v == null ? null : Math.round(v * 1000) / 1000
 
 // ===== 组稿(纯函数,可单测) =====
 
-export function composeIndustryInsight(agg: IndustryAggregates): ComposedInsight {
+/**
+ * @param prev 上期各品牌有效提及率(0-1),取自同行业上一期报告;首期传 undefined
+ */
+export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<string, number>): ComposedInsight {
   const sorted = [...agg.brands].sort(
     (a, b) => rateOf(b.mentioned, b.valid) - rateOf(a.mentioned, a.valid) || b.valid - a.valid,
   );
-  const head = sorted[0];
-  const last = sorted[sorted.length - 1];
+  // 叙述口径只认样本充足的品牌:小样本 100%/0% 都是噪声
+  const narratable = sorted.filter((b) => b.valid >= MIN_SAMPLE);
+  const head = narratable[0] ?? sorted[0];
+  const last = narratable[narratable.length - 1] ?? sorted[sorted.length - 1];
   const blocks: InsightBlock[] = [];
 
-  // ① 格局定调
+  // ⓪ 数据说明(报告开篇:窗口与样本边界,读者先知道数字的分量再看结论)
+  {
+    const thin = sorted.filter((b) => b.valid > 0 && b.valid < MIN_SAMPLE);
+    const parts = [
+      `数据窗口${agg.windowDays ? `为近 ${agg.windowDays} 天` : '为全量历史'},共 ${agg.funnel.answers} 条有效回答、${agg.brands.length} 个监测品牌。`,
+    ];
+    if (narratable.length < sorted.length) {
+      parts.push(
+        thin.length > 0
+          ? `其中 ${thin.map((b) => b.name).join('、')} 的有效回答不足 ${MIN_SAMPLE} 条,其比率仅供参考,不参与格局结论。`
+          : `部分品牌样本量不足 ${MIN_SAMPLE} 条,其比率仅供参考。`,
+      );
+    }
+    blocks.push({ type: 'takeaway', title: '数据说明', text: parts.join(''), tone: 'brand' } satisfies TakeawayBlock);
+  }
+
+  // ① 格局定调(只叙述样本充足的品牌)
   if (head) {
     const headRate = rateOf(head.mentioned, head.valid);
     const tailRate = last && last !== head ? rateOf(last.mentioned, last.valid) : null;
@@ -120,25 +144,51 @@ export function composeIndustryInsight(agg: IndustryAggregates): ComposedInsight
     } satisfies TakeawayBlock);
   }
 
-  // ② 品牌有效提及率排行
+  // ② 品牌有效提及率排行(带样本量与环比)
   if (agg.brands.length > 0) {
     const headRate = rateOf(head.mentioned, head.valid);
     const tailRate = last && last !== head ? rateOf(last.mentioned, last.valid) : null;
+    // 环比叙述:样本充足且上期有值的品牌中,取提升/回落最陡者
+    let deltaLine = '';
+    if (prev && prev.size > 0) {
+      const movers = narratable
+        .map((b) => ({ b, d: prev.has(b.name) ? (rateOf(b.mentioned, b.valid) - (prev.get(b.name) ?? 0)) * 100 : null }))
+        .filter((m) => m.d != null) as Array<{ b: (typeof narratable)[number]; d: number }>;
+      if (movers.length > 0) {
+        const up = movers.reduce((a, m) => (m.d > a.d ? m : a));
+        const down = movers.reduce((a, m) => (m.d < a.d ? m : a));
+        const fmt = (d: number) => `${Math.abs(Math.round(d * 10) / 10)} 个百分点`;
+        deltaLine =
+          up.d > 0.5
+            ? `较上期,${up.b.name} 提升 ${fmt(up.d)}${down.d < -0.5 && down.b.name !== up.b.name ? `,${down.b.name} 回落 ${fmt(down.d)}` : ''}。`
+            : down.d < -0.5
+              ? `较上期,${down.b.name} 回落 ${fmt(down.d)}。`
+              : '较上期,头部格局基本未变。';
+      }
+    }
     blocks.push({
       type: 'barRank',
       title: '品牌有效提及率排行',
       summary:
-        tailRate != null && tailRate < headRate
+        (tailRate != null && tailRate < headRate
           ? `${head.name} 以 ${pctText(headRate)} 领跑,${last!.name} 仅 ${pctText(tailRate)} —— 首尾相差 ${Math.round((headRate - tailRate) * 100)} 个百分点。`
           : head
             ? `${head.name} 以 ${pctText(headRate)} 领跑监测品牌。`
-            : undefined,
+            : '') + deltaLine,
+      note: `条目右侧 n = 该品牌有效回答数(样本量),n<${MIN_SAMPLE} 的比率仅供参考`,
       total: 100,
       unit: '%',
-      items: sorted.map((b) => ({
-        name: b.name,
-        value: Math.round(rateOf(b.mentioned, b.valid) * 1000) / 10,
-      })),
+      items: sorted.map((b) => {
+        const v = Math.round(rateOf(b.mentioned, b.valid) * 1000) / 10;
+        return {
+          name: b.name,
+          value: v,
+          n: b.valid,
+          ...(prev && prev.has(b.name) && b.valid >= MIN_SAMPLE
+            ? { delta: Math.round((v - (prev.get(b.name) ?? 0) * 100) * 10) / 10 }
+            : {}),
+        };
+      }),
     } satisfies BarRankBlock);
   }
 
@@ -324,7 +374,13 @@ export function composeIndustryInsight(agg: IndustryAggregates): ComposedInsight
   const questions = agg.brands.reduce((a, b) => a + b.questions, 0);
   const answers = agg.brands.reduce((a, b) => a + b.answers, 0);
   const cover: InsightCover = {
-    headline: head ? `${head.name} · 有效提及率 ${pctText(rateOf(head.mentioned, head.valid))}` : undefined,
+    // headline 只由样本充足的品牌担纲:小样本 100% 上封面是可信度事故
+    headline:
+      head && head.valid >= MIN_SAMPLE
+        ? `${head.name} · 有效提及率 ${pctText(rateOf(head.mentioned, head.valid))}`
+        : answers > 0
+          ? `本期 ${answers} 条有效回答`
+          : undefined,
     brands: agg.brands.length,
     questions,
     answers,
@@ -333,7 +389,9 @@ export function composeIndustryInsight(agg: IndustryAggregates): ComposedInsight
 
   const summary = head
     ? `对 ${agg.brands.length} 个品牌、${questions} 个监控问题、${answers} 条有效回答的行业聚合分析:` +
-      `${head.name} 以有效提及率 ${pctText(rateOf(head.mentioned, head.valid))}、Top3 率 ${pctText(rateOf(head.top3, head.ranked))} 领跑` +
+      (head.valid >= MIN_SAMPLE
+        ? `${head.name} 以有效提及率 ${pctText(rateOf(head.mentioned, head.valid))}、Top3 率 ${pctText(rateOf(head.top3, head.ranked))} 领跑`
+        : '头部品牌样本尚少,格局待更多数据确认') +
       (agg.citations.total > 0 ? `;AI 引用合计 ${agg.citations.total} 次,自有信源占比 ${pctText(agg.citations.ownedShare)}` : '') +
       '。'
     : `${agg.industry} 行业暂无可聚合的监测数据。`;
@@ -620,6 +678,19 @@ function rowsOf<T>(res: unknown): T[] {
 }
 const num = (v: string | number | null | undefined) => Number(v ?? 0) || 0;
 
+/** 从报告 blocks 提取「品牌有效提及率排行」的 name→value(0-1);无此块返回 undefined。 */
+function extractRankItems(blocks: InsightBlock[]): Map<string, number> | undefined {
+  const rank = blocks.find(
+    (b): b is BarRankBlock => b.type === 'barRank' && b.title === '品牌有效提及率排行' && Array.isArray(b.items),
+  );
+  if (!rank) return undefined;
+  const m = new Map<string, number>();
+  for (const it of rank.items) {
+    if (typeof it.name === 'string' && typeof it.value === 'number') m.set(it.name, it.value / 100);
+  }
+  return m.size > 0 ? m : undefined;
+}
+
 // ===== 运行编排(队列消费入口) =====
 
 export interface InsightBuildJob {
@@ -643,7 +714,20 @@ export async function runInsightBuild(db: Db, job: InsightBuildJob): Promise<voi
 
   try {
     const agg = await collectIndustryAggregates(db, industry?.name ?? '', job.windowDays);
-    let composed = composeIndustryInsight(agg);
+    // 上期环比基线:同行业最近一份已构建报告(排除自身)排行图的品牌提及率
+    const prevRow = (
+      await db
+        .select({ blocks: industryInsights.blocks })
+        .from(industryInsights)
+        .where(and(eq(industryInsights.industryId, row.industryId), ne(industryInsights.id, job.insightId)))
+        .orderBy(desc(industryInsights.builtAt))
+        .limit(5)
+    )
+      .filter((r) => r.blocks != null)
+      .map((r) => extractRankItems(r.blocks as InsightBlock[]))
+      .find((m) => m != null);
+    const prev = prevRow ?? undefined;
+    let composed = composeIndustryInsight(agg, prev);
     // LLM 撰稿层:标题/摘要/核心洞察由 GLM 基于聚合事实撰写;失败保留模板稿(降级可复现)
     try {
       composed = await polishWithLlm(db, industry?.name ?? '', job.windowDays, agg, composed);
@@ -760,6 +844,25 @@ async function polishWithLlm(
     .filter((t) => t.text.length >= 8)
     .slice(0, 3);
   if (!parsed.title || !parsed.summary || takeaways.length === 0) return composed;
+
+  // 数字自检(防幻觉):LLM 文中的百分比必须能在事实摘要中找到(±1 容差覆盖舍入)。
+  // 违例说明模型编造了比率 → 整篇降级模板稿,宁可朴素不可失实。
+  const legalPct = new Set<number>();
+  for (const b of digest.品牌提及率 ?? []) {
+    for (const v of [b.提及率, b.Top3率, b.首推率]) {
+      const n = parseFloat(String(v ?? ''));
+      if (Number.isFinite(n)) legalPct.add(n);
+    }
+  }
+  const texts = [parsed.title, parsed.summary, ...takeaways.map((t) => t.text), parsed.sections?.landscape, parsed.sections?.drivers, parsed.sections?.actions]
+    .filter(Boolean)
+    .join(' ');
+  const pctsInText = [...texts.matchAll(/(\d+(?:\.\d+)?)\s*%/g)].map((m) => parseFloat(m[1]!));
+  const fabricated = pctsInText.filter((p) => ![...legalPct].some((l) => Math.abs(l - p) <= 1));
+  if (fabricated.length > 0) {
+    console.error(`[insights] LLM 撰稿出现事实外百分比[${fabricated.join(',')}],降级模板稿`);
+    return composed;
+  }
 
   const blocks = [...composed.blocks];
   // 洞察条目 → 独立带标签卡片(替代一条塞三句的旧形态)

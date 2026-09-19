@@ -113,7 +113,8 @@ describe('行业洞察组稿(运行 → 数据报告)', () => {
     empty.landscape = [];
     empty.engineHits = [];
     const c = composeIndustryInsight(empty);
-    expect(c.blocks.length).toBe(0);
+    expect(c.blocks.length).toBe(1); // 仅剩开篇「数据说明」块
+    expect(c.blocks[0]!.title).toBe('数据说明');
     expect(c.summary).toContain('暂无可聚合');
   });
 
@@ -151,5 +152,42 @@ describe('行业洞察组稿(运行 → 数据报告)', () => {
     const rep = c.blocks.find((b) => b.title === '口碑与印象')!;
     expect(JSON.stringify(rep)).toContain('性价比高');
     expect(JSON.stringify(rep)).not.toContain('×12');
+  });
+
+  it('环比:传入上期基线后 items 带 delta,summary 出现变动叙述', () => {
+    const c = composeIndustryInsight(fixture(), new Map([['品牌A', 0.5], ['品牌B', 0.5]]));
+    const rank = c.blocks.find((b) => b.type === 'barRank') as BarRankBlock;
+    const a = rank.items.find((i) => i.name === '品牌A')!;
+    const b = rank.items.find((i) => i.name === '品牌B')!;
+    expect(a.delta).toBeCloseTo(30); // 80% - 50%
+    expect(b.delta).toBeCloseTo(-10); // 40% - 50%
+    expect(rank.summary).toContain('较上期');
+    expect(rank.summary).toContain('品牌A 提升');
+    expect(rank.items.every((i) => typeof i.n === 'number' && i.n! > 0)).toBe(true);
+  });
+
+  it('首期报告(无上期):items 无 delta,不出现环比叙述', () => {
+    const c = composeIndustryInsight(fixture());
+    const rank = c.blocks.find((b) => b.type === 'barRank') as BarRankBlock;
+    expect(rank.items.every((i) => i.delta === undefined)).toBe(true);
+    expect(rank.summary ?? '').not.toContain('较上期');
+  });
+
+  it('小样本守门:样本不足的品牌不进 headline/格局叙述,数据说明块披露', () => {
+    const thin = fixture();
+    // 品牌B 仅 2 条有效回答且 2 次都被提及(100%)——典型噪声数据
+    thin.brands = thin.brands.map((b) => (b.name === '品牌B' ? { ...b, valid: 2, mentioned: 2, ranked: 2, top3: 2, top1: 2 } : b));
+    const c = composeIndustryInsight(thin);
+    expect(c.cover.headline).toContain('品牌A'); // headline 由样本充足的 A 担纲
+    expect(c.cover.headline).not.toContain('100% · 品牌B');
+    const note = c.blocks.find((b) => b.title === '数据说明')!;
+    expect(JSON.stringify(note)).toContain('品牌B');
+    const rank = c.blocks.find((b) => b.type === 'barRank') as BarRankBlock;
+    const b2 = rank.items.find((i) => i.name === '品牌B')!;
+    expect(b2.n).toBe(2); // 数据仍展示,但披露样本量
+    expect(b2.delta).toBeUndefined(); // 小样本不参与环比
+    // 格局叙述只讲样本充足的 A
+    const landscape = c.blocks.find((b) => b.title === 'AI 眼中的行业格局')!;
+    expect(JSON.stringify(landscape)).not.toContain('品牌B');
   });
 });

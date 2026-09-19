@@ -21,7 +21,15 @@ export interface BarRankBlock {
   summary?: string;
   total: number;
   unit?: string;
-  items: Array<{ name: string; value: number; group?: 'domestic' | 'intl' | 'highlight' | 'normal' }>;
+  items: Array<{
+    name: string;
+    value: number;
+    group?: 'domestic' | 'intl' | 'highlight' | 'normal';
+    /** 该条目的样本量(有效回答数);读者据此判断比率可信度 */
+    n?: number;
+    /** 较上期变动(百分点或绝对数,正=上升);首期报告无此字段 */
+    delta?: number;
+  }>;
 }
 
 /** AI 筛选漏斗:每层 count,pct 相对首层自动计算 */

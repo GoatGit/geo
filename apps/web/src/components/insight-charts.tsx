@@ -102,6 +102,9 @@ function BarRankChart({ total, unit, items }: Extract<InsightBlock, { type: 'bar
     <div className="space-y-1.5">
       {items.map((it, i) => {
         const color = it.group === 'intl' ? GRAY : it.group === 'highlight' ? ORANGE : i === 0 ? NAVY : BLUE;
+        // 环比箭头(仅样本充足且上期有值的条目携带 delta)
+        const delta =
+          it.delta == null ? null : it.delta > 0 ? <span className="text-good">↑{it.delta.toFixed(1)}</span> : it.delta < 0 ? <span className="text-bad">↓{Math.abs(it.delta).toFixed(1)}</span> : <span className="text-slate-400">—</span>;
         return (
           <div key={it.name} className="flex items-center gap-2.5 text-[13px]">
             <span className="metric-num w-6 shrink-0 text-right text-slate-400">{i + 1}</span>
@@ -112,6 +115,15 @@ function BarRankChart({ total, unit, items }: Extract<InsightBlock, { type: 'bar
             <span className="metric-num w-16 shrink-0 text-right font-medium" style={{ color: it.group === 'highlight' ? ORANGE : INK }}>
               {unit === '%' ? `${it.value}%` : `${it.value}/${total}`}
             </span>
+            {delta != null && <span className="metric-num w-12 shrink-0 text-[11px]">{delta}</span>}
+            {it.n != null && (
+              <span
+                className="metric-num w-10 shrink-0 text-right text-[10px] text-slate-400"
+                title={`该品牌有效回答 ${it.n} 条,样本量越小比率波动越大`}
+              >
+                n={it.n}
+              </span>
+            )}
           </div>
         );
       })}

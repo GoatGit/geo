@@ -133,7 +133,7 @@ export async function renderInsightPdf(detail: PdfInsight): Promise<Buffer> {
 
   const barRank = (b: BarRankBlock) => {
     const labelW = 128;
-    const valueW = 64;
+    const valueW = 96; // 值 + 环比 + 样本量
     const trackW = CONTENT_W - labelW - valueW - 16;
     const isPct = b.unit === '%';
     const maxV = isPct ? 100 : Math.max(...b.items.map((i) => i.value), 1);
@@ -146,12 +146,17 @@ export async function renderInsightPdf(detail: PdfInsight): Promise<Buffer> {
       doc.roundedRect(PAGE.left + labelW + 6, ry + 3, trackW, 9, 3).fill('#eef0f4');
       const w = Math.max((item.value / maxV) * trackW, 2);
       doc.roundedRect(PAGE.left + labelW + 6, ry + 3, w, 9, 3).fill(color);
-      const label = isPct ? `${item.value}%` : `${item.value} / ${b.total}`;
-      doc.fillColor(SUB).fontSize(8).text(label, PAGE.left + labelW + trackW + 12, ry + 3.5, {
-        width: valueW,
-        align: 'right',
-        lineBreak: false,
-      });
+      // 值 + 环比箭头 + 样本量(右对齐一列,信息密度对齐网页版)
+      const val = isPct ? `${item.value}%` : `${item.value} / ${b.total}`;
+      const delta =
+        item.delta == null ? '' : item.delta > 0 ? ` ↑${item.delta.toFixed(1)}` : item.delta < 0 ? ` ↓${Math.abs(item.delta).toFixed(1)}` : ' —';
+      const n = item.n != null ? ` n=${item.n}` : '';
+      doc.fillColor(delta.startsWith(' ↑') ? BRAND : delta.startsWith(' ↓') ? ORANGE : SUB).fontSize(7.5).text(
+        `${val}${delta}${n}`,
+        PAGE.left + labelW + trackW + 12,
+        ry + 3.5,
+        { width: valueW, align: 'right', lineBreak: false },
+      );
     });
     y += b.items.length * rowH + 4;
   };
