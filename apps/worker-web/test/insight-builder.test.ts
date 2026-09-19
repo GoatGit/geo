@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { BarRankBlock, FunnelBlock, HeatmapBlock, TrendBlock } from '@geo/shared';
 import { composeIndustryInsight, type IndustryAggregates } from '../src/insight-builder';
+import type { BarRankBlock, RadarBlock } from '@geo/shared';
 
 /** 合成聚合输入:2 品牌、2 引擎、完整漏斗/信源/口碑/趋势。 */
 function fixture(): IndustryAggregates {
@@ -17,6 +18,10 @@ function fixture(): IndustryAggregates {
     answers: valid,
     failed: 1,
     quotaBlocked: 2,
+    repTotal: name === '品牌A' ? 20 : 10,
+    repPos: name === '品牌A' ? 16 : 3,
+    repNeg: name === '品牌A' ? 1 : 4,
+    ownedHits: name === '品牌A' ? 12 : 0,
   });
   return {
     industry: '测试行业',
@@ -100,6 +105,29 @@ describe('行业洞察组稿(运行 → 数据报告)', () => {
     const trend = c.blocks.find((b) => b.type === 'trend') as TrendBlock;
     expect(trend.points[2].value).toBeNull();
     expect(trend.points[0].value).toBeCloseTo(70);
+  });
+
+  it('雷达五维全部为品牌归属真实值:口碑/官网被引不再共享行业值', () => {
+    const c = composeIndustryInsight(fixture());
+    const radar = c.blocks.find((b) => b.type === 'radar') as RadarBlock;
+    expect(radar.axes).toEqual(['提及率', 'Top3率', '首位率', '口碑正面', '官网被引']);
+    const a = radar.series.find((s) => s.name === '品牌A')!;
+    const b = radar.series.find((s) => s.name === '品牌B')!;
+    // 品牌A:口碑正面 16/20=0.8,官网被引 12/300=0.04;品牌B:3/10=0.3,0
+    expect(a.values[3]).toBeCloseTo(0.8);
+    expect(a.values[4]).toBeCloseTo(0.04);
+    expect(b.values[3]).toBeCloseTo(0.3);
+    expect(b.values[4]).toBe(0);
+  });
+
+  it('品牌口碑正面率排行出块:n 携带口碑回答数', () => {
+    const c = composeIndustryInsight(fixture());
+    const rank = c.blocks.find((b) => b.type === 'barRank' && b.title === '品牌口碑正面率排行') as BarRankBlock;
+    expect(rank).toBeTruthy();
+    expect(rank.items).toEqual([
+      { name: '品牌A', value: 80, n: 20 },
+      { name: '品牌B', value: 30, n: 10 },
+    ]);
   });
 
   it('行业无品牌/无数据时:不产生空除崩溃,产出可渲染的最小报告', () => {

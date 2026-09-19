@@ -355,7 +355,7 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
       title: '行业每日提及率',
       summary:
         first != null && lastT != null
-          ? Math.abs(lastT - first) >= 0.5
+          ? Math.abs(lastT - first) >= 0.005
             ? `行业提及率从 ${pctText(first)} 走到 ${pctText(lastT)},${lastT >= first ? '整体抬升' : '有所回落'}。`
             : `行业提及率整体走平(${pctText(first)} → ${pctText(lastT)}),格局稳定。`
           : undefined,
@@ -463,9 +463,9 @@ export async function collectIndustryAggregates(
 
   // 独立模型(docs/01 IA ⑤):行业品牌来自 insight_brands;采集数据全部挂在
   // 影子品牌(哨兵账号名下 industry 同名)名下,按 mention_facts.subject_name 分组还原各品牌
-  const brandRows = rowsOf<{ id: string; name: string }>(
+  const brandRows = rowsOf<{ id: string; name: string; website: string | null }>(
     await db.execute(sql`
-      select ib.id::bigint as id, ib.name
+      select ib.id::bigint as id, ib.name, ib.website
       from insight_brands ib
       join insight_industries ii on ii.id = ib.industry_id
       where ii.name = ${industry} and ib.active
@@ -556,6 +556,56 @@ export async function collectIndustryAggregates(
     order by hits desc
   `);
 
+  // 官网域名 → 行业品牌 的归属表(自有信源硬证据):取 website 的 host,去 www,子域也算命中
+  const brandHosts = new Map<string, string>();
+  for (const b of brandRows) {
+    const host = (b.website ?? '')
+      .replace(/^https?:\/\//, '')
+      .replace(/^www\./, '')
+      .split('/')[0]
+      ?.toLowerCase();
+    if (host) brandHosts.set(host, b.name);
+  }
+  const ownedHitsByBrand = new Map<string, number>();
+  for (const r of rowsOf<{ domain: string; hits: string }>(
+    await db.execute(sql`
+      select cf.domain, count(*)::int as hits
+      from citation_facts cf
+      where cf.brand_id = ${shadowId}${winCf}
+      group by cf.domain
+    `),
+  )) {
+    const d = r.domain.toLowerCase().replace(/^www\./, '');
+    for (const [host, name] of brandHosts) {
+      if (d === host || d.endsWith(`.${host}`)) {
+        ownedHitsByBrand.set(name, (ownedHitsByBrand.get(name) ?? 0) + num(r.hits));
+        break;
+      }
+    }
+  }
+
+  // 口碑回答的品牌归属:一条口碑回答提到谁,正负面就归属给谁(多品牌同题各计一次)
+  const repByBrand = new Map<string, { total: number; pos: number; neg: number }>();
+  for (const r of rowsOf<{ subject_name: string; sentiment: string; n: string }>(
+    await db.execute(sql`
+      select mf.subject_name, rf.sentiment, count(*)::int as n
+      from reputation_facts rf
+      join mention_facts mf on mf.run_id = rf.run_id and mf.mentioned and mf.brand_id = ${shadowId}
+      where rf.brand_id = ${shadowId}
+        and mf.subject_name in (${sql.join(
+          brandRows.map((b) => sql`${b.name}`),
+          sql`, `,
+        )})${winRf}
+      group by mf.subject_name, rf.sentiment
+    `),
+  )) {
+    const cur = repByBrand.get(r.subject_name) ?? { total: 0, pos: 0, neg: 0 };
+    cur.total += num(r.n);
+    if (r.sentiment === 'pos') cur.pos += num(r.n);
+    else if (r.sentiment === 'neg') cur.neg += num(r.n);
+    repByBrand.set(r.subject_name, cur);
+  }
+
   const repRows = await db.execute(sql`
     select sentiment, impression_terms
     from (
@@ -612,6 +662,10 @@ export async function collectIndustryAggregates(
       answers: num(c?.answers),
       failed: num(c?.failed),
       quotaBlocked: num(c?.quota_blocked),
+      repTotal: repByBrand.get(b.name)?.total ?? 0,
+      repPos: repByBrand.get(b.name)?.pos ?? 0,
+      repNeg: repByBrand.get(b.name)?.neg ?? 0,
+      ownedHits: ownedHitsByBrand.get(b.name) ?? 0,
     };
   });
 
