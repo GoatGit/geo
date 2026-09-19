@@ -14,6 +14,15 @@ import { useGSAP } from '@gsap/react';
 
 if (typeof window !== 'undefined') {
   gsap.registerPlugin(useGSAP, ScrollTrigger);
+  // ScrollTrigger 起点缓存会因晚到的字体/图片/数据布局变化而过期(锚点跳转时浏览器
+  // 在水合前已滚动,触发器创建时读不到正确位置 → 内容卡在 from() 隐形初始态)。
+  // load 后统一刷新 + 延迟再刷一次,覆盖晚到布局
+  const w = window as Window & { __geoStRefreshed?: boolean };
+  if (!w.__geoStRefreshed) {
+    w.__geoStRefreshed = true;
+    window.addEventListener('load', () => ScrollTrigger.refresh());
+    window.setTimeout(() => ScrollTrigger.refresh(), 1_500);
+  }
 }
 
 function prefersReducedMotion(): boolean {
@@ -79,15 +88,25 @@ export function Reveal({
     () => {
       const el = ref.current;
       if (!el || prefersReducedMotion() || el.children.length === 0) return;
-      gsap.from(Array.from(el.children), {
+      const kids = Array.from(el.children);
+      const tween = gsap.from(kids, {
         y: 22,
         opacity: 0,
         duration: 0.6,
         delay,
         stagger,
         ease: 'power2.out',
-        scrollTrigger: { trigger: el, start: 'top 86%', once: true },
+        scrollTrigger: { trigger: el, start: 'top 92%', once: true },
       });
+      // 内容可见性死线:任何原因(锚点跳转竞态/晚到布局)导致触发点未结算时,
+      // 3s 后强制清除隐形初始态——内容绝不允许因动效永远消失
+      const failsafe = window.setTimeout(() => {
+        if (getComputedStyle(kids[0] as Element).opacity === '0') {
+          tween.scrollTrigger?.kill();
+          gsap.set(kids, { clearProps: 'all' });
+        }
+      }, 3_000);
+      return () => window.clearTimeout(failsafe);
     },
     { scope: ref },
   );
