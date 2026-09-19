@@ -12,6 +12,24 @@ export interface TakeawayBlock {
   tone?: 'brand' | 'warn' | 'good';
 }
 
+/**
+ * 下钻查询(报告数字 → 事实明细):由组稿器挂在块元数据上,前端点击后
+ * 调 GET /insights/:id/facts 拉取 mention/citation 分页明细(含回答摘录)。
+ */
+export interface InsightDrill {
+  kind: 'mentions' | 'citations';
+  /** 主体名(品牌) */
+  subject?: string;
+  /** 问题语义层 */
+  layer?: string;
+  /** 引擎 slug(如 doubao) */
+  engine?: string;
+  /** 引用域名(如 zhihu.com) */
+  domain?: string;
+  /** 信源类型桶(信源类型构成图,如「UGC/社区」→ API 侧映射回 platform_category 集) */
+  bucket?: string;
+}
+
 /** 品牌命中排行(横向条形):value 相对 total(如 50/78)或百分比(total=100 + unit='%') */
 export interface BarRankBlock {
   type: 'barRank';
@@ -29,6 +47,8 @@ export interface BarRankBlock {
     n?: number;
     /** 较上期变动(百分点或绝对数,正=上升);首期报告无此字段 */
     delta?: number;
+    /** 行点击下钻(事实明细);无此字段的条目不可点 */
+    drill?: InsightDrill;
   }>;
 }
 
@@ -51,6 +71,8 @@ export interface HeatmapBlock {
   summary?: string;
   columns: string[];
   rows: Array<{ name: string; cells: Array<number | null> }>;
+  /** 列语义(下钻用):engine=引擎 slug 反查,layer=问题层原值;缺省不可点 */
+  columnKind?: 'engine' | 'layer';
 }
 
 /** 多品牌维度形状对比(雷达):values 为 0-1 */

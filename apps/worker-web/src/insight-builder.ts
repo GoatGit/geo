@@ -218,6 +218,7 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
           name: b.name,
           value: v,
           n: b.valid,
+          drill: { kind: 'mentions', subject: b.name },
           ...(prev && prev.has(b.name) && b.valid >= MIN_SAMPLE
             ? { delta: Math.round((v - (prev.get(b.name) ?? 0) * 100) * 10) / 10 }
             : {}),
@@ -302,6 +303,7 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
           ? `;${missing.map((m) => engineLabel(m)).join('/')} 本轮无有效样本(需在账号池完成该引擎登录后重采)`
           : ''),
       columns: engines.map((e) => engineLabel(e)),
+      columnKind: 'engine',
       rows: agg.brands.map((b) => ({
         name: b.name,
         cells: engines.map((e) => {
@@ -337,6 +339,7 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
         : undefined,
       note: ['每格 = 该层问题的提及率(命中 ÷ 有效回答);空白 = 无有效样本', qNote].filter(Boolean).join('。'),
       columns: layerOrder,
+      columnKind: 'layer',
       rows: agg.brands.map((b) => ({
         name: b.name,
         cells: layerOrder.map((layer) => {
@@ -482,7 +485,11 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
           ? `行业合计被引 ${agg.citations.total} 次,品牌官网被引 ${ownedTotal} 次(占比 ${pctText(ownedTotal / agg.citations.total)})`
           : `行业合计被引 ${agg.citations.total} 次`,
       total: agg.citations.total,
-      items: platformTop.map((d) => ({ name: d.platform || d.domain, value: d.hits })),
+      items: platformTop.map((d) => ({
+        name: d.platform || d.domain,
+        value: d.hits,
+        drill: { kind: 'citations', domain: d.domain },
+      })),
     } satisfies BarRankBlock);
 
     // ⑥.1 信源类型构成(UGC/媒体/榜单/官网……):回答"AI 的判断从哪类内容来"
@@ -522,6 +529,7 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
           name,
           value: Math.round((hits / catTotal) * 1000) / 10,
           n: hits,
+          drill: { kind: 'citations', bucket: name },
         })),
       } satisfies BarRankBlock);
     }

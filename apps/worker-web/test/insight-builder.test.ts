@@ -331,13 +331,24 @@ describe('行业洞察组稿(运行 → 数据报告)', () => {
     expect(b2.cells[1]).toBeCloseTo(0.5); // doubao 50% 命中 —— 名字关联命中
   });
 
+  it('数字下钻元数据:排行/信源条目带 drill,热力图标 columnKind', () => {
+    const c = composeIndustryInsight(fixture());
+    const rank = c.blocks.find((b) => b.type === 'barRank' && b.title === '品牌有效提及率排行') as BarRankBlock;
+    expect(rank.items[0]).toMatchObject({ name: '品牌A', drill: { kind: 'mentions', subject: '品牌A' } });
+    const src = c.blocks.find((b) => b.type === 'barRank' && b.title === 'AI 引用信源 Top 8') as BarRankBlock;
+    expect(src.items[0]).toMatchObject({ drill: { kind: 'citations', domain: 'zhihu.com' } });
+    const heats = c.blocks.filter((b) => b.type === 'heatmap') as HeatmapBlock[];
+    const kinds = heats.map((h) => h.columnKind).sort();
+    expect(kinds).toEqual(['engine', 'layer']);
+  });
+
   it('信源类型构成:细类归并五大桶,官网占比驱动总结叙述', () => {
     const c = composeIndustryInsight(fixture());
     const mix = c.blocks.find((b) => b.type === 'barRank' && b.title === '信源类型构成') as BarRankBlock;
     expect(mix).toBeTruthy();
     expect(mix.unit).toBe('%');
     // ugc90+门户60+榜单50+官网36+unknown10 → 合计 246;UGC 90/246=36.6%
-    expect(mix.items[0]).toEqual({ name: 'UGC/社区', value: 36.6, n: 90 });
+    expect(mix.items[0]).toMatchObject({ name: 'UGC/社区', value: 36.6, n: 90, drill: { kind: 'citations', bucket: 'UGC/社区' } });
     const names = mix.items.map((i) => i.name);
     expect(names).toContain('新闻/垂媒');
     expect(names).toContain('榜单/评测');

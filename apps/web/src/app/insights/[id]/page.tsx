@@ -2,12 +2,13 @@
 
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Badge, EmptyState, Skeleton } from '@/components/ui';
 import { InsightBlocks } from '@/components/insight-charts';
+import { InsightFactsDrawer } from '@/components/insight-facts-drawer';
 import { api } from '@/lib/api';
-import type { InsightDetailDto } from '@geo/shared';
+import type { InsightDetailDto, InsightDrill } from '@geo/shared';
 
 /**
  * 行业洞察报告详情(docs/01 §3.10 扩展):印刷风只读页;
@@ -38,6 +39,9 @@ export default function InsightDetailPage() {
       document.title = '青柠GEO · AI 搜索品牌可见性监测';
     };
   }, [title]);
+
+  // 1.5 数字下钻:图表数字点击 → 事实明细抽屉(排行条目/热力格子/桑基标签)
+  const [drill, setDrill] = useState<InsightDrill | null>(null);
 
   if (query.isLoading) return <Skeleton />;
   if (query.error || !query.data) {
@@ -86,9 +90,9 @@ export default function InsightDetailPage() {
           )}
         </header>
 
-        {/* 图表块 */}
+        {/* 图表块(可点击的数字带下钻:命中/引用事实明细) */}
         <section className="mt-8">
-          <InsightBlocks blocks={d.blocks} />
+          <InsightBlocks blocks={d.blocks} onDrill={setDrill} />
         </section>
 
         {/* 口径页脚(全报告唯一口径出处;各图表不再重复) */}
@@ -98,6 +102,7 @@ export default function InsightDetailPage() {
             采集失败与配额拦截不计入任何分母。有效回答指 AI 返回了实质内容的作答。
           </p>
           <p className="mt-1">口径提醒:命中率高 ≠ 评价好,本报告度量的是「被 AI 主动提及」;监测题目不含品牌名,避免提示偏差。</p>
+          <p className="mt-1">数字可回溯:点击品牌条目、热力格子或桑基标签,可查看对应的原始回答摘录与引用来源明细。</p>
           <p className="mt-1">
             <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer" className="hover:text-slate-600">
               京ICP备2024074563号-9
@@ -113,6 +118,8 @@ export default function InsightDetailPage() {
           <Link href={d.industry ? '/' : '/dashboard'} className="btn-ghost">了解更多行业洞察</Link>
         </div>
       </article>
+
+      {drill && <InsightFactsDrawer insightId={id} drill={drill} onClose={() => setDrill(null)} />}
     </div>
   );
 }

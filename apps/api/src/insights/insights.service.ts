@@ -939,6 +939,131 @@ export class InsightsService implements OnModuleDestroy {
     return null;
   }
 
+  // ===== 1.5 数字下钻:报告数字 → 事实明细(rubric docs/10) =====
+
+  /** 信源类型桶(与组稿器 insight-builder 同一映射,API 侧负责桶→原始类目回查)。 */
+  private static readonly SOURCE_BUCKETS: Array<{ bucket: string; match: RegExp }> = [
+    { bucket: 'UGC/社区', match: /ugc|社区|社交|问答/ },
+    { bucket: '榜单/评测', match: /榜单|评测/ },
+    { bucket: '品牌官网', match: /官网/ },
+    { bucket: '新闻/垂媒', match: /门户|资讯|垂媒|媒体/ },
+    { bucket: '百科', match: /百科/ },
+  ];
+  private bucketOf(cat: string): string {
+    const c = cat.toLowerCase();
+    return InsightsService.SOURCE_BUCKETS.find((b) => b.match.test(c))?.bucket ?? '其他';
+  }
+
+  /**
+   * 报告事实明细分页(mention 命中记录 / citation 引用记录),窗口与报告一致
+   * (builtAt 往前 windowDays;全量报告不加窗口)。访问控制同 detailFor。
+   */
+  async factsFor(
+    accountId: number | null,
+    id: number,
+    q: {
+      kind: 'mentions' | 'citations';
+      subject?: string;
+      layer?: string;
+      engine?: string;
+      domain?: string;
+      bucket?: string;
+      page: number;
+      pageSize: number;
+    },
+  ): Promise<
+    | null
+    | {
+        kind: 'mentions' | 'citations';
+        total: number;
+        page: number;
+        pageSize: number;
+        rows: Array<Record<string, unknown>>;
+      }
+  > {
+    const found = await this.detailFor(accountId, id);
+    if (!found) return null;
+    const { row } = found;
+    const industry =
+      (
+        await this.db
+          .select({ name: insightIndustries.name })
+          .from(insightIndustries)
+          .where(eq(insightIndustries.id, row.industryId))
+          .limit(1)
+      )[0]?.name;
+    if (!industry) return null;
+    const shadowRows = (await this.db.execute(sql`
+      select b.id::text as id from brands b
+      join accounts a on a.id = b.account_id
+      where b.industry = ${industry} and a.phone = '10000000000'
+      limit 1
+    `)) as unknown as { rows: Array<{ id: string }> };
+    const shadowId = Number(shadowRows.rows[0]?.id ?? 0);
+    if (!shadowId) return { kind: q.kind, total: 0, page: q.page, pageSize: q.pageSize, rows: [] };
+
+    // 报告数据窗口:builtAt(生成时刻)往前 windowDays 天;全量报告不加窗口
+    const since =
+      row.builtAt && row.windowDays
+        ? new Date(row.builtAt.getTime() - row.windowDays * 86_400_000)
+        : null;
+
+    const limit = q.pageSize;
+    const offset = (q.page - 1) * q.pageSize;
+
+    if (q.kind === 'mentions') {
+      const conds = [sql`mf.brand_id = ${shadowId}`, sql`mf.mentioned = true`];
+      if (q.subject) conds.push(sql`and mf.subject_name = ${q.subject}`);
+      if (q.layer) conds.push(sql`and q.group_name = ${q.layer}`);
+      if (q.engine) conds.push(sql`and mf.engine = ${q.engine}`);
+      if (since) conds.push(sql`and mf.ran_at >= ${since.toISOString()}`);
+      const where = sql.join(conds, sql` `);
+      const counted = (await this.db.execute(sql`
+        select count(*)::int as total
+        from mention_facts mf join monitoring_questions q on q.id = mf.question_id
+        where ${where}
+      `)) as unknown as { rows: Array<{ total: number }> };
+      const data = (await this.db.execute(sql`
+        select mf.ran_at, mf.engine, mf.subject_name, mf.rank, mf.confidence,
+               mf.evidence->>'snippet' as snippet,
+               q.text_raw as question, q.group_name as layer
+        from mention_facts mf join monitoring_questions q on q.id = mf.question_id
+        where ${where}
+        order by mf.ran_at desc, mf.id desc
+        limit ${limit} offset ${offset}
+      `)) as unknown as { rows: Array<Record<string, unknown>> };
+      return { kind: 'mentions', total: counted.rows[0]?.total ?? 0, page: q.page, pageSize: q.pageSize, rows: data.rows };
+    }
+
+    // citations
+    const conds = [sql`cf.brand_id = ${shadowId}`];
+    if (q.domain) conds.push(sql`and cf.domain = ${q.domain}`);
+    if (q.engine) conds.push(sql`and cf.engine = ${q.engine}`);
+    if (q.bucket) {
+      // 桶 → 原始 platform_category 集合(与组稿器同一映射)
+      const cats = (await this.db.execute(sql`
+        select distinct platform_category from citation_facts where brand_id = ${shadowId}
+      `)) as unknown as { rows: Array<{ platform_category: string }> };
+      const members = cats.rows.map((r) => r.platform_category).filter((c) => this.bucketOf(c) === q.bucket);
+      if (members.length === 0) return { kind: 'citations', total: 0, page: q.page, pageSize: q.pageSize, rows: [] };
+      conds.push(sql`and cf.platform_category in (${sql.join(members.map((m) => sql`${m}`), sql`, `)})`);
+    }
+    if (since) conds.push(sql`and cf.extracted_at >= ${since.toISOString()}`);
+    const where = sql.join(conds, sql` `);
+    const counted = (await this.db.execute(sql`
+      select count(*)::int as total from citation_facts cf where ${where}
+    `)) as unknown as { rows: Array<{ total: number }> };
+    const data = (await this.db.execute(sql`
+      select cf.extracted_at, cf.engine, cf.domain, cf.platform_category, cf.title,
+             cf.raw_url, cf.is_owned, q.text_raw as question
+      from citation_facts cf left join monitoring_questions q on q.id = cf.question_id
+      where ${where}
+      order by cf.extracted_at desc, cf.id desc
+      limit ${limit} offset ${offset}
+    `)) as unknown as { rows: Array<Record<string, unknown>> };
+    return { kind: 'citations', total: counted.rows[0]?.total ?? 0, page: q.page, pageSize: q.pageSize, rows: data.rows };
+  }
+
   // ===== 展示侧 =====
 
   /**

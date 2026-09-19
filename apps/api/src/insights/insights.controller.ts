@@ -282,6 +282,43 @@ export class InsightsController {
     return this.insights.adminGet(id);
   }
 
+  /**
+   * 1.5 数字下钻(rubric docs/10):报告事实明细分页——mention 命中记录(含回答摘录)
+   * 与 citation 引用记录;过滤参数 subject/layer/engine/domain/bucket 来自块元数据 drill。
+   * 访问控制同详情:已发布匿名可查,草稿须本人/订阅/管理员。
+   */
+  @Public()
+  @Get(':id/facts')
+  async facts(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) id: number,
+    @Query()
+    q: {
+      kind?: string;
+      subject?: string;
+      layer?: string;
+      engine?: string;
+      domain?: string;
+      bucket?: string;
+      page?: string;
+      pageSize?: string;
+    },
+  ) {
+    const accountId = optionalAccountId(req);
+    const res = await this.insights.factsFor(accountId, id, {
+      kind: q.kind === 'citations' ? 'citations' : 'mentions',
+      subject: q.subject || undefined,
+      layer: q.layer || undefined,
+      engine: q.engine || undefined,
+      domain: q.domain || undefined,
+      bucket: q.bucket || undefined,
+      page: Math.max(1, Number(q.page) || 1),
+      pageSize: Math.min(100, Math.max(5, Number(q.pageSize) || 20)),
+    });
+    if (!res) throw new HttpException('报告不存在或未发布', HttpStatus.NOT_FOUND);
+    return res;
+  }
+
   @Get()
   list(@Req() req: Request, @Query('industry') industry?: string) {
     void currentAccount(req);

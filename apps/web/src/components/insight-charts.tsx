@@ -1,6 +1,15 @@
 'use client';
 
-import type { InsightBlock } from '@geo/shared';
+import { ENGINE_LABELS, type InsightBlock, type InsightDrill } from '@geo/shared';
+
+/** 引擎中文名 → slug 反查(热力图列点击下钻用)。 */
+const ENGINE_BY_LABEL: Record<string, string> = Object.entries(ENGINE_LABELS).reduce(
+  (m, [slug, label]) => {
+    m[label] = slug;
+    return m;
+  },
+  {} as Record<string, string>,
+);
 
 /**
  * 行业洞察图表渲染器(docs/01 §3.10 扩展):结构化 JSON → 内联 SVG/DOM,
@@ -27,7 +36,7 @@ export function nameColor(name: string): string {
 
 type TakeawayRow = Extract<InsightBlock, { type: 'takeaway' }>;
 
-export function InsightBlocks({ blocks }: { blocks: InsightBlock[] }) {
+export function InsightBlocks({ blocks, onDrill }: { blocks: InsightBlock[]; onDrill?: (d: InsightDrill) => void }) {
   // 连续文字块(takeaway)合并为一张「核心要点」卡:报告首屏不被文字墙占满,
   // 顺序保留——非文字块之间夹着的独立文字块照常单卡渲染
   const groups: Array<InsightBlock | TakeawayRow[]> = [];
@@ -40,7 +49,7 @@ export function InsightBlocks({ blocks }: { blocks: InsightBlock[] }) {
   return (
     <div className="space-y-5">
       {groups.map((g, i) =>
-        Array.isArray(g) ? <TakeawayGroup key={i} rows={g} /> : <InsightBlockView key={i} block={g} />,
+        Array.isArray(g) ? <TakeawayGroup key={i} rows={g} /> : <InsightBlockView key={i} block={g} onDrill={onDrill} />,
       )}
     </div>
   );
@@ -79,7 +88,7 @@ function TakeawayGroup({ rows }: { rows: TakeawayRow[] }) {
   );
 }
 
-export function InsightBlockView({ block: b }: { block: InsightBlock }) {
+export function InsightBlockView({ block: b, onDrill }: { block: InsightBlock; onDrill?: (d: InsightDrill) => void }) {
   // 管理端手编 JSON 可能缺数组字段:守卫失败渲染占位,公开页不因脏数据白屏
   const arrays = {
     barRank: 'items' in b && Array.isArray(b.items) && b.items.length > 0,
@@ -99,11 +108,11 @@ export function InsightBlockView({ block: b }: { block: InsightBlock }) {
     case 'takeaway':
       return <TakeawayGroup rows={[b]} />;
     case 'barRank':
-      return <ChartCard title={b.title} summary={b.summary} note={b.note}><BarRankChart {...b} /></ChartCard>;
+      return <ChartCard title={b.title} summary={b.summary} note={b.note}><BarRankChart {...b} onDrill={onDrill} /></ChartCard>;
     case 'funnel':
       return <ChartCard title={b.title} summary={b.summary} note={b.note}><FunnelChart {...b} /></ChartCard>;
     case 'heatmap':
-      return <ChartCard title={b.title} summary={b.summary} note={b.note}><HeatmapChart {...b} /></ChartCard>;
+      return <ChartCard title={b.title} summary={b.summary} note={b.note}><HeatmapChart {...b} onDrill={onDrill} /></ChartCard>;
     case 'radar':
       return <ChartCard title={b.title} summary={b.summary} note={b.note}><RadarChart {...b} /></ChartCard>;
     case 'trend':
@@ -111,7 +120,7 @@ export function InsightBlockView({ block: b }: { block: InsightBlock }) {
     case 'scatter':
       return <ChartCard title={b.title} summary={b.summary} note={b.note}><ScatterChart {...b} /></ChartCard>;
     case 'sankey':
-      return <ChartCard title={b.title} summary={b.summary} note={b.note}><SankeyChart {...b} /></ChartCard>;
+      return <ChartCard title={b.title} summary={b.summary} note={b.note}><SankeyChart {...b} onDrill={onDrill} /></ChartCard>;
     default:
       return null;
   }
@@ -134,7 +143,7 @@ function ChartCard({ title, summary, note, children }: { title: string; summary?
 
 /* ===== 排行榜(横向条形,如「32 品牌 AI 可见度榜」) ===== */
 
-function BarRankChart({ total, unit, items }: Extract<InsightBlock, { type: 'barRank' }>) {
+function BarRankChart({ total, unit, items, onDrill }: Extract<InsightBlock, { type: 'barRank' }> & { onDrill?: (d: InsightDrill) => void }) {
   const max = Math.max(...items.map((it) => it.value ?? 0), 1);
   return (
     <div className="space-y-1.5">
@@ -144,8 +153,14 @@ function BarRankChart({ total, unit, items }: Extract<InsightBlock, { type: 'bar
         // 环比箭头(仅样本充足且上期有值的条目携带 delta)
         const delta =
           it.delta == null ? null : it.delta > 0 ? <span className="text-good">↑{it.delta.toFixed(1)}</span> : it.delta < 0 ? <span className="text-bad">↓{Math.abs(it.delta).toFixed(1)}</span> : <span className="text-slate-400">—</span>;
+        const drillable = !!(it.drill && onDrill);
         return (
-          <div key={it.name} className="flex items-center gap-2.5 text-[13px]">
+          <div
+            key={it.name}
+            className={`flex items-center gap-2.5 rounded-md text-[13px] ${drillable ? 'cursor-pointer px-1 py-0.5 -mx-1 transition-colors hover:bg-brand-50' : ''}`}
+            title={drillable ? '点击查看该条目的事实明细(原始回答摘录)' : undefined}
+            onClick={drillable ? () => onDrill?.(it.drill!) : undefined}
+          >
             <span className="metric-num w-6 shrink-0 text-right text-slate-400">{i + 1}</span>
             <span className={`w-24 shrink-0 truncate font-medium ${it.group === 'highlight' ? 'text-orange-700' : 'text-slate-800'}`}>{it.name}</span>
             <div className="h-4 flex-1 overflow-hidden rounded-sm bg-slate-100">
@@ -219,7 +234,16 @@ function FunnelChart({ stages }: Extract<InsightBlock, { type: 'funnel' }>) {
 
 /* ===== 品牌 × 维度命中热力图 ===== */
 
-function HeatmapChart({ columns, rows }: Extract<InsightBlock, { type: 'heatmap' }>) {
+function HeatmapChart({ columns, rows, columnKind, onDrill }: Extract<InsightBlock, { type: 'heatmap' }> & { onDrill?: (d: InsightDrill) => void }) {
+  // 格子点击 → 该品牌在该列(引擎/问题层)的命中明细
+  const cellDrill = (name: string, col: string): InsightDrill | null => {
+    if (!onDrill || !columnKind) return null;
+    if (columnKind === 'engine') {
+      const slug = ENGINE_BY_LABEL[col] ?? col;
+      return { kind: 'mentions', subject: name, engine: slug };
+    }
+    return { kind: 'mentions', subject: name, layer: col };
+  };
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-collapse text-center text-xs">
@@ -235,23 +259,28 @@ function HeatmapChart({ columns, rows }: Extract<InsightBlock, { type: 'heatmap'
           {rows.map((r) => (
             <tr key={r.name}>
               <td className="p-1.5 text-left text-[13px] font-medium text-slate-800">{r.name}</td>
-              {r.cells.map((v, ci) => (
+              {r.cells.map((v, ci) => {
+                const drill = v != null ? cellDrill(r.name, columns[ci]!) : null;
+                return (
                 <td key={ci} className="p-1">
                   {v == null ? (
                     <div className="rounded bg-slate-50 py-2 text-slate-300">—</div>
                   ) : (
                     <div
-                      className="rounded py-2 font-semibold"
+                      className={`rounded py-2 font-semibold ${drill ? 'cursor-pointer outline-offset-1 hover:outline hover:outline-1 hover:outline-brand-400' : ''}`}
                       style={{
                         backgroundColor: v === 0 ? '#f8fafc' : `rgba(29, 63, 174, ${0.12 + v * 0.88})`,
                         color: v > 0.55 ? '#ffffff' : '#334155',
                       }}
+                      title={drill ? '点击查看该格的命中明细(原始回答摘录)' : undefined}
+                      onClick={drill ? () => onDrill?.(drill) : undefined}
                     >
                       {Math.round(v * 100)}%
                     </div>
                   )}
                 </td>
-              ))}
+                );
+              })}
             </tr>
           ))}
         </tbody>
@@ -509,7 +538,7 @@ function ScatterChart({ xLabel, yLabel, diagonal, points, groups }: Extract<Insi
 
 /* ===== 可见度来源桑基(左=品牌命中量,右=问题层;带宽=命中次数) ===== */
 
-function SankeyChart({ left, right, links }: Extract<InsightBlock, { type: 'sankey' }>) {
+function SankeyChart({ left, right, links, onDrill }: Extract<InsightBlock, { type: 'sankey' }> & { onDrill?: (d: InsightDrill) => void }) {
   const W = 680;
   const nodeW = 10;
   const xL = 132; // 左节点条 x
@@ -588,9 +617,9 @@ function SankeyChart({ left, right, links }: Extract<InsightBlock, { type: 'sank
         {left.map((n, i) => {
           const p = leftNode.get(i)!;
           return (
-            <g key={`l-${n.name}`}>
+            <g key={`l-${n.name}`} className={onDrill ? 'cursor-pointer' : undefined} onClick={onDrill ? () => onDrill({ kind: 'mentions', subject: n.name }) : undefined}>
               <rect x={xL} y={p.y} width={nodeW} height={p.h} rx={2} fill={nameColor(n.name)} />
-              <text x={xL - 8} y={leftYs[i]! - 1} textAnchor="end" fontSize={11.5} fontWeight={600} fill="#1e293b">
+              <text x={xL - 8} y={leftYs[i]! - 1} textAnchor="end" fontSize={11.5} fontWeight={600} fill="#1e293b" textDecoration={onDrill ? 'underline' : undefined}>
                 {n.name}
               </text>
               <text x={xL - 8} y={leftYs[i]! + 10} textAnchor="end" fontSize={9.5} fill="#94a3b8">
@@ -602,9 +631,9 @@ function SankeyChart({ left, right, links }: Extract<InsightBlock, { type: 'sank
         {right.map((n, i) => {
           const p = rightNode.get(i)!;
           return (
-            <g key={`r-${n.name}`}>
+            <g key={`r-${n.name}`} className={onDrill ? 'cursor-pointer' : undefined} onClick={onDrill ? () => onDrill({ kind: 'mentions', layer: n.name }) : undefined}>
               <rect x={xR} y={p.y} width={nodeW} height={p.h} rx={2} fill={NAVY} />
-              <text x={xR + nodeW + 8} y={rightYs[i]! - 1} fontSize={11.5} fontWeight={600} fill="#1e293b">
+              <text x={xR + nodeW + 8} y={rightYs[i]! - 1} fontSize={11.5} fontWeight={600} fill="#1e293b" textDecoration={onDrill ? 'underline' : undefined}>
                 {n.name}
               </text>
               <text x={xR + nodeW + 8} y={rightYs[i]! + 10} fontSize={9.5} fill="#94a3b8">
