@@ -70,3 +70,19 @@ export function buildReputationPrompt(input: { brandName: string; answerText: st
   ].join('\n');
   return { system, user: input.answerText.slice(0, 12_000) };
 }
+
+export function buildWebsitePrompt(input: { name: string; industry?: string; positioning?: string }): {
+  system: string;
+  user: string;
+} {
+  const system = [
+    '你是品牌调研助手。给出一个品牌的官方网站首页 URL(消费者或媒体会引用的官网)。',
+    '判定规则:',
+    '1. 必须是品牌方自有官网首页,不是电商店铺、百科、新闻页、招聘页或经销商页;',
+    '2. 优先 https 与裸域或 www;不确定时在 confidence 中体现(<0.5);完全不知道就 url=null;',
+    '3. 禁止编造:宁可承认不知道,也不要给出猜测域名;',
+    `输出 JSON:{"url":"https://…|null","confidence":0到1}。${JSON_ONLY}`,
+  ].join('\n');
+  const user = JSON.stringify({ 品牌: input.name, ...(input.industry ? { 行业: input.industry } : {}), ...(input.positioning ? { 定位: input.positioning } : {}) });
+  return { system, user };
+}

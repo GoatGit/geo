@@ -7,7 +7,8 @@ import {
   accounts, orders, insightBrands, insightQuestions, recognitionEntries, subscriptions, collectionPlans,
 } from '@geo/db';
 import { WEB_ENGINES } from '@geo/shared';
-import { chatCompletion } from '@geo/insight-agent';
+import { chatCompletion, InsightAgent } from '@geo/insight-agent';
+import { normalizeWebsiteInput, probeWebsite } from './website-discovery';
 import { INSIGHTS_QUEUE, type InsightBuildStatus } from '@geo/shared';
 import type { InsightBlock, InsightCover } from '@geo/shared';
 import { INSIGHT_BLOCK_TYPES } from '@geo/shared';
@@ -194,7 +195,7 @@ export class InsightsService implements OnModuleDestroy {
             industryId,
             name,
             aliases: (b.aliases ?? []).map((a) => String(a).trim()).filter(Boolean).slice(0, 6),
-            website: b.website ? String(b.website).trim() : null,
+            website: normalizeWebsiteInput(String(b.website ?? '')),
             positioning: b.positioning ? String(b.positioning).trim().slice(0, 60) : null,
           })
           .returning()
@@ -202,6 +203,50 @@ export class InsightsService implements OnModuleDestroy {
       created.push({ id: row.id, name: row.name });
     }
     return { created };
+  }
+
+  /**
+   * 官网自动发现(品牌资产精品化):LLM 提议候选 → 探测验证(可达 + 域名族) → 验证通过才落库。
+   * 宁缺毋滥:候选为空/格式无效/不可达都不写,前端可重试。
+   */
+  async discoverIndustryBrandWebsite(industryId: number, brandId: number) {
+    const industry = (
+      await this.db.select().from(insightIndustries).where(eq(insightIndustries.id, industryId)).limit(1)
+    )[0];
+    if (!industry) throw new HttpException('行业不存在', HttpStatus.NOT_FOUND);
+    const brand = (
+      await this.db
+        .select()
+        .from(insightBrands)
+        .where(and(eq(insightBrands.id, brandId), eq(insightBrands.industryId, industryId)))
+        .limit(1)
+    )[0];
+    if (!brand) throw new HttpException('行业品牌不存在', HttpStatus.NOT_FOUND);
+    if (brand.website) return { website: brand.website, discovered: false, note: '已有官网' };
+
+    const cfg = (await loadPlatformSettings(this.db)).insightAgent;
+    if (!cfg.enabled || cfg.mode === 'rules' || !cfg.endpoint || !cfg.apiKey || !cfg.model) {
+      throw new HttpException('需先在「全局配置 → Insight Agent」启用 LLM', HttpStatus.BAD_REQUEST);
+    }
+    const agent = new InsightAgent({ settings: cfg });
+    const candidate = await agent.suggestBrandWebsite({
+      name: brand.name,
+      industry: industry?.name ?? undefined,
+      positioning: brand.positioning ?? undefined,
+    });
+    if (!candidate?.url) {
+      return { website: null, discovered: false, error: 'AI 未能给出候选官网(可能是不知名品牌)' };
+    }
+    const normalized = normalizeWebsiteInput(candidate.url);
+    if (!normalized) {
+      return { website: null, discovered: false, error: `候选官网格式无效: ${candidate.url.slice(0, 60)}` };
+    }
+    const probe = await probeWebsite(normalized);
+    if (!probe.ok) {
+      return { website: null, discovered: false, error: `候选官网不可达: ${normalized}(${probe.error ?? probe.status ?? '未知'})` };
+    }
+    await this.db.update(insightBrands).set({ website: normalized }).where(eq(insightBrands.id, brandId));
+    return { website: normalized, discovered: true, confidence: candidate.confidence };
   }
 
   // ===== 向导步骤③:行业问题(单份,行业级) =====

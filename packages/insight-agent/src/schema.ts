@@ -123,3 +123,20 @@ export function validateReputationOutput(v: unknown): ValidateResult<ReputationO
     value: { sentiment: v.sentiment, confidence: clamp01(v.confidence, 0.6), impressions },
   };
 }
+
+export interface WebsiteOutput {
+  url: string | null;
+  confidence: number;
+}
+
+/** 官网发现输出校验:URL 形态合法才接受;null(不知道)合法。 */
+export function validateWebsiteOutput(v: unknown): ValidateResult<WebsiteOutput> {
+  if (!isRecord(v)) return { ok: false, errors: ['root is not an object'] };
+  if (v.url == null || v.url === '') return { ok: true, value: { url: null, confidence: 0 } };
+  const url = String(v.url).trim();
+  if (!/^https?:\/\/./i.test(url)) return { ok: false, errors: [`url not http(s): ${url.slice(0, 60)}`] };
+  const raw = String(v.confidence ?? 0.5);
+  const n = Number(raw);
+  const confidence = Number.isFinite(n) ? Math.min(Math.max(n, 0), 1) : 0.5;
+  return { ok: true, value: { url, confidence } };
+}

@@ -12,7 +12,18 @@ const NAVY = '#1d3fae';
 const BLUE = '#4c6bc6';
 const GRAY = '#9aa3af';
 const ORANGE = '#c2570b';
-const SERIES_COLORS = ['#1d4ed8', '#c2570b', '#15803d', '#7c3aed', '#b45309'];
+const TEAL = '#1f7a70';
+const SERIES_COLORS = ['#1d4ed8', '#c2570b', '#15803d', '#7c3aed', '#b45309', '#0e7490'];
+
+/**
+ * 品牌稳定色:同名品牌在排行/象限/雷达等所有图表里同色(跨图可读性),
+ * 取名做字符哈希映射色板,避免依赖渲染顺序。
+ */
+export function nameColor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return SERIES_COLORS[h % SERIES_COLORS.length]!;
+}
 
 const GROUP_COLORS: Record<string, string> = {
   domestic: BLUE,
@@ -101,7 +112,8 @@ function BarRankChart({ total, unit, items }: Extract<InsightBlock, { type: 'bar
   return (
     <div className="space-y-1.5">
       {items.map((it, i) => {
-        const color = it.group === 'intl' ? GRAY : it.group === 'highlight' ? ORANGE : i === 0 ? NAVY : BLUE;
+        // 品牌条用稳定品牌色(跨图同色);group 语义色(highlight=橙/intl=灰)优先
+        const color = it.group === 'highlight' ? ORANGE : it.group === 'intl' ? GRAY : nameColor(it.name);
         // 环比箭头(仅样本充足且上期有值的条目携带 delta)
         const delta =
           it.delta == null ? null : it.delta > 0 ? <span className="text-good">↑{it.delta.toFixed(1)}</span> : it.delta < 0 ? <span className="text-bad">↓{Math.abs(it.delta).toFixed(1)}</span> : <span className="text-slate-400">—</span>;
@@ -135,7 +147,8 @@ function BarRankChart({ total, unit, items }: Extract<InsightBlock, { type: 'bar
 
 function FunnelChart({ stages }: Extract<InsightBlock, { type: 'funnel' }>) {
   const base = stages[0]?.count || 1;
-  const fills = ['#16298f', '#2544b8', '#4c6bc6', '#7c93d8', '#a8b9e8'];
+  // 逐层色相推进(藏青→蓝→青绿→橙):漏斗收口的稀缺感由色相对比表达,而非单色渐变
+  const fills = ['#16298f', '#2544b8', TEAL, ORANGE, GRAY];
   return (
     <div className="space-y-2.5">
       {stages.map((s, i) => {
@@ -329,12 +342,14 @@ function ScatterChart({ xLabel, yLabel, diagonal, points, groups }: Extract<Insi
   const X = (v: number) => m.l + clamp01(v / axisMax) * iw;
   const Y = (v: number) => H - m.b - clamp01(v / axisMax) * ih;
   const maxBySize = Math.max(...points.map((p) => p.size ?? 1), 1);
+  // 品牌点用稳定品牌色(跨图同色);灰组(intl/未监测)保留灰以示区分
   const colorOf = (p: (typeof points)[number]) => {
     const g = groups?.find((x) => x.key === p.group);
     if (g?.color === 'accent') return ORANGE;
     if (g?.color === 'gray') return GRAY;
     if (g?.color === 'brand') return NAVY;
-    return GROUP_COLORS[p.group ?? 'normal'] ?? BLUE;
+    if (p.group === 'intl') return GRAY;
+    return nameColor(p.name);
   };
   const ticks = [0, 0.25, 0.5, 0.75, 1];
   // 标签防溢出:点落在右半区时标签翻到点左侧,画布内永远完整

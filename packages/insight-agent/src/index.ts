@@ -14,6 +14,7 @@ import {
   buildExpandPrompt,
   buildMentionPrompt,
   buildReputationPrompt,
+  buildWebsitePrompt,
   INSIGHT_PROMPT_VERSION,
   type MentionSubjectInput,
 } from './prompts';
@@ -22,6 +23,7 @@ import {
   validateExpandOutput,
   validateMentionOutput,
   validateReputationOutput,
+  validateWebsiteOutput,
 } from './schema';
 
 export * from './client';
@@ -55,7 +57,7 @@ export function resolveInsightSettings(
 
 export interface InsightEvent {
   kind: 'call' | 'fallback' | 'invalid_partial';
-  task: 'mention' | 'reputation' | 'classify' | 'expand';
+  task: 'mention' | 'reputation' | 'classify' | 'expand' | 'website';
   ok: boolean;
   latencyMs?: number;
   error?: string;
@@ -202,6 +204,35 @@ export class InsightAgent {
     }
     if (dropped > 0) this.onEvent({ kind: 'invalid_partial', task: 'mention', ok: false, error: `${dropped} unknown keys dropped` });
     return { answerEmpty: validated.value.answerEmpty, judges, parserVersion };
+  }
+
+  /** T5 官网发现:LLM 提议官网候选;可达性探测与落库由调用方执行——本包只出候选,失败返回 null。 */
+  async suggestBrandWebsite(input: {
+    name: string;
+    industry?: string;
+    positioning?: string;
+  }): Promise<{ url: string | null; confidence: number } | null> {
+    if (!this.usable) return null;
+    const { system, user } = buildWebsitePrompt(input);
+    let text: string;
+    try {
+      text = await this.chatWithRetry(this.endpointCfg(30_000), system, user, 'website');
+    } catch {
+      return null;
+    }
+    let parsed: unknown;
+    try {
+      parsed = this.parseJson(text);
+    } catch (err) {
+      this.onEvent({ kind: 'fallback', task: 'website', ok: false, error: `bad json: ${(err as Error).message}` });
+      return null;
+    }
+    const validated = validateWebsiteOutput(parsed);
+    if (!validated.ok) {
+      this.onEvent({ kind: 'fallback', task: 'website', ok: false, error: validated.errors.join('; ').slice(0, 300) });
+      return null;
+    }
+    return validated.value;
   }
 
   /** T2 口碑分析:整体情绪(仅针对本品)+ 短语级印象词;失败返回 null。 */

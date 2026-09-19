@@ -202,6 +202,15 @@ export class AdminInsightsController {
     return this.insights.removeIndustryBrand(id, brandId);
   }
 
+  /** 官网自动发现(品牌资产精品化):LLM 提议候选 → 探测验证通过才落库。 */
+  @Post('industries/:id/brands/:brandId/discover-website')
+  discoverWebsite(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('brandId', ParseIntPipe) brandId: number,
+  ) {
+    return this.insights.discoverIndustryBrandWebsite(id, brandId);
+  }
+
   // ===== 向导步骤③:行业问题(单份) =====
 
   @Get('industries/:id/questions')
