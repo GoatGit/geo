@@ -932,11 +932,10 @@ export class InsightsService implements OnModuleDestroy {
     if (!row) return null;
     if (row.status === 'published') return { row, mine: false };
     if (!accountId) return null;
-    const industries = await this.industriesOfAccount(accountId);
-    const industry = (
-      await this.db.select().from(insightIndustries).where(eq(insightIndustries.id, row.industryId)).limit(1)
-    )[0];
-    if (industry && industries.includes(industry.name)) return { row, mine: true };
+    // 0014 订阅制:自建/已订阅/管理员的草稿可见(旧"品牌行业名匹配"漏掉自建与订阅行业,
+    // 导致「查看报告」对本人行业 404,实测护肤品自建行业报告打不开)
+    const mine = await this.myIndustryIds(accountId);
+    if (mine.has(row.industryId)) return { row, mine: true };
     return null;
   }
 
