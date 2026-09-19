@@ -17,8 +17,10 @@ import {
   IconShield,
   IconSpark,
 } from '../components/icons';
+import { Clouds } from '../components/canvasui/Clouds';
+import { Reveal } from '../components/motion';
 
-const ENGINES = ['豆包', 'DeepSeek', '文心一言', '通义千问', '腾讯元宝'];
+const ENGINES = ['豆包', 'DeepSeek', '文心', '千问', '元宝'];
 
 const VALUES = [
   {
@@ -129,7 +131,7 @@ export default function LandingPage() {
         </div>
       </header>
 
-      {/* ===== Hero ===== */}
+      {/* ===== Hero(签名效果:雾被光标吹散——"让品牌可见性显形",整站唯一 canvas 效果) ===== */}
       <section className="relative overflow-hidden bg-ink-950">
         <div className="pointer-events-none absolute -left-40 -top-40 h-[30rem] w-[30rem] animate-float-slow rounded-full bg-brand-500/20 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-52 right-0 h-[34rem] w-[34rem] rounded-full bg-sand/10 blur-3xl" />
@@ -142,8 +144,16 @@ export default function LandingPage() {
             maskImage: 'radial-gradient(ellipse 90% 70% at 50% 0%, black 40%, transparent 100%)',
           }}
         />
-
-        <div className="relative mx-auto max-w-6xl px-6 pb-24 pt-20 text-center md:pt-28">
+        <Clouds
+          density={1.6}
+          speed={0.45}
+          wind={0.65}
+          windRadius={320}
+          opacity={0.5}
+          cover={0.1}
+          color={[0.68, 0.78, 0.52]}
+        >
+          <div className="relative mx-auto max-w-6xl px-6 pb-24 pt-20 text-center md:pt-28">
           <div className="rise mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-brand-400/20 bg-brand-400/10 px-3.5 py-1.5 text-xs text-brand-200">
             <IconSpark width={13} height={13} />
             每日 5 大引擎中立监测 · 每个数字可回溯
@@ -195,7 +205,8 @@ export default function LandingPage() {
               ))}
             </div>
           </div>
-        </div>
+          </div>
+        </Clouds>
       </section>
 
       {/* ===== 三大价值 ===== */}
@@ -205,9 +216,9 @@ export default function LandingPage() {
           title="看见 · 可信 · 可行动"
           sub="不是又一个看板,而是一套可以拿去汇报、经得起质疑的证据体系。"
         />
-        <div className="mt-12 grid gap-5 md:grid-cols-3">
-          {VALUES.map((v, i) => (
-            <div key={v.title} className={`card card-hover p-7 rise-${i + 1}`}>
+        <Reveal className="mt-12 grid gap-5 md:grid-cols-3">
+          {VALUES.map((v) => (
+            <div key={v.title} className="card card-hover p-7">
               <span className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-brand-50 to-brand-100 text-brand-600">
                 {v.icon}
               </span>
@@ -215,7 +226,7 @@ export default function LandingPage() {
               <p className="mt-2 text-sm leading-6 text-slate-500">{v.text}</p>
             </div>
           ))}
-        </div>
+        </Reveal>
       </section>
 
       {/* ===== 证据链(深色段) ===== */}
@@ -239,11 +250,11 @@ export default function LandingPage() {
                 <IconArrowRight width={14} height={14} />
               </Link>
             </div>
-            <div className="space-y-4">
-              {EVIDENCE.map((e, i) => (
+            <Reveal className="space-y-4">
+              {EVIDENCE.map((e) => (
                 <div
                   key={e.title}
-                  className={`rise-${i + 1} rounded-xl border border-white/10 bg-white/[.04] p-5 backdrop-blur transition-colors hover:border-brand-400/30`}
+                  className="rounded-xl border border-white/10 bg-white/[.04] p-5 backdrop-blur transition-colors hover:border-brand-400/30"
                 >
                   <div className="flex items-center gap-2.5">
                     <span className="flex h-6 w-6 items-center justify-center rounded-md bg-brand-500/15 text-brand-300">
@@ -251,12 +262,12 @@ export default function LandingPage() {
                     </span>
                     <h3 className="text-[15px] font-semibold text-slate-100">{e.title}</h3>
                   </div>
-                  <p className="mt-2 pl-8.5 text-sm leading-6 text-slate-400" style={{ paddingLeft: '2.125rem' }}>
+                  <p className="mt-2 text-sm leading-6 text-slate-400" style={{ paddingLeft: '2.125rem' }}>
                     {e.text}
                   </p>
                 </div>
               ))}
-            </div>
+            </Reveal>
           </div>
         </div>
       </section>
@@ -268,9 +279,9 @@ export default function LandingPage() {
           title="10 分钟,看到真实数据"
           sub="从注册到首轮 AI 排名数据,一个上午都不用。"
         />
-        <div className="mt-12 grid gap-5 md:grid-cols-3">
+        <Reveal className="mt-12 grid gap-5 md:grid-cols-3">
           {STEPS.map((s, i) => (
-            <div key={s.n} className={`relative card p-7 rise-${i + 1}`}>
+            <div key={s.n} className="relative card p-7">
               <span className="metric-num text-3xl font-semibold text-brand-200">{s.n}</span>
               <h3 className="mt-3 text-lg font-semibold text-slate-900">{s.title}</h3>
               <p className="mt-2 text-sm leading-6 text-slate-500">{s.text}</p>
@@ -283,7 +294,7 @@ export default function LandingPage() {
               )}
             </div>
           ))}
-        </div>
+        </Reveal>
       </section>
 
       {/* ===== 行业洞察精选 ===== */}
@@ -295,12 +306,12 @@ export default function LandingPage() {
               title="各行业在 AI 里的真实存在感"
               sub="抢答题实测 × 6 大引擎 —— 命中高 ≠ 评价好,量的是被 AI 主动提及。"
             />
-            <div className="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-              {featured.data.map((it, i) => (
+            <Reveal className="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+              {featured.data.map((it) => (
                 <Link
                   key={it.id}
                   href={`/insights/${it.id}`}
-                  className={`card group flex flex-col p-6 rise-${(i % 3) + 1} transition-all duration-200 hover:-translate-y-1`}
+                  className="card group flex flex-col p-6 transition-all duration-200 hover:-translate-y-1"
                 >
                   <p className="flex items-center gap-2 text-[11px] font-medium text-slate-400">
                     <span className="rounded bg-brand-50 px-1.5 py-0.5 font-semibold text-brand-700">{it.industry}</span>
@@ -318,7 +329,7 @@ export default function LandingPage() {
                   </span>
                 </Link>
               ))}
-            </div>
+            </Reveal>
           </div>
         </section>
       )}
@@ -331,11 +342,11 @@ export default function LandingPage() {
             title="从免费监测开始"
             sub="所有档位均可监测全部 5 大引擎;超套餐动作按积分计费,每一处明码标价。"
           />
-          <div className="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
-            {PRICING.map((p, i) => (
+          <Reveal className="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
+            {PRICING.map((p) => (
               <div
                 key={p.name}
-                className={`relative rounded-2xl border p-6 rise-${(i % 3) + 1} transition-all duration-200 hover:-translate-y-1 ${
+                className={`relative rounded-2xl border p-6 transition-all duration-200 hover:-translate-y-1 ${
                   p.hot
                     ? 'border-brand-500 bg-ink-950 text-white shadow-glow'
                     : 'card bg-white'
@@ -360,7 +371,7 @@ export default function LandingPage() {
                 </Link>
               </div>
             ))}
-          </div>
+          </Reveal>
           <p className="mt-6 text-center text-xs text-slate-400">
             年付享折扣 · 单次快速体检按积分计费(网页端 2 积分/题·引擎)· 全部档位口径一致
           </p>

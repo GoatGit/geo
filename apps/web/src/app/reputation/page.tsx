@@ -1,4 +1,6 @@
 'use client';
+
+import { CountUp, useCountUp } from '@/components/motion';
 import { engineLabel } from '@geo/shared';
 
 import { useQuery } from '@tanstack/react-query';
@@ -65,9 +67,9 @@ export default function ReputationPage() {
           <h2 className="font-semibold text-slate-900">情绪得分</h2>
           <p className="mt-1 text-sm leading-6 text-slate-500">
             口碑词有效回答 <b className="metric-num text-slate-700">{data.totals.runs}</b> 条 ·
-            正面 <b className="metric-num text-good">{data.totals.pos}</b> / 中性{' '}
-            <b className="metric-num text-slate-700">{data.totals.neu}</b> / 负面{' '}
-            <b className="metric-num text-bad">{data.totals.neg}</b>
+            正面 <CountUp value={data.totals.pos} className="metric-num text-good" /> / 中性{' '}
+            <CountUp value={data.totals.neu} className="metric-num text-slate-700" /> / 负面{' '}
+            <CountUp value={data.totals.neg} className="metric-num text-bad" />
             {data.totals.sentimentScore != null && (
               <> · 档位 <b className={data.totals.sentimentScore < 60 ? 'text-bad' : 'text-good'}>
                 {data.totals.sentimentScore < 60 ? '偏负面' : '正面'}
@@ -199,6 +201,11 @@ export default function ReputationPage() {
   );
 }
 
+function RingNumber({ value }: { value: number | null }) {
+  const v = useCountUp(value);
+  return <>{value == null ? '—' : (v ?? 0)}</>;
+}
+
 function ScoreRing({ value }: { value: number | null }) {
   const r = 40;
   const c = 2 * Math.PI * r;
@@ -229,7 +236,7 @@ function ScoreRing({ value }: { value: number | null }) {
         className="transition-all duration-700"
       />
       <text x="50" y="57" textAnchor="middle" fontSize="21" fontWeight="600" fill={tone} className="metric-num">
-        {value ?? '—'}
+        <RingNumber value={value} />
       </text>
     </svg>
   );

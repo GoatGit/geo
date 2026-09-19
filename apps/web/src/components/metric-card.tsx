@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCountUp } from './motion';
 
 type MetricCard = {
   metric: string;
@@ -19,25 +19,6 @@ export function pct(v: number | null | undefined): string {
 
 function isRateMetric(m: string): boolean {
   return m !== 'avgRank';
-}
-
-/** 数值进场动画:600ms ease-out 递增(null 不动画)。 */
-function useCountUp(target: number | null): number | null {
-  const [v, setV] = useState(0);
-  useEffect(() => {
-    if (target == null) return;
-    let raf = 0;
-    const start = performance.now();
-    const dur = 650;
-    const tick = (t: number) => {
-      const p = Math.min(1, (t - start) / dur);
-      setV(target * (1 - Math.pow(1 - p, 3)));
-      if (p < 1) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [target]);
-  return target == null ? null : v;
 }
 
 /** 迷你趋势线(docs/01 §3.3 指标卡近 7/30 天迷你趋势);null 断点自动跳过。 */

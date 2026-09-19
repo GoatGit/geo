@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, apiDownload } from '@/lib/api';
 import { useToast } from '@/components/toast';
-import { PageHeader, Skeleton } from '@/components/ui';
+import { PageHeader } from '@/components/ui';
 import { InsightBlocks } from '@/components/insight-charts';
 import type { InsightBlock, InsightBuildStatus } from '@geo/shared';
 
@@ -83,7 +83,6 @@ export default function AdminInsightsPage() {
   const [manualQ, setManualQ] = useState('');
   const [manualQType, setManualQType] = useState<'ranking' | 'reputation'>('ranking');
   const [qSuggest, setQSuggest] = useState<Array<{ type: string; text: string }> | null>(null);
-  const [createErrors, setCreateErrors] = useState<string[]>([]);
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['admin-insights'] });
@@ -115,11 +114,6 @@ export default function AdminInsightsPage() {
     } catch (err) {
       toast((err as Error).message, 'err');
     }
-  };
-
-  const toggleIndustry = async (row: IndustryRow) => {
-    await api(`/admin/insights/industries/${row.id}`, { method: 'PATCH', json: { active: !row.active } });
-    refresh();
   };
 
   return (

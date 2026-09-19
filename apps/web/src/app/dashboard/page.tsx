@@ -6,6 +6,7 @@ import { MetricCardView } from '@/components/metric-card';
 import { Badge, EmptyState, Skeleton, pct } from '@/components/ui';
 import { IconArrowRight, IconCheck, IconList, IconLogo, IconPulse, IconRank, IconReport, IconShield, IconVoice } from '@/components/icons';
 import { api, useBrandId, useRankings } from '@/lib/queries';
+import { CountUp } from '@/components/motion';
 import type { InsightSummaryDto } from '@geo/shared';
 
 const HEALTH_LABELS: Record<string, string> = {
@@ -158,19 +159,19 @@ export default function DashboardPage() {
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-x-8 gap-y-3 border-t border-slate-100 pt-4">
           <div className="flex items-baseline gap-2">
-            <b className="metric-num text-2xl font-bold text-slate-900">{todayDone}</b>
+            <CountUp value={todayDone} className="metric-num text-2xl font-bold text-slate-900" />
             <span className="text-xs text-slate-500">当日采集查询</span>
           </div>
           <div className="flex items-baseline gap-2">
-            <b className="metric-num text-2xl font-bold text-slate-900">{quotaUsed}</b>
+            <CountUp value={quotaUsed} className="metric-num text-2xl font-bold text-slate-900" />
             <span className="text-xs text-slate-500">监控问题</span>
           </div>
           <div className="flex items-baseline gap-2">
-            <b className="metric-num text-2xl font-bold text-slate-900">{competitorCount}</b>
+            <CountUp value={competitorCount} className="metric-num text-2xl font-bold text-slate-900" />
             <span className="text-xs text-slate-500">竞品</span>
           </div>
           <div className="flex items-baseline gap-2">
-            <b className="metric-num text-2xl font-bold text-slate-900">{reportsOfBrand.length}</b>
+            <CountUp value={reportsOfBrand.length} className="metric-num text-2xl font-bold text-slate-900" />
             <span className="text-xs text-slate-500">报告</span>
           </div>
           <span className="ml-auto text-[11px] text-slate-400">

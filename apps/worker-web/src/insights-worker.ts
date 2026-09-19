@@ -1,5 +1,5 @@
 import { Worker, Queue } from 'bullmq';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import type { Db } from '@geo/db';
 import { industryInsights, insightIndustries } from '@geo/db';
 import { INSIGHTS_QUEUE, bullConnection } from './queue';
