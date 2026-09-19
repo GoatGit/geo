@@ -1013,11 +1013,11 @@ export class InsightsService implements OnModuleDestroy {
 
     if (q.kind === 'mentions') {
       const conds = [sql`mf.brand_id = ${shadowId}`, sql`mf.mentioned = true`];
-      if (q.subject) conds.push(sql`and mf.subject_name = ${q.subject}`);
-      if (q.layer) conds.push(sql`and q.group_name = ${q.layer}`);
-      if (q.engine) conds.push(sql`and mf.engine = ${q.engine}`);
-      if (since) conds.push(sql`and mf.ran_at >= ${since.toISOString()}`);
-      const where = sql.join(conds, sql` `);
+      if (q.subject) conds.push(sql`mf.subject_name = ${q.subject}`);
+      if (q.layer) conds.push(sql`q.group_name = ${q.layer}`);
+      if (q.engine) conds.push(sql`mf.engine = ${q.engine}`);
+      if (since) conds.push(sql`mf.ran_at >= ${since.toISOString()}`);
+      const where = sql.join(conds, sql` and `);
       const counted = (await this.db.execute(sql`
         select count(*)::int as total
         from mention_facts mf join monitoring_questions q on q.id = mf.question_id
@@ -1037,8 +1037,8 @@ export class InsightsService implements OnModuleDestroy {
 
     // citations
     const conds = [sql`cf.brand_id = ${shadowId}`];
-    if (q.domain) conds.push(sql`and cf.domain = ${q.domain}`);
-    if (q.engine) conds.push(sql`and cf.engine = ${q.engine}`);
+    if (q.domain) conds.push(sql`cf.domain = ${q.domain}`);
+    if (q.engine) conds.push(sql`cf.engine = ${q.engine}`);
     if (q.bucket) {
       // 桶 → 原始 platform_category 集合(与组稿器同一映射)
       const cats = (await this.db.execute(sql`
@@ -1046,10 +1046,10 @@ export class InsightsService implements OnModuleDestroy {
       `)) as unknown as { rows: Array<{ platform_category: string }> };
       const members = cats.rows.map((r) => r.platform_category).filter((c) => this.bucketOf(c) === q.bucket);
       if (members.length === 0) return { kind: 'citations', total: 0, page: q.page, pageSize: q.pageSize, rows: [] };
-      conds.push(sql`and cf.platform_category in (${sql.join(members.map((m) => sql`${m}`), sql`, `)})`);
+      conds.push(sql`cf.platform_category in (${sql.join(members.map((m) => sql`${m}`), sql`, `)})`);
     }
-    if (since) conds.push(sql`and cf.extracted_at >= ${since.toISOString()}`);
-    const where = sql.join(conds, sql` `);
+    if (since) conds.push(sql`cf.extracted_at >= ${since.toISOString()}`);
+    const where = sql.join(conds, sql` and `);
     const counted = (await this.db.execute(sql`
       select count(*)::int as total from citation_facts cf where ${where}
     `)) as unknown as { rows: Array<{ total: number }> };
