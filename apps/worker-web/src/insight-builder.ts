@@ -865,8 +865,8 @@ async function polishWithLlm(
   }
 
   const blocks = [...composed.blocks];
-  // 洞察条目 → 独立带标签卡片(替代一条塞三句的旧形态)
-  const idx = blocks.findIndex((b) => b.type === 'takeaway');
+  // 洞察条目 → 独立带标签卡片,替换模板「格局」块(数据说明块永远保留,不能当替换目标)
+  const idx = blocks.findIndex((b) => b.type === 'takeaway' && b.title === 'AI 眼中的行业格局');
   const insightBlocks: InsightBlock[] = takeaways.map((t) => ({
     type: 'takeaway',
     title: t.label || '核心洞察',
@@ -874,10 +874,11 @@ async function polishWithLlm(
     tone: 'brand',
   }));
   if (idx >= 0) blocks.splice(idx, 1, ...insightBlocks);
-  else blocks.unshift(...insightBlocks);
+  else blocks.splice(1, 0, ...insightBlocks); // 兜底:插在「数据说明」之后
 
   // 撰稿正文 → 三段结构块(格局 / 成因与信源 / 建议),拒绝 500 字文字墙
-  const sec = parsed.sections;
+  // prompt 的三段是顶层键(landscape/drivers/actions);sections 包装形态一并兼容
+  const sec = (parsed.sections ?? parsed) as { landscape?: string; drivers?: string; actions?: string };
   const sectionBlocks: InsightBlock[] = [];
   if (sec?.landscape && sec.landscape.length >= 60) {
     sectionBlocks.push({ type: 'takeaway', title: '行业格局', text: sec.landscape.trim(), tone: 'brand' });
@@ -889,20 +890,28 @@ async function polishWithLlm(
     sectionBlocks.push({ type: 'takeaway', title: '可执行建议', text: sec.actions.trim(), tone: 'warn' });
   }
   if (sectionBlocks.length > 0) {
-    blocks.splice(Math.max(idx, 0) + insightBlocks.length, 0, ...sectionBlocks);
+    blocks.splice(Math.max(idx, 1) + insightBlocks.length, 0, ...sectionBlocks);
   } else {
-    // 兼容旧输出:只有 narrative 时按段落拆分为多块,消除文字墙
+    // 兼容旧输出:只有 narrative 时按长度分级呈现,保证综述不缺失
     const narrative = String(parsed.narrative ?? '').trim();
-    if (narrative.length >= 100) {
+    if (narrative.length >= 180) {
       const paras = narrative.split(/(?<=。”)|(?<=。)(?=[^\d])/).filter((p) => p.trim().length >= 60).slice(0, 3);
       paras.forEach((p, i) =>
-        blocks.splice(Math.max(idx, 0) + insightBlocks.length + i, 0, {
+        blocks.splice(Math.max(idx, 1) + insightBlocks.length + i, 0, {
           type: 'takeaway',
           title: ['行业格局', '成因与信源逻辑', '可执行建议'][i] ?? '综述',
           text: p.trim(),
           tone: i === 2 ? 'warn' : 'brand',
         }),
       );
+    } else if (narrative.length >= 60) {
+      // 短综述不拆段,整段保留(此前 <100 字直接丢弃导致综述缺失,线上实测踩过)
+      blocks.splice(Math.max(idx, 1) + insightBlocks.length, 0, {
+        type: 'takeaway',
+        title: '主编综述',
+        text: narrative,
+        tone: 'brand',
+      });
     }
   }
   return {
