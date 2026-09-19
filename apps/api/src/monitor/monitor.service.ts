@@ -20,7 +20,7 @@ import {
   type MetricCard,
   type MetricSource,
 } from '@geo/shared';
-import { evaluateHealth, generateActionList, sentimentScore as sentimentScoreOf } from '@geo/metrics';
+import { classifyDomain, evaluateHealth, generateActionList, sentimentScore as sentimentScoreOf } from '@geo/metrics';
 import Redis from 'ioredis';
 import { chatCompletion } from '@geo/insight-agent';
 import { loadPlatformSettings } from '@geo/db';
@@ -435,21 +435,33 @@ export class MonitorService {
       limit 20
     `);
 
+    // 域名 → 平台中文名聚合(auto.sina.cn/k.sina.cn/sina.cn 合并为「新浪」):
+    // 展示层语义,字典子域匹配在此现算(采集侧不落 platform 名,免迁移)
+    const byPlatform = new Map<string, { hits: number; owned: number; domains: string[] }>();
+    for (const r of pref.rows as Array<Record<string, string>>) {
+      const platform = classifyDomain(r.domain!).platform;
+      const cur = byPlatform.get(platform) ?? { hits: 0, owned: 0, domains: [] };
+      cur.hits += Number(r.hits);
+      cur.owned += Number(r.owned);
+      cur.domains.push(r.domain!);
+      byPlatform.set(platform, cur);
+    }
+
     return {
       items: rows.map((r) => ({
         url: r.rawUrl,
         domain: r.domain,
-        platform: r.domain,
+        platform: classifyDomain(r.domain).platform,
         category: r.platformCategory,
         title: r.title,
         isOwned: r.isOwned,
         engine: r.engine,
         extractedAt: r.extractedAt,
       })),
-      preference: pref.rows.map((r) => {
-        const row = r as Record<string, string>;
-        return { domain: row.domain, category: row.platform_category, hits: Number(row.hits), owned: Number(row.owned) };
-      }),
+      preference: [...byPlatform.entries()]
+        .sort((a, b) => b[1].hits - a[1].hits)
+        .slice(0, 20)
+        .map(([platform, v]) => ({ platform, domain: v.domains[0]!, domains: v.domains, category: classifyDomain(v.domains[0]!).category, hits: v.hits, owned: v.owned })),
       totals: {
         citations: total,
         owned: ownedTotal,

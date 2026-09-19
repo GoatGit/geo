@@ -409,3 +409,6 @@ export const brandMaterials = pgTable('brand_materials', {
   byteLen: integer('byte_len').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** 行业洞察:问题语义分层标签(对标竞品方法论,参与分层热力/存在形状图表)。 */
+export const INSIGHT_QUESTION_LAYERS = ['消费功能层', '场景人群层', '品类行业层', '竞品层', '渠道市场层'] as const;

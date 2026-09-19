@@ -85,6 +85,7 @@ export const DEFAULT_DOMAIN_DICT: Record<string, PlatformClassification> = {
   'kuaishou.com': { platform: '快手', category: 'UGC/短视频' },
   'weibo.com': { platform: '微博', category: 'UGC/社交' },
   'tieba.baidu.com': { platform: '百度贴吧', category: 'UGC/社区' },
+  'mp.weixin.qq.com': { platform: '微信公众号', category: 'UGC/社交' },
   // 技术/知识
   'csdn.net': { platform: 'CSDN', category: '技术社区' },
   'juejin.cn': { platform: '掘金', category: '技术社区' },

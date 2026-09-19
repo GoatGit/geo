@@ -10,7 +10,7 @@ const PAGE_SIZE = 20;
 
 interface CitationsDto {
   items: Array<{ url: string; domain: string; title: string | null; isOwned: boolean; engine: string; extractedAt: string }>;
-  preference: Array<{ domain: string; category: string; hits: number; owned: number }>;
+  preference: Array<{ platform?: string; domain: string; domains?: string[]; category: string; hits: number; owned: number }>;
   totals: { citations: number; owned: number; ownedShare: number | null };
   page: number;
   pageSize: number;
@@ -44,8 +44,10 @@ export default function CitationsPage() {
         <h2 className="mb-4 font-semibold text-slate-900">信源平台偏好(TOP 20)</h2>
         <div className="space-y-1.5">
           {data.preference.map((p) => (
-            <div key={p.domain} className="flex items-center gap-2 text-xs">
-              <span className="w-48 truncate">{p.domain}</span>
+            <div key={p.platform ?? p.domain} className="flex items-center gap-2 text-xs">
+              <span className="w-48 truncate font-medium text-slate-700" title={(p.domains ?? [p.domain]).join('、')}>
+                {p.platform ?? p.domain}
+              </span>
               <div className="h-2 flex-1 rounded bg-slate-100">
                 <div
                   className="h-2 rounded bg-brand"

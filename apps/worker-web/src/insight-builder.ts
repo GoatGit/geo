@@ -1,6 +1,7 @@
 import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import type { Db } from '@geo/db';
 import { insightIndustries, industryInsights, loadPlatformSettings } from '@geo/db';
+import { classifyDomain } from '@geo/metrics';
 import { chatCompletion } from '@geo/insight-agent';
 import type {
   BarRankBlock,
@@ -116,6 +117,18 @@ const r3 = (v: number | null) => (v == null ? null : Math.round(v * 1000) / 1000
  * @param prev 上期各品牌有效提及率(0-1),取自同行业上一期报告;首期传 undefined
  */
 export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<string, number>): ComposedInsight {
+  // 信源条目域名 → 平台中文名聚合(auto.sina.cn/k.sina.cn/sina.cn →「新浪」);
+  // 纯函数层做(可单测),SQL 只出原始域名
+  const platformTop = (() => {
+    const byPlatform = new Map<string, { domain: string; platform: string; category: string; hits: number }>();
+    for (const r of agg.citations.top) {
+      const cls = classifyDomain(r.domain);
+      const cur = byPlatform.get(cls.platform);
+      if (cur) cur.hits += r.hits;
+      else byPlatform.set(cls.platform, { domain: r.domain, platform: cls.platform, category: r.category || cls.category, hits: r.hits });
+    }
+    return [...byPlatform.values()].sort((a, b) => b.hits - a.hits).slice(0, 8);
+  })();
   const sorted = [...agg.brands].sort(
     (a, b) => rateOf(b.mentioned, b.valid) - rateOf(a.mentioned, a.valid) || b.valid - a.valid,
   );
@@ -321,7 +334,7 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
           ? `行业合计被引 ${agg.citations.total} 次,品牌官网被引 ${ownedTotal} 次(占比 ${pctText(ownedTotal / agg.citations.total)})`
           : `行业合计被引 ${agg.citations.total} 次`,
       total: agg.citations.total,
-      items: agg.citations.top.map((d) => ({ name: d.domain, value: d.hits })),
+      items: platformTop.map((d) => ({ name: d.platform || d.domain, value: d.hits })),
     } satisfies BarRankBlock);
   }
 
@@ -709,13 +722,13 @@ export async function collectIndustryAggregates(
     ownedShare: num(ct?.total) > 0 ? num(ct?.owned) / num(ct?.total) : null,
     top: rowsOf<{ domain: string; platform_category: string; hits: string; owned_hits: string }>(cites)
       .filter((r) => !citeNoise.test(r.domain))
-      .slice(0, 8)
+      .slice(0, 30)
       .map((r) => ({
-      domain: r.domain,
-      platform: r.platform_category,
-      category: r.platform_category,
-      hits: num(r.hits),
-    })),
+        domain: r.domain,
+        platform: r.platform_category,
+        category: r.platform_category,
+        hits: num(r.hits),
+      })),
     categories: rowsOf<{ platform_category: string; hits: string }>(citeCategories).map((r) => ({
       category: r.platform_category,
       hits: num(r.hits),

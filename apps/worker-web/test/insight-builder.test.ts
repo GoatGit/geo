@@ -252,4 +252,20 @@ describe('行业洞察组稿(运行 → 数据报告)', () => {
     expect(b2.cells[0]).toBeNull();     // deepseek 无样本
     expect(b2.cells[1]).toBeCloseTo(0.5); // doubao 50% 命中 —— 名字关联命中
   });
+
+  it('信源按平台中文名聚合(sina 系多域名合并为「新浪」)', () => {
+    const fx = fixture();
+    fx.citations.top = [
+      { domain: 'auto.sina.cn', platform: '', category: '门户', hits: 17 },
+      { domain: 'sina.cn', platform: '', category: '门户', hits: 12 },
+      { domain: 'k.sina.com.cn', platform: '', category: '门户', hits: 8 },
+      { domain: 'mp.weixin.qq.com', platform: '', category: 'UGC', hits: 5 },
+    ];
+    const c = composeIndustryInsight(fx);
+    const cite = c.blocks.find((b) => b.type === 'barRank' && b.title === 'AI 引用信源 Top 8') as BarRankBlock;
+    const sina = cite.items.find((i) => i.name === '新浪')!;
+    expect(sina.value).toBe(37); // 17+12+8 合并
+    expect(cite.items.some((i) => i.name === '微信公众号')).toBe(true);
+    expect(cite.items.every((i) => !i.name.includes('.com') && !i.name.includes('.cn'))).toBe(true); // 无裸域名
+  });
 });
