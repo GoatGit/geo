@@ -9,7 +9,6 @@ import type { InsightBlock } from '@geo/shared';
 
 const INK = '#0f172a';
 const NAVY = '#1d3fae';
-const BLUE = '#4c6bc6';
 const GRAY = '#9aa3af';
 const ORANGE = '#c2570b';
 const TEAL = '#1f7a70';
@@ -25,12 +24,6 @@ export function nameColor(name: string): string {
   return SERIES_COLORS[h % SERIES_COLORS.length]!;
 }
 
-const GROUP_COLORS: Record<string, string> = {
-  domestic: BLUE,
-  intl: GRAY,
-  highlight: ORANGE,
-  normal: BLUE,
-};
 
 export function InsightBlocks({ blocks }: { blocks: InsightBlock[] }) {
   return (

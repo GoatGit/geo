@@ -259,6 +259,25 @@ function IndustryWizard(props: {
     queryKey: ['wiz-brands', industryId],
     queryFn: () => api<IndustryBrandRow[]>(`/admin/insights/industries/${industryId}/brands`),
   });
+  const discoverWebsite = async (brandId: number) => {
+    setBusy(`discover-${brandId}`);
+    try {
+      const r = await api<{ website: string | null; discovered?: boolean; error?: string; note?: string }>(
+        `/admin/insights/industries/${industryId}/brands/${brandId}/discover-website`,
+        { method: 'POST' },
+      );
+      if (r.website) {
+        toast(`官网已自动填入:${r.website.replace('https://', '')}`);
+        refreshWizard(industryId);
+      } else {
+        toast(r.error ?? r.note ?? '未能发现官网', 'err');
+      }
+    } catch (e) {
+      toast((e as Error).message, 'err');
+    } finally {
+      setBusy(null);
+    }
+  };
   const questions = useQuery({
     queryKey: ['wiz-questions', industryId],
     queryFn: () => api<IndustryQuestionRow[]>(`/admin/insights/industries/${industryId}/questions`),
@@ -380,6 +399,18 @@ function IndustryWizard(props: {
             <span key={b.id} className="group inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1 text-xs">
               <b className="text-slate-800">{b.name}</b>
               {b.aliases?.length > 0 && <span className="text-slate-400">({b.aliases.join('/')})</span>}
+              {b.website ? (
+                <span className="text-brand-700">{b.website.replace('https://', '')}</span>
+              ) : (
+                <button
+                  className="underline decoration-dotted text-slate-400 hover:text-brand-700 disabled:opacity-40"
+                  disabled={busy === `discover-${b.id}`}
+                  title="LLM 提议官网,探测可达后自动填入(官网被引维度的数据源)"
+                  onClick={() => void discoverWebsite(b.id)}
+                >
+                  {busy === `discover-${b.id}` ? '发现中…' : '发现官网'}
+                </button>
+              )}
               <button
                 className="text-slate-300 transition-colors hover:text-bad group-hover:text-slate-400"
                 title="移除行业品牌"
