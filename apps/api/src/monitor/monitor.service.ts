@@ -622,7 +622,8 @@ export class MonitorService {
         '你是 AI 搜索优化(GEO)增长顾问。只输出一个 JSON 数组,不要多余文字。' +
         '基于给定的规则检测事实与品牌画像,产出 3-5 条具体可执行的行动项。' +
         'schema: [{"priority":"P0|P1|P2","ruleId":"对应检测事实的 ruleId","action":"具体动作:写什么角度的内容、投到哪类平台、强调什么卖点(60字内,禁止空话)","dataBasis":"数据依据(≤40字)","target":"可验证的目标(≤30字)"}]。' +
-        'action 必须引用品牌画像里的具体卖点/产品线;平台只能用「各平台被引对比」里出现过的平台类别名,引擎只能用「引擎三率」里出现过的引擎名。';
+        'action 必须引用品牌画像里的具体卖点/产品线;平台只能用「各平台被引对比」里出现过的平台类别名,引擎只能用「引擎三率」里出现过的引擎名。' +
+        '禁止使用 L1/L2/L3/L4、ruleId 等内部代号,一律用中文描述(如"全线缺席""0 引擎进前3")。';
       const user = JSON.stringify({ 品牌名: ctx.name, 品牌画像: ctx.intro.slice(0, 800), 检测事实与上下文: ctx.facts }, null, 0);
       const raw = await chatCompletion(
         { protocol: cfg.protocol as 'openai' | 'anthropic', endpoint: cfg.endpoint, apiKey: cfg.apiKey, model: cfg.model, timeoutMs: 60_000 },
