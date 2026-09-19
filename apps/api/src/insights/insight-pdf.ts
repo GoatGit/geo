@@ -47,6 +47,14 @@ const SOFT = '#f4f6f3';
 
 const SERIES_COLORS = [NAVY, ORANGE, BRAND, '#8a7ba8', '#3d8f8a', '#b0885e'];
 
+/** 品牌稳定色:与网页版(insight-charts.tsx nameColor)同色板同哈希,跨媒介同色。 */
+const BRAND_PALETTE = ['#1d4ed8', '#c2570b', '#15803d', '#7c3aed', '#b45309', '#0e7490'];
+function brandColor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return BRAND_PALETTE[h % BRAND_PALETTE.length]!;
+}
+
 const PAGE = { w: 595.28, h: 841.89, left: 50, right: 50, top: 56, bottom: 64 };
 // pdfkit 的实际 bottom margin 只留 24pt:页脚固定画在 h-42 处,
 // 若页脚落在 margin 之外的布局区,doc.text 会触发自动换页 → pageAdded → 再画页脚 → 无限递归。
@@ -119,18 +127,34 @@ export async function renderInsightPdf(detail: PdfInsight): Promise<Buffer> {
 
   // ===== 各块渲染器 =====
 
-  const takeaway = (b: TakeawayBlock) => {
-    const tone = b.tone === 'warn' ? ORANGE : b.tone === 'good' ? BRAND : NAVY;
-    doc.fontSize(10);
-    const lines = Math.max(1, Math.ceil(doc.widthOfString(b.text) / (CONTENT_W - 44)));
-    const boxH = 32 + lines * 14;
-    ensure(boxH + 8);
+  /** 连续文字块合并为一个盒子(与网页版「核心要点」卡对齐):标题行 + 正文段,省版面。 */
+  const takeawayGroup = (rows: TakeawayBlock[]) => {
+    const tone = (t?: string) => (t === 'warn' ? ORANGE : t === 'good' ? '#15803d' : NAVY);
+    const W = CONTENT_W - 28;
+    const rowH = rows.map((r) => {
+      doc.fontSize(9.5);
+      const lines = Math.max(1, Math.ceil(doc.widthOfString(r.text) / W));
+      return 12 + lines * 12.5 + 8;
+    });
+    const multi = rows.length > 1;
+    const boxH = (multi ? 24 : 10) + rowH.reduce((a, b) => a + b, 0);
+    ensure(boxH + 10);
     doc.roundedRect(PAGE.left, y, CONTENT_W, boxH, 6).fill(SOFT);
-    doc.roundedRect(PAGE.left, y, 3, boxH, 1.5).fill(tone);
-    doc.fillColor(tone).fontSize(9.5).text(b.title, PAGE.left + 14, y + 9, { width: CONTENT_W - 28, lineBreak: false });
-    doc.fillColor(INK).fontSize(10).text(b.text, PAGE.left + 14, y + 25, { width: CONTENT_W - 28, lineGap: 3 });
-    y += boxH + 8;
+    doc.roundedRect(PAGE.left, y, 3, boxH, 1.5).fill(tone(rows[0]?.tone));
+    let ry = y + (multi ? 20 : 9);
+    if (multi) {
+      doc.fillColor(SUB).fontSize(8.5).text('核心要点', PAGE.left + 14, y + 7, { lineBreak: false });
+    }
+    rows.forEach((r, i) => {
+      const col = tone(r.tone);
+      doc.fillColor(col).fontSize(9).text(r.title, PAGE.left + 14, ry, { width: W, lineBreak: false });
+      doc.fillColor(INK).fontSize(9.5).text(r.text, PAGE.left + 14, ry + 12, { width: W, lineGap: 2.2 });
+      ry += rowH[i]!;
+    });
+    y += boxH + 10;
   };
+
+  const takeaway = (b: TakeawayBlock) => takeawayGroup([b]);
 
   const barRank = (b: BarRankBlock) => {
     const labelW = 128;
@@ -341,11 +365,11 @@ export async function renderInsightPdf(detail: PdfInsight): Promise<Buffer> {
     }
     const maxSize = Math.max(...b.points.map((p) => p.size ?? 1), 1);
     doc.fontSize(8);
-    b.points.forEach((p, i) => {
-      const color = p.group === 'highlight' ? ORANGE : SERIES_COLORS[i % SERIES_COLORS.length];
+    b.points.forEach((p) => {
+      const color = p.group === 'highlight' ? ORANGE : brandColor(p.name);
       const r = 4 + ((p.size ?? 1) / maxSize) * 7;
       doc.circle(sx(p.x), sy(p.y), r).fillColor(blend(color, 0.55)).fill();
-      doc.fillColor(INK).text(truncate(p.name, 70, 8), sx(p.x) + r + 3, sy(p.y) - 4, { lineBreak: false });
+      doc.fillColor(INK).fontSize(7.5).text(truncate(p.name, 70, 7.5), sx(p.x) + r + 3, sy(p.y) - 4, { lineBreak: false });
     });
     doc.fillColor(SUB).fontSize(7.5).text(b.xLabel, plotX, plotY + size + 6, { width: plotW, align: 'center' });
     doc.fillColor(SUB).fontSize(7.5).text(b.yLabel, plotX - 10, plotY - 12, { lineBreak: false });
@@ -367,12 +391,7 @@ export async function renderInsightPdf(detail: PdfInsight): Promise<Buffer> {
       (H - (b.right.length - 1) * gap) / Math.max(sum(b.right), 1),
     );
     // 品牌稳定色:与网页版同色板同哈希,跨媒介同色
-    const palette = ['#1d4ed8', '#c2570b', '#15803d', '#7c3aed', '#b45309', '#0e7490'];
-    const colorOf = (name: string) => {
-      let h = 0;
-      for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-      return palette[h % palette.length]!;
-    };
+    const colorOf = brandColor;
     const leftNode = new Map<number, { y: number; h: number }>();
     const rightNode = new Map<number, { y: number; h: number }>();
     let cur = 0;
@@ -534,7 +553,20 @@ export async function renderInsightPdf(detail: PdfInsight): Promise<Buffer> {
   }
 
   // ===== 内容块 =====
-  for (const block of detail.blocks ?? []) {
+  const allBlocks = detail.blocks ?? [];
+  for (let bi = 0; bi < allBlocks.length; bi++) {
+    const block = allBlocks[bi]!;
+    // 连续文字块批进同一盒(跳过单块的标题条路线)
+    if (block.type === 'takeaway') {
+      const rows: TakeawayBlock[] = [];
+      while (bi < allBlocks.length && allBlocks[bi]!.type === 'takeaway') {
+        rows.push(allBlocks[bi]! as TakeawayBlock);
+        bi += 1;
+      }
+      takeawayGroup(rows);
+      bi -= 1;
+      continue;
+    }
     const note = 'note' in block ? block.note : undefined;
     // 图上总结(网页版每图上方的「所以呢」):PDF 同样先给结论再看图
     const summary = 'summary' in block ? (block as { summary?: string }).summary : undefined;

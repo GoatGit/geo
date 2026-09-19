@@ -9,8 +9,6 @@ import type { InsightBlock } from '@geo/shared';
 
 const INK = '#0f172a';
 const NAVY = '#1d3fae';
-const BLUE = '#4c6bc6';
-const GROUP_COLORS: Record<string, string> = { domestic: BLUE, intl: '#9aa3af', highlight: '#c2570b', normal: BLUE };
 const GRAY = '#9aa3af';
 const ORANGE = '#c2570b';
 const TEAL = '#1f7a70';
@@ -27,12 +25,56 @@ export function nameColor(name: string): string {
 }
 
 
+type TakeawayRow = Extract<InsightBlock, { type: 'takeaway' }>;
+
 export function InsightBlocks({ blocks }: { blocks: InsightBlock[] }) {
+  // 连续文字块(takeaway)合并为一张「核心要点」卡:报告首屏不被文字墙占满,
+  // 顺序保留——非文字块之间夹着的独立文字块照常单卡渲染
+  const groups: Array<InsightBlock | TakeawayRow[]> = [];
+  for (const b of blocks) {
+    const last = groups[groups.length - 1];
+    if (b.type === 'takeaway' && Array.isArray(last)) last.push(b);
+    else if (b.type === 'takeaway') groups.push([b]);
+    else groups.push(b);
+  }
   return (
     <div className="space-y-5">
-      {blocks.map((b, i) => (
-        <InsightBlockView key={i} block={b} />
-      ))}
+      {groups.map((g, i) =>
+        Array.isArray(g) ? <TakeawayGroup key={i} rows={g} /> : <InsightBlockView key={i} block={g} />,
+      )}
+    </div>
+  );
+}
+
+/** 语气色:品牌蓝 / 警示橙 / 正面青绿,标题与圆点同色便于扫读。 */
+const TONE_COLOR: Record<string, string> = { brand: NAVY, warn: ORANGE, good: TEAL };
+
+function TakeawayGroup({ rows }: { rows: TakeawayRow[] }) {
+  const multi = rows.length > 1;
+  return (
+    <div className="card p-5">
+      {multi && (
+        <div className="mb-3 flex items-baseline gap-2 border-b border-slate-100 pb-2">
+          <h3 className="text-[15px] font-bold text-slate-900">核心要点</h3>
+          <span className="metric-num text-[11px] text-slate-400">{rows.length} 条</span>
+        </div>
+      )}
+      <div className={multi ? 'space-y-3.5' : ''}>
+        {rows.map((r) => {
+          const tone = TONE_COLOR[r.tone ?? 'brand'] ?? NAVY;
+          return (
+            <div key={r.title} className="flex gap-2.5">
+              <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: tone }} />
+              <div className="min-w-0">
+                <p className="text-[12.5px] font-semibold leading-5" style={{ color: tone }}>
+                  {r.title}
+                </p>
+                <p className="mt-0.5 text-[13px] leading-6 text-slate-600">{r.text}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -55,22 +97,7 @@ export function InsightBlockView({ block: b }: { block: InsightBlock }) {
   }
   switch (b.type) {
     case 'takeaway':
-      return (
-        <div
-          className={`rounded-xl border-l-4 p-5 ${
-            b.tone === 'warn'
-              ? 'border-warn bg-warn-50'
-              : b.tone === 'good'
-                ? 'border-good bg-good-50'
-                : 'border-brand-600 bg-brand-50'
-          }`}
-        >
-          <p className="text-[11px] font-medium uppercase tracking-widest text-slate-500">{b.title}</p>
-          <p className={`mt-1.5 whitespace-pre-line text-[15px] font-semibold leading-7 ${b.tone === 'warn' ? 'text-warn' : b.tone === 'good' ? 'text-good' : 'text-brand-700'}`}>
-            {b.text}
-          </p>
-        </div>
-      );
+      return <TakeawayGroup rows={[b]} />;
     case 'barRank':
       return <ChartCard title={b.title} summary={b.summary} note={b.note}><BarRankChart {...b} /></ChartCard>;
     case 'funnel':
@@ -361,45 +388,81 @@ function ScatterChart({ xLabel, yLabel, diagonal, points, groups }: Extract<Insi
   const X = (v: number) => m.l + (v / axisMax) * iw;
   const Y = (v: number) => m.t + (1 - v / axisMax) * ih;
   const maxBySize = Math.max(...points.map((p) => p.size ?? 1), 1);
+  // 气泡默认用品牌稳定色(与排行/桑基跨图同色);显式分组语义色优先
   const colorOf = (p: (typeof points)[number]) => {
     const g = groups?.find((x) => x.key === p.group);
-    if (g?.color === 'accent') return ORANGE;
-    if (g?.color === 'gray') return GRAY;
+    if (g?.color === 'accent' || p.group === 'highlight') return ORANGE;
+    if (g?.color === 'gray' || p.group === 'intl') return GRAY;
     if (g?.color === 'brand') return NAVY;
-    return GROUP_COLORS[p.group ?? 'normal'] ?? BLUE;
+    return nameColor(p.name);
   };
   const ticks = [0, 0.25, 0.5, 0.75, 1].filter((t) => t <= axisMax + 1e-9);
 
-  // 标签防重叠:大气泡标签画进气泡内;其余右/左/上依次找空位
+  // 标签防重叠:短名画进气泡内(白字),其余右/左/上依次找空位
   const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
+  // 文本宽估算:CJK ≈ 1 字号,拉丁 ≈ 0.58 字号
+  const textW = (s: string, fs: number) =>
+    fs * [...s].reduce((a, c) => a + (c.charCodeAt(0) > 0x2e80 ? 1 : 0.58), 0);
 
-  const bubbles = points.map((p) => {
-    const r = 5 + ((p.size ?? 1) / maxBySize) * 9;
-    return { p, r, cx: X(p.x), cy: Y(p.y) };
+  const bubbles = points.map((p, i) => {
+    const r = 4.5 + ((p.size ?? 1) / maxBySize) * 8;
+    const cx = X(p.x);
+    const cy = Y(p.y);
+    // 与其他气泡显著重叠的不放内嵌白字(会压到邻泡上不可读)
+    const isolated = !points.some((_, j) => {
+      if (j === i) return false;
+      const o = { cx: X(points[j]!.x), cy: Y(points[j]!.y), r: 4.5 + ((points[j]!.size ?? 1) / maxBySize) * 8 };
+      return Math.hypot(o.cx - cx, o.cy - cy) < (o.r + r) * 0.85;
+    });
+    return { p, r, cx, cy, isolated };
   });
 
-  const labels = bubbles.map(({ p, r, cx, cy }) => {
-    const w = Math.min(p.name.length * 11 + 14, 150);
-    const h = 14;
+  const labels: Array<{ key: string; x: number; y: number; w: number; text: string; anchor: 'middle' | 'start'; color: string; size: number }> = [];
+  // 三连位都放不下的标签 → 左侧引线队列(密集角落的标准制图手法)
+  const overflow: Array<{ p: (typeof points)[number]; cx: number; cy: number; r: number; color: string }> = [];
+
+  for (const { p, r, cx, cy, isolated } of bubbles) {
+    const w = Math.min(textW(p.name, 10) + 8, 150);
+    const h = 13;
     const color = colorOf(p);
-    if (r >= 13) {
+    // 名字放得下、且气泡不被邻居压住,才内嵌白字;否则外置
+    if (isolated && r >= 11 && textW(p.name, 9.5) <= r * 1.7) {
       placed.push({ x: cx - w / 2, y: cy - h / 2, w, h });
-      return { key: p.name, x: cx, y: cy + 4, w, text: p.name, anchor: 'middle' as const, color: '#ffffff' };
+      labels.push({ key: p.name, x: cx, y: cy + 3.3, w, text: p.name, anchor: 'middle', color: '#ffffff', size: 9.5 });
+      continue;
     }
-    let lx = cx + r + 4;
-    let ly = cy - 7;
-    if (lx + w > W - m.r || placed.some((b) => lx < b.x + b.w && lx + w > b.x && ly < b.y + h && ly + h > b.y)) {
-      lx = cx - r - 4 - w;
-      ly = cy - 7;
-      if (lx < m.l || placed.some((b) => lx < b.x + b.w && lx + w > b.x && ly < b.y + h && ly + h > b.y)) {
-        lx = Math.max(m.l, cx - w / 2);
-        ly = cy - r - h - 2;
-      }
+    const hit = (lx: number, ly: number) =>
+      lx < m.l || lx + w > W - m.r || placed.some((b) => lx < b.x + b.w && lx + w > b.x && ly < b.y + b.h && ly + h > b.y);
+    const cands: Array<[number, number]> = [
+      [cx + r + 4, cy - 7],
+      [cx - r - 4 - w, cy - 7],
+      [Math.max(m.l, cx - w / 2), cy - r - h - 2],
+    ];
+    const spot = cands.find(([lx, ly]) => !hit(lx, ly));
+    if (!spot) {
+      overflow.push({ p, cx, cy, r, color });
+      continue;
     }
-    lx = Math.max(m.l, Math.min(lx, W - m.r - w));
+    const [lx, ly] = spot;
     placed.push({ x: lx, y: ly, w, h });
-    return { key: p.name, x: lx, y: ly + 10, w, text: p.name, anchor: 'start' as const, color: color === GRAY ? '#64748b' : color };
-  });
+    labels.push({ key: p.name, x: lx, y: ly + 9.5, w, text: p.name, anchor: 'start', color: color === GRAY ? '#64748b' : color, size: 10 });
+  }
+
+  // 引线队列:绘图区左缘自下而上排,细线指向气泡
+  let scatterLeaders: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+  if (overflow.length > 0) {
+    let sy = Y(0) - 6 - overflow.length * 13;
+    sy = Math.max(m.t + 4, sy);
+    const leaders: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+    for (const o of overflow) {
+      const w = Math.min(textW(o.p.name, 10) + 8, 150);
+      const lx = m.l + 2;
+      labels.push({ key: `ov-${o.p.name}`, x: lx, y: sy + 9.5, w, text: o.p.name, anchor: 'start', color: o.color === GRAY ? '#64748b' : o.color, size: 10 });
+      leaders.push({ x1: o.cx - o.r * 0.7, y1: o.cy - o.r * 0.7, x2: lx + w - 2, y2: sy + 5.5 });
+      sy += 13;
+    }
+    scatterLeaders = leaders;
+  }
 
   return (
     <div>
@@ -418,8 +481,11 @@ function ScatterChart({ xLabel, yLabel, diagonal, points, groups }: Extract<Insi
         {bubbles.map(({ p, r, cx, cy }) => (
           <circle key={`b-${p.name}`} cx={cx} cy={cy} r={r} fill={colorOf(p)} fillOpacity={0.92} />
         ))}
+        {scatterLeaders.map((l, i) => (
+          <line key={`ld-${i}`} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke="#cbd5e1" strokeWidth={0.8} />
+        ))}
         {labels.map((l, i) => (
-          <text key={i} x={l.x} y={l.y} textAnchor={l.anchor} fontSize={11} fontWeight={600} fill={l.color}>
+          <text key={i} x={l.x} y={l.y} textAnchor={l.anchor} fontSize={l.size} fontWeight={600} fill={l.color}>
             {l.text}
           </text>
         ))}
@@ -508,7 +574,7 @@ function SankeyChart({ left, right, links }: Extract<InsightBlock, { type: 'sank
         {/* 丝带(品牌色低透明度,流量感) */}
         {segs.map((s) => {
           const ln = leftNode.get(s.from)!;
-          const color = s.from >= 0 ? nameColor(left[s.from]!.name) : BLUE;
+          const color = s.from >= 0 ? nameColor(left[s.from]!.name) : NAVY;
           return (
             <path
               key={s.i}
