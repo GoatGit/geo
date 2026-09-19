@@ -91,6 +91,19 @@ export interface ScatterBlock {
   groups?: Array<{ key: string; label: string; color?: 'brand' | 'gray' | 'accent' }>;
 }
 
+/** 可见度来源桑基:左=品牌(分层命中次数),右=问题层;带宽=该品牌在该层的命中次数 */
+export interface SankeyBlock {
+  type: 'sankey';
+  title: string;
+  note?: string;
+  /** 图表上方的一句话结论(数据驱动的「所以呢」),由组稿器生成 */
+  summary?: string;
+  left: Array<{ name: string; value: number }>;
+  right: Array<{ name: string; value: number }>;
+  /** from/to 为 left/right 数组下标 */
+  links: Array<{ from: number; to: number; value: number }>;
+}
+
 export type InsightBlock =
   | TakeawayBlock
   | BarRankBlock
@@ -98,7 +111,8 @@ export type InsightBlock =
   | HeatmapBlock
   | RadarBlock
   | TrendBlock
-  | ScatterBlock;
+  | ScatterBlock
+  | SankeyBlock;
 
 export const INSIGHT_BLOCK_TYPES = [
   'takeaway',
@@ -108,6 +122,7 @@ export const INSIGHT_BLOCK_TYPES = [
   'radar',
   'trend',
   'scatter',
+  'sankey',
 ] as const;
 
 /** 报告封面指标(列表卡与详情页页眉)。 */

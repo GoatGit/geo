@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { BarRankBlock, FunnelBlock, HeatmapBlock, TrendBlock } from '@geo/shared';
+import type { BarRankBlock, FunnelBlock, HeatmapBlock, SankeyBlock, TrendBlock } from '@geo/shared';
 import { composeIndustryInsight, type IndustryAggregates } from '../src/insight-builder';
 import type { BarRankBlock, RadarBlock } from '@geo/shared';
 
@@ -36,9 +36,9 @@ function fixture(): IndustryAggregates {
       { brandId: 2, engine: 'deepseek', valid: 0, rate: 0 },
     ],
     layerHits: [
-      { layer: '场景人群层', brand: '品牌A', rate: 0.9, valid: 30 },
-      { layer: '场景人群层', brand: '品牌B', rate: 0.3, valid: 30 },
-      { layer: '品类行业层', brand: '品牌A', rate: 0.7, valid: 30 },
+      { layer: '场景人群层', brand: '品牌A', rate: 0.9, valid: 30, mentioned: 27 },
+      { layer: '场景人群层', brand: '品牌B', rate: 0.3, valid: 30, mentioned: 9 },
+      { layer: '品类行业层', brand: '品牌A', rate: 0.7, valid: 30, mentioned: 21 },
     ],
     layerQuestionCounts: [
       { layer: '场景人群层', count: 2 },
@@ -138,6 +138,36 @@ describe('行业洞察组稿(运行 → 数据报告)', () => {
     expect(b2.cells[1]).toBeNull();
   });
 
+  it('可见度来源桑基:左右总量守恒,集中品牌出「名气型可见」总结', () => {
+    const c = composeIndustryInsight(fixture());
+    const sk = c.blocks.find((b) => b.type === 'sankey') as SankeyBlock;
+    expect(sk).toBeTruthy();
+    expect(sk.left.map((n) => n.name)).toEqual(['品牌A', '品牌B']);
+    expect(sk.left[0]!.value).toBe(48); // 27(场景)+21(品类)
+    expect(sk.right.length).toBe(2);
+    const lSum = sk.left.reduce((a, n) => a + n.value, 0);
+    const rSum = sk.right.reduce((a, n) => a + n.value, 0);
+    const lkSum = sk.links.reduce((a, l) => a + l.value, 0);
+    expect(lSum).toBe(rSum);
+    expect(lSum).toBe(lkSum); // 桑基两侧带宽同源守恒
+    // 品牌A 27/48=56% 落在场景人群层 → 集中叙述
+    expect(sk.summary).toContain('品牌A');
+    expect(sk.summary).toContain('场景人群层');
+  });
+
+  it('桑基长尾聚合:Top 8 之外的品牌并入「其他品牌」,总量仍守恒', () => {
+    const agg = fixture();
+    for (let i = 0; i < 9; i++)
+      agg.layerHits.push({ layer: '竞品层', brand: `尾部${i}`, rate: 0.1, valid: 10, mentioned: 2 });
+    const sk = composeIndustryInsight(agg).blocks.find((b) => b.type === 'sankey') as SankeyBlock;
+    expect(sk.left.length).toBe(9); // 8 + 其他
+    expect(sk.left.some((n) => n.name === '其他品牌')).toBe(true);
+    expect(sk.left.find((n) => n.name === '其他品牌')!.value).toBe(6); // 3 个尾部品牌 × 2
+    const lSum = sk.left.reduce((a, n) => a + n.value, 0);
+    const rSum = sk.right.reduce((a, n) => a + n.value, 0);
+    expect(lSum).toBe(rSum);
+  });
+
   it('品牌存活漏斗:收录→提及→达标→头部收口(≥3 品牌才出块)', () => {
     const agg = fixture();
     agg.brands.push({
@@ -181,6 +211,7 @@ describe('行业洞察组稿(运行 → 数据报告)', () => {
     empty.reputation.total = 0;
     empty.landscape = [];
     empty.engineHits = [];
+    empty.layerHits = [];
     const c = composeIndustryInsight(empty);
     expect(c.blocks.length).toBe(1); // 仅剩开篇「数据说明」块
     expect(c.blocks[0]!.title).toBe('数据说明');

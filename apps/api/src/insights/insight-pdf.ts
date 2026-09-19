@@ -8,6 +8,7 @@ import type {
   InsightBlock,
   InsightCover,
   RadarBlock,
+  SankeyBlock,
   ScatterBlock,
   TakeawayBlock,
   TrendBlock,
@@ -351,6 +352,97 @@ export async function renderInsightPdf(detail: PdfInsight): Promise<Buffer> {
     y = plotY + size + 20;
   };
 
+  const sankey = (b: SankeyBlock) => {
+    const labelL = 96;
+    const labelR = 88;
+    const nodeW = 6;
+    const gap = 7;
+    const H = Math.min(240, Math.max(140, (b.left.length + b.right.length) * 20));
+    ensure(H + 16);
+    const xL = PAGE.left + labelL;
+    const xR = PAGE.w - PAGE.right - labelR - nodeW;
+    const sum = (arr: Array<{ value: number }>) => arr.reduce((a, n) => a + n.value, 0);
+    const scale = Math.min(
+      (H - (b.left.length - 1) * gap) / Math.max(sum(b.left), 1),
+      (H - (b.right.length - 1) * gap) / Math.max(sum(b.right), 1),
+    );
+    // 品牌稳定色:与网页版同色板同哈希,跨媒介同色
+    const palette = ['#1d4ed8', '#c2570b', '#15803d', '#7c3aed', '#b45309', '#0e7490'];
+    const colorOf = (name: string) => {
+      let h = 0;
+      for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+      return palette[h % palette.length]!;
+    };
+    const leftNode = new Map<number, { y: number; h: number }>();
+    const rightNode = new Map<number, { y: number; h: number }>();
+    let cur = 0;
+    b.left.forEach((n, i) => {
+      leftNode.set(i, { y: cur, h: Math.max(n.value * scale, 1) });
+      cur += n.value * scale + gap;
+    });
+    cur = 0;
+    b.right.forEach((n, i) => {
+      rightNode.set(i, { y: cur, h: Math.max(n.value * scale, 1) });
+      cur += n.value * scale + gap;
+    });
+    // 丝带区段:左列按(from,to)、右列按(to,from)顺序消耗,两侧均不交叉
+    const segs = b.links.map((l, i) => ({ i, ...l, ly: 0, ry: 0 }));
+    let cursor = new Map<number, number>();
+    for (const s of [...segs].sort((a, x) => a.from - x.from || a.to - x.to)) {
+      s.ly = cursor.get(s.from) ?? 0;
+      cursor.set(s.from, s.ly + s.value * scale);
+    }
+    cursor = new Map();
+    for (const s of [...segs].sort((a, x) => a.to - x.to || a.from - x.from)) {
+      s.ry = cursor.get(s.to) ?? 0;
+      cursor.set(s.to, s.ry + s.value * scale);
+    }
+    const baseY = y + 8;
+    const midX = (xL + nodeW + xR) / 2;
+    for (const s of segs) {
+      const ln = leftNode.get(s.from);
+      const rn = rightNode.get(s.to);
+      if (!ln || !rn) continue;
+      const y0 = baseY + ln.y + s.ly;
+      const y1 = baseY + rn.y + s.ry;
+      const h = Math.max(s.value * scale, 0.6);
+      doc
+        .moveTo(xL + nodeW, y0)
+        .bezierCurveTo(midX, y0, midX, y1, xR, y1)
+        .lineTo(xR, y1 + h)
+        .bezierCurveTo(midX, y1 + h, midX, y0 + h, xL + nodeW, y0 + h)
+        .closePath()
+        .fill(blend(colorOf(b.left[s.from]?.name ?? ''), 0.26));
+    }
+    // 标签防重叠(7.5pt 行距 10)
+    const spread = (ys: number[]): number[] => {
+      const out = [...ys];
+      for (let i = 1; i < out.length; i++) if (out[i]! - out[i - 1]! < 10) out[i] = out[i - 1]! + 10;
+      const over = out[out.length - 1]! - (H - 2);
+      if (over > 0) for (let i = 0; i < out.length; i++) out[i]! -= over;
+      for (let i = out.length - 1; i > 0; i--) if (out[i]! - out[i - 1]! < 10) out[i - 1] = out[i]! - 10;
+      return out;
+    };
+    const lYs = spread(b.left.map((_, i) => leftNode.get(i)!.y + leftNode.get(i)!.h / 2));
+    const rYs = spread(b.right.map((_, i) => rightNode.get(i)!.y + rightNode.get(i)!.h / 2));
+    doc.fontSize(7.5);
+    b.left.forEach((n, i) => {
+      const p = leftNode.get(i)!;
+      doc.rect(xL, baseY + p.y, nodeW, p.h).fill(colorOf(n.name));
+      doc.fillColor(INK).text(truncate(n.name, labelL - 14, 7.5), PAGE.left, baseY + lYs[i]! - 6, { width: labelL - 12, align: 'right', lineBreak: false });
+      doc.fillColor(SUB).fontSize(6.5).text(`${n.value} 次`, PAGE.left, baseY + lYs[i]! + 2, { width: labelL - 12, align: 'right', lineBreak: false });
+      doc.fontSize(7.5);
+    });
+    b.right.forEach((n, i) => {
+      const p = rightNode.get(i)!;
+      doc.rect(xR, baseY + p.y, nodeW, p.h).fill(NAVY);
+      doc.fillColor(INK).text(truncate(n.name, labelR - 10, 7.5), xR + nodeW + 4, baseY + rYs[i]! - 6, { width: labelR - 6, lineBreak: false });
+      doc.fillColor(SUB).fontSize(6.5).text(`${n.value} 次`, xR + nodeW + 4, baseY + rYs[i]! + 2, { width: labelR - 6, lineBreak: false });
+      doc.fontSize(7.5);
+    });
+    y = baseY + H + 12;
+  };
+
   const renderers: { [K in InsightBlock['type']]: (b: Extract<InsightBlock, { type: K }>) => void } = {
     takeaway,
     barRank,
@@ -359,6 +451,7 @@ export async function renderInsightPdf(detail: PdfInsight): Promise<Buffer> {
     radar,
     trend,
     scatter,
+    sankey,
   };
 
   /** 各块渲染高度的粗估:用于换页判断,标题必须与内容同页。 */
@@ -378,6 +471,8 @@ export async function renderInsightPdf(detail: PdfInsight): Promise<Buffer> {
         return 240;
       case 'scatter':
         return 330;
+      case 'sankey':
+        return 250;
     }
   }
 
@@ -441,11 +536,17 @@ export async function renderInsightPdf(detail: PdfInsight): Promise<Buffer> {
   // ===== 内容块 =====
   for (const block of detail.blocks ?? []) {
     const note = 'note' in block ? block.note : undefined;
+    // 图上总结(网页版每图上方的「所以呢」):PDF 同样先给结论再看图
+    const summary = 'summary' in block ? (block as { summary?: string }).summary : undefined;
     // 先保证标题+整块内容同页,再落标题(避免标题孤儿)
-    ensure(estimateBlockHeight(block) + (note ? 20 : 8));
+    ensure(estimateBlockHeight(block) + (note ? 20 : 8) + (summary ? 26 : 0));
     doc.roundedRect(PAGE.left, y + 1, 3, 11, 1.5).fill(NAVY);
     doc.fillColor(INK).fontSize(12).text(block.title, PAGE.left + 9, y, { lineBreak: false });
     y += 18;
+    if (summary) {
+      text(summary, 9.5, INK, { lineGap: 2 });
+      y += 3;
+    }
     if (note) {
       text(note, 8, SUB, { lineGap: 1 });
       y += 4;

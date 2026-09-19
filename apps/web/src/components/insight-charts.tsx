@@ -46,6 +46,9 @@ export function InsightBlockView({ block: b }: { block: InsightBlock }) {
     radar: 'axes' in b && 'series' in b && Array.isArray(b.axes) && b.axes.length >= 3 && Array.isArray(b.series) && b.series.length > 0,
     trend: 'points' in b && Array.isArray(b.points) && b.points.length >= 2,
     scatter: 'points' in b && Array.isArray(b.points) && b.points.length > 0,
+    sankey:
+      'left' in b && 'right' in b && 'links' in b &&
+      Array.isArray(b.left) && b.left.length >= 2 && Array.isArray(b.right) && b.right.length >= 2 && Array.isArray(b.links) && b.links.length > 0,
   } as Record<string, boolean>;
   if (b.type !== 'takeaway' && !arrays[b.type]) {
     return null;
@@ -80,6 +83,8 @@ export function InsightBlockView({ block: b }: { block: InsightBlock }) {
       return <ChartCard title={b.title} summary={b.summary} note={b.note}><TrendChart {...b} /></ChartCard>;
     case 'scatter':
       return <ChartCard title={b.title} summary={b.summary} note={b.note}><ScatterChart {...b} /></ChartCard>;
+    case 'sankey':
+      return <ChartCard title={b.title} summary={b.summary} note={b.note}><SankeyChart {...b} /></ChartCard>;
     default:
       return null;
   }
@@ -435,4 +440,116 @@ function ScatterChart({ xLabel, yLabel, diagonal, points, groups }: Extract<Insi
     </div>
   );
 }
+
+/* ===== 可见度来源桑基(左=品牌命中量,右=问题层;带宽=命中次数) ===== */
+
+function SankeyChart({ left, right, links }: Extract<InsightBlock, { type: 'sankey' }>) {
+  const W = 680;
+  const nodeW = 10;
+  const xL = 132; // 左节点条 x
+  const xR = W - 122 - nodeW; // 右节点条 x
+  const gap = 12;
+  const padT = 10;
+  // 高度按节点数伸缩;两侧共享同一 px/单位 比例,丝带宽度才不失真
+  const H = Math.max(190, Math.min(340, (left.length + right.length) * 30));
+  const sum = (arr: Array<{ value: number }>) => arr.reduce((a, n) => a + n.value, 0);
+  const scale = Math.min(
+    (H - (left.length - 1) * gap) / Math.max(sum(left), 1),
+    (H - (right.length - 1) * gap) / Math.max(sum(right), 1),
+  );
+
+  // 左右列纵向堆叠节点条
+  const leftNode = new Map<number, { y: number; h: number }>();
+  const rightNode = new Map<number, { y: number; h: number }>();
+  let cur = 0;
+  left.forEach((n, i) => {
+    leftNode.set(i, { y: cur, h: Math.max(n.value * scale, 1) });
+    cur += n.value * scale + gap;
+  });
+  cur = 0;
+  right.forEach((n, i) => {
+    rightNode.set(i, { y: cur, h: Math.max(n.value * scale, 1) });
+    cur += n.value * scale + gap;
+  });
+
+  // 丝带:左侧按(from,to)顺序消耗节点内区段,右侧按(to,from)顺序——两侧都不交叉
+  const segs = links.map((l, i) => ({ i, ...l, ly: 0, ry: 0 }));
+  let cursorL = new Map<number, number>();
+  for (const s of [...segs].sort((a, b) => a.from - b.from || a.to - b.to)) {
+    s.ly = cursorL.get(s.from) ?? 0;
+    cursorL.set(s.from, s.ly + s.value * scale);
+  }
+  cursorL = new Map();
+  for (const s of [...segs].sort((a, b) => a.to - b.to || a.from - b.from)) {
+    s.ry = cursorL.get(s.to) ?? 0;
+    cursorL.set(s.to, s.ry + s.value * scale);
+  }
+
+  const ribbon = (y0: number, h: number, y1: number) => {
+    const cx = (xL + nodeW + xR) / 2;
+    return `M${xL + nodeW},${y0} C${cx},${y0} ${cx},${y1} ${xR},${y1} L${xR},${y1 + h} C${cx},${y1 + h} ${cx},${y0 + h} ${xL + nodeW},${y0 + h} Z`;
+  };
+
+  // 标签防重叠:节点过密时先下推再回推,保持 13px 行距
+  const spread = (ys: number[]): number[] => {
+    const out = [...ys];
+    for (let i = 1; i < out.length; i++) if (out[i]! - out[i - 1]! < 13) out[i] = out[i - 1]! + 13;
+    const over = out[out.length - 1]! - (H - 3);
+    if (over > 0) for (let i = 0; i < out.length; i++) out[i]! -= over;
+    for (let i = out.length - 1; i > 0; i--) if (out[i]! - out[i - 1]! < 13) out[i - 1] = out[i]! - 13;
+    return out;
+  };
+  const leftYs = spread(left.map((_, i) => leftNode.get(i)!.y + leftNode.get(i)!.h / 2));
+  const rightYs = spread(right.map((_, i) => rightNode.get(i)!.y + rightNode.get(i)!.h / 2));
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H + padT * 2}`} role="img" className="mx-auto max-w-[680px]">
+      <g transform={`translate(0 ${padT})`}>
+        {/* 丝带(品牌色低透明度,流量感) */}
+        {segs.map((s) => {
+          const ln = leftNode.get(s.from)!;
+          const color = s.from >= 0 ? nameColor(left[s.from]!.name) : BLUE;
+          return (
+            <path
+              key={s.i}
+              d={ribbon(ln.y + s.ly, Math.max(s.value * scale, 0.6), rightNode.get(s.to)!.y + s.ry)}
+              fill={color}
+              fillOpacity={0.22}
+            />
+          );
+        })}
+        {/* 节点条:左=品牌色(跨图同色),右=藏青 */}
+        {left.map((n, i) => {
+          const p = leftNode.get(i)!;
+          return (
+            <g key={`l-${n.name}`}>
+              <rect x={xL} y={p.y} width={nodeW} height={p.h} rx={2} fill={nameColor(n.name)} />
+              <text x={xL - 8} y={leftYs[i]! - 1} textAnchor="end" fontSize={11.5} fontWeight={600} fill="#1e293b">
+                {n.name}
+              </text>
+              <text x={xL - 8} y={leftYs[i]! + 10} textAnchor="end" fontSize={9.5} fill="#94a3b8">
+                {n.value} 次
+              </text>
+            </g>
+          );
+        })}
+        {right.map((n, i) => {
+          const p = rightNode.get(i)!;
+          return (
+            <g key={`r-${n.name}`}>
+              <rect x={xR} y={p.y} width={nodeW} height={p.h} rx={2} fill={NAVY} />
+              <text x={xR + nodeW + 8} y={rightYs[i]! - 1} fontSize={11.5} fontWeight={600} fill="#1e293b">
+                {n.name}
+              </text>
+              <text x={xR + nodeW + 8} y={rightYs[i]! + 10} fontSize={9.5} fill="#94a3b8">
+                {n.value} 次
+              </text>
+            </g>
+          );
+        })}
+      </g>
+    </svg>
+  );
+}
+
 

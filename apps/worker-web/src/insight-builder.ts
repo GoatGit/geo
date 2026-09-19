@@ -11,6 +11,7 @@ import type {
   InsightBlock,
   InsightCover,
   RadarBlock,
+  SankeyBlock,
   ScatterBlock,
   TakeawayBlock,
   TrendBlock,
@@ -92,8 +93,8 @@ export interface IndustryAggregates {
     rate: number;
     valid: number;
   }>;
-  /** 品牌 × 问题层命中率(0012 问题分层;layer=影子问题 group_name) */
-  layerHits: Array<{ layer: string; brand: string; rate: number; valid: number }>;
+  /** 品牌 × 问题层命中(0012 问题分层;layer=影子问题 group_name);mentioned=该层命中次数(桑基带宽) */
+  layerHits: Array<{ layer: string; brand: string; rate: number; valid: number; mentioned: number }>;
   layerQuestionCounts: Array<{ layer: string; count: number }>;
   funnel: { answers: number; mentioned: number; top3: number; top1: number };
   landscape: LandscapeRow[];
@@ -346,7 +347,79 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
     } satisfies HeatmapBlock);
   }
 
-  // ⑤ 行业口碑印象(正/负高频印象词)
+  // ④.2 可见度来源桑基(竞品方法论:品牌总命中 → 各问题层;「名气型可见 vs 决策层渗透」)
+  {
+    const LAYER_READING: Record<string, string> = {
+      品类行业层: 'AI 谈行业格局时的背景板,名气型可见,决策场景未必兑现',
+      场景人群层: '贴近「我该买什么」的决策提问,可见度可直接转化为推荐',
+      消费功能层: '功能细节讨论中被点名,产品力驱动的可见度',
+      竞品层: '被拉进对比题,是 AI 眼里的正面竞争者',
+      渠道市场层: '出现在渠道/购买路径问题里,偏交易侧的可见度',
+    };
+    const linkRows = agg.layerHits.filter((h) => h.mentioned > 0);
+    const brandTotal = new Map<string, number>();
+    for (const h of linkRows) brandTotal.set(h.brand, (brandTotal.get(h.brand) ?? 0) + h.mentioned);
+    // Top 8 品牌进图,长尾聚成「其他」;未分层问题不计入(桑基两侧必须同总量平衡)
+    const ranked = [...brandTotal.entries()].sort((a, b) => b[1] - a[1]);
+    const shown = ranked.slice(0, 8);
+    const rest = ranked.slice(8);
+    const shownSet = new Set(shown.map(([n]) => n));
+    const links: Array<{ brand: string; layer: string; value: number }> = linkRows
+      .filter((h) => shownSet.has(h.brand))
+      .map((h) => ({ brand: h.brand, layer: h.layer, value: h.mentioned }));
+    if (rest.length > 0) {
+      for (const h of linkRows.filter((x) => !shownSet.has(x.brand)))
+        links.push({ brand: '其他品牌', layer: h.layer, value: h.mentioned });
+    }
+    const layerTotal = new Map<string, number>();
+    for (const l of links) layerTotal.set(l.layer, (layerTotal.get(l.layer) ?? 0) + l.value);
+    const rightOrder = [...layerTotal.entries()]
+      .sort((a, b) => {
+        const ia = (INSIGHT_QUESTION_LAYERS as readonly string[]).indexOf(a[0]);
+        const ib = (INSIGHT_QUESTION_LAYERS as readonly string[]).indexOf(b[0]);
+        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+      })
+      .map(([layer]) => layer);
+    const leftNames = [...shown.map(([n]) => n), ...(rest.length > 0 ? ['其他品牌'] : [])];
+    const othersTotal = rest.reduce((a, [, v]) => a + v, 0);
+    if (leftNames.length >= 2 && rightOrder.length >= 2) {
+      // 图上总结:找「命中量大且集中于单一层」的品牌——名气型可见的典型信号
+      let summary: string | undefined;
+      const concentrated = shown
+        .map(([name, total]) => {
+          const top = linkRows
+            .filter((h) => h.brand === name)
+            .reduce((a, h) => (h.mentioned > a.value ? { layer: h.layer, value: h.mentioned } : a), { layer: '', value: 0 });
+          return { name, total, top };
+        })
+        .filter((r) => r.top.value / r.total >= 0.5 && r.total >= MIN_SAMPLE)
+        .sort((a, b) => b.total - a.total)[0];
+      if (concentrated) {
+        summary = `${concentrated.name} 的 ${concentrated.total} 次命中里 ${concentrated.top.value} 次(${Math.round(
+          (concentrated.top.value / concentrated.total) * 100,
+        )}%)来自「${concentrated.top.layer}」——${LAYER_READING[concentrated.top.layer] ?? '可见度来源高度集中'}。`;
+      } else if (shown.length > 0) {
+        const [name, total] = shown[0]!;
+        const top = linkRows
+          .filter((h) => h.brand === name)
+          .reduce((a, h) => (h.mentioned > a.value ? { layer: h.layer, value: h.mentioned } : a), { layer: '', value: 0 });
+        summary = `头部品牌 ${name} 的可见度在${rightOrder.length}个问题层间分布较均匀,最大来源为「${top.layer}」(${top.value}/${total} 次),不依赖单一场景。`;
+      }
+      blocks.push({
+        type: 'sankey',
+        title: '可见度从哪一层挣来',
+        summary,
+        note: '带宽 = 该品牌在该层问题中被提及的次数;长尾品牌聚为「其他品牌」。比率视角见上图,本图看的是量的构成。',
+        left: leftNames.map((n) => ({ name: n, value: n === '其他品牌' ? othersTotal : brandTotal.get(n) ?? 0 })),
+        right: rightOrder.map((l) => ({ name: l, value: layerTotal.get(l) ?? 0 })),
+        links: links.map((l) => ({
+          from: leftNames.indexOf(l.brand),
+          to: rightOrder.indexOf(l.layer),
+          value: l.value,
+        })),
+      } satisfies SankeyBlock);
+    }
+  }
   if (agg.reputation.total > 0) {
     const posShare = r3(agg.reputation.pos / agg.reputation.total);
     const topPos = agg.reputation.posTerms.slice(0, 3);
@@ -871,6 +944,7 @@ export async function collectIndustryAggregates(
       brand: r.brand_name,
       valid: num(r.valid),
       rate: num(r.valid) > 0 ? num(r.mentioned) / num(r.valid) : 0,
+      mentioned: num(r.mentioned),
     })),
     layerQuestionCounts,
     funnel,
