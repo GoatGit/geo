@@ -20,7 +20,11 @@ export default function InsightDetailPage() {
   const id = Number(params?.id);
   const query = useQuery({
     queryKey: ['insight', id],
-    queryFn: () => api<InsightDetailDto>(`/insights/${id}`, { auth: false }),
+    // 登录用户带 token(可读本人/订阅行业的草稿);匿名访客不带(仅已发布报告公开可见)
+    queryFn: () =>
+      api<InsightDetailDto>(`/insights/${id}`, {
+        auth: typeof window !== 'undefined' && !!localStorage.getItem('geo.accessToken') ? undefined : false,
+      }),
     enabled: Number.isFinite(id),
   });
 
