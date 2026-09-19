@@ -6,7 +6,7 @@ import { api, apiDownload } from '@/lib/api';
 import { useToast } from '@/components/toast';
 import { PageHeader } from '@/components/ui';
 import { InsightBlocks } from '@/components/insight-charts';
-import { INSIGHT_QUESTION_LAYERS, type InsightBlock, InsightBuildStatus } from '@geo/shared';
+import { type InsightBlock, InsightBuildStatus } from '@geo/shared';
 
 /**
  * 平台后台 · 行业洞察生成器(向导式,docs/01 IA ⑤ 市场化):
@@ -342,7 +342,6 @@ function IndustryWizard(props: {
   const {
     industryId, busy, setBusy, brandSuggest, setBrandSuggest, brandPicked, setBrandPicked,
     manualBrandDesc, setManualBrandDesc, manualQ, setManualQ, manualQType, setManualQType,
-    manualQLayer, setManualQLayer,
     qSuggest, setQSuggest, refreshWizard, toast,
   } = props;
 
@@ -694,7 +693,7 @@ function ReportsSection(props: {
   refresh: () => void;
   toast: (msg: string, kind?: 'ok' | 'err') => void;
 }) {
-  const { list, industries, windowDays, busy, setBusy, expanded, setExpanded, editing, setEditing, editTitle, setEditTitle, editSummary, setEditSummary, editDisclosure, setEditDisclosure, disclosureFor, setDisclosureFor, refresh, toast } = props;
+  const { list, industries, windowDays, busy, setBusy, expanded, setExpanded, editing, setEditing, editTitle, setEditTitle, editSummary, setEditSummary, editDisclosure, setEditDisclosure, setDisclosureFor, refresh, toast } = props;
 
   const run = async (industry: IndustryRow) => {
     setBusy(`run:${industry.id}`);

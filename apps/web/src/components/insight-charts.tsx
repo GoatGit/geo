@@ -347,8 +347,6 @@ function ScatterChart({ xLabel, yLabel, diagonal, points, groups }: Extract<Insi
 
   // 标签防重叠:大气泡标签画进气泡内;其余右/左/上依次找空位
   const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
-  const hits = (x: number, y: number, w: number, h: number) =>
-    placed.some((b) => x < b.x + b.w && x + w > b.x && y < b.y + b.h && y + h > b.y);
 
   const bubbles = points.map((p) => {
     const r = 5 + ((p.size ?? 1) / maxBySize) * 9;

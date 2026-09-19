@@ -1,5 +1,5 @@
 import { and, desc, eq, ne, sql } from 'drizzle-orm';
-import { ENGINE_LABELS, INSIGHT_QUESTION_LAYERS, WEB_ENGINES, engineLabel } from '@geo/shared';
+import { INSIGHT_QUESTION_LAYERS, WEB_ENGINES, engineLabel } from '@geo/shared';
 import type { Db } from '@geo/db';
 import { insightIndustries, industryInsights, loadPlatformSettings } from '@geo/db';
 import { classifyDomain } from '@geo/metrics';
