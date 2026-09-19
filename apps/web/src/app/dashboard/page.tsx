@@ -180,27 +180,6 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      {/* ===== 快捷动作磁贴 ===== */}
-      <section>
-        <div className="mb-2 text-xs font-medium text-slate-400">快捷动作</div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          {QUICK_ACTIONS.map((t, i) => (
-            <Link
-              key={t.href}
-              href={t.href}
-              className={`card group flex items-center gap-3 p-4 transition-all hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-card-hover rise-${(i % 4) + 1}`}
-            >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600">{t.icon}</span>
-              <span className="min-w-0 flex-1">
-                <b className="block text-[13px] font-semibold text-slate-800">{t.title}</b>
-                <span className="block truncate text-[11px] text-slate-400">{t.desc}</span>
-              </span>
-              <IconArrowRight width={14} height={14} className="shrink-0 text-slate-300 transition-colors group-hover:text-brand" />
-            </Link>
-          ))}
-        </div>
-      </section>
-
       {/* 引导清单(无数据时) */}
       {!hasData && (
         <div className="card rise relative overflow-hidden p-6">
@@ -351,6 +330,27 @@ export default function DashboardPage() {
           </div>
         </section>
       )}
+
+      {/* ===== 快捷动作磁贴 ===== */}
+      <section>
+        <div className="mb-2 text-xs font-medium text-slate-400">快捷动作</div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          {QUICK_ACTIONS.map((t, i) => (
+            <Link
+              key={t.href}
+              href={t.href}
+              className={`card group flex items-center gap-3 p-4 transition-all hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-card-hover rise-${(i % 4) + 1}`}
+            >
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600">{t.icon}</span>
+              <span className="min-w-0 flex-1">
+                <b className="block text-[13px] font-semibold text-slate-800">{t.title}</b>
+                <span className="block truncate text-[11px] text-slate-400">{t.desc}</span>
+              </span>
+              <IconArrowRight width={14} height={14} className="shrink-0 text-slate-300 transition-colors group-hover:text-brand" />
+            </Link>
+          ))}
+        </div>
+      </section>
 
       {/* 采集动态 */}
       {hasData && (
