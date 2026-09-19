@@ -237,4 +237,19 @@ describe('行业洞察组稿(运行 → 数据报告)', () => {
     const heat = c.blocks.find((b) => b.type === 'heatmap') as HeatmapBlock;
     expect(heat.columns).not.toContain('yuanbao'); // 全空引擎列被过滤
   });
+
+  it('热力图按主体名关联(SQL 的 brand_id 实为 subject_name)', () => {
+    const fx = fixture();
+    // 模拟真实装配:engineHits 携带 subject(品牌名),brandId 为 NaN(数字化品牌名失败)
+    fx.engineHits = fx.engineHits.map((e) => ({
+      ...e,
+      brandId: Number.NaN,
+      subject: e.brandId === 1 ? '品牌A' : '品牌B',
+    }));
+    const c = composeIndustryInsight(fx);
+    const heat = c.blocks.find((b) => b.type === 'heatmap') as HeatmapBlock;
+    const b2 = heat.rows.find((r) => r.name === '品牌B')!;
+    expect(b2.cells[0]).toBeNull();     // deepseek 无样本
+    expect(b2.cells[1]).toBeCloseTo(0.5); // doubao 50% 命中 —— 名字关联命中
+  });
 });

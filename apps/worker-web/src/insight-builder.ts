@@ -82,7 +82,14 @@ export interface IndustryAggregates {
   to: string;
   brands: BrandAgg[];
   /** 品牌 × 引擎命中率(0-1) */
-  engineHits: Array<{ brandId: number; engine: string; rate: number; valid: number }>;
+  engineHits: Array<{
+    brandId: number;
+    /** 主体名(SQL 的 subject_name;热力图按名关联——按数字 id 永远 miss,实测热力图曾全空白) */
+    subject?: string;
+    engine: string;
+    rate: number;
+    valid: number;
+  }>;
   funnel: { answers: number; mentioned: number; top3: number; top1: number };
   landscape: LandscapeRow[];
   citations: CitationAgg;
@@ -225,12 +232,13 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
   const engines = [...new Set(agg.engineHits.filter((e) => e.valid > 0).map((e) => e.engine))].sort();
   if (engines.length > 0 && agg.brands.length > 0) {
     const cell = new Map<string, { rate: number; valid: number }>();
-    for (const e of agg.engineHits) cell.set(`${e.brandId}:${e.engine}`, { rate: e.rate, valid: e.valid });
+    // 关联键 = 主体名(engineRows 的 brand_id 实为 subject_name;按数字 id 会 NaN miss)
+    for (const e of agg.engineHits) cell.set(`${e.subject ?? e.brandId}:${e.engine}`, { rate: e.rate, valid: e.valid });
     let best: { brand: string; engine: string; rate: number } | null = null;
     for (const e of agg.engineHits) {
       if (e.valid <= 0) continue;
       if (!best || e.rate > best.rate) {
-        const name = agg.brands.find((b) => b.brandId === e.brandId)?.name;
+        const name = agg.brands.find((b) => (e.subject ? b.name === e.subject : b.brandId === e.brandId))?.name;
         if (name) best = { brand: name, engine: e.engine, rate: e.rate };
       }
     }
@@ -243,7 +251,7 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
       rows: agg.brands.map((b) => ({
         name: b.name,
         cells: engines.map((e) => {
-          const c = cell.get(`${b.brandId}:${e}`);
+          const c = cell.get(`${b.name}:${e}`) ?? cell.get(`${b.brandId}:${e}`);
           return c && c.valid > 0 ? r3(c.rate) : null;
         }),
       })),
@@ -677,6 +685,7 @@ export async function collectIndustryAggregates(
   const engineHits = rowsOf<{ brand_id: string; engine: string; valid: string; mentioned: string }>(engineRows).map(
     (r) => ({
       brandId: Number(r.brand_id),
+      subject: r.brand_id,
       engine: r.engine,
       valid: num(r.valid),
       rate: num(r.valid) > 0 ? num(r.mentioned) / num(r.valid) : 0,
