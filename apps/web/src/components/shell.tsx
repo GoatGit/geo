@@ -56,7 +56,6 @@ const NAV: NavGroup[] = [
   },
   { kind: 'item', item: { href: '/industry-insights', label: '行业洞察', icon: <IconSpark /> } },
   { kind: 'item', item: { href: '/reports', label: '报告中心', icon: <IconReport /> } },
-  { kind: 'item', item: { href: '/billing', label: '套餐与账单', icon: <IconWallet /> } },
   {
     kind: 'group',
     label: '配置',
@@ -562,6 +561,13 @@ function AccountMenu() {
       </button>
       {open && (
         <div className="card rise absolute right-0 top-full z-20 mt-2 w-44 p-1.5">
+          <Link
+            href="/billing"
+            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-brand-50 hover:text-brand-700"
+          >
+            <IconWallet width={14} height={14} />
+            套餐与账单
+          </Link>
           <Link
             href="/"
             className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-brand-50 hover:text-brand-700"
