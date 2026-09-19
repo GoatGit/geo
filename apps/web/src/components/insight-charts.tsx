@@ -290,21 +290,21 @@ function RadarChart({ axes, series }: Extract<InsightBlock, { type: 'radar' }>) 
             </g>
           );
         })}
-        {series.map((s, si) => (
+        {series.map((s) => (
           <polygon
             key={s.name}
             points={s.values.map((v, ai) => pt(ai, v).join(',')).join(' ')}
-            fill={SERIES_COLORS[si % SERIES_COLORS.length]}
+            fill={nameColor(s.name)}
             fillOpacity={0.1}
-            stroke={SERIES_COLORS[si % SERIES_COLORS.length]}
+            stroke={nameColor(s.name)}
             strokeWidth={1.8}
           />
         ))}
       </svg>
       <ul className="mt-6 space-y-1.5 text-xs text-slate-600">
-        {series.map((s, si) => (
+        {series.map((s) => (
           <li key={s.name} className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: SERIES_COLORS[si % SERIES_COLORS.length] }} />
+            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: nameColor(s.name) }} />
             {s.name}
           </li>
         ))}

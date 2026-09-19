@@ -55,7 +55,13 @@ function fixture(): IndustryAggregates {
       owned: 36,
       ownedShare: 0.12,
       top: [{ domain: 'zhihu.com', platform: '社区', category: 'ugc', hits: 90 }],
-      categories: [{ category: 'ugc', hits: 90 }],
+      categories: [
+        { category: 'ugc', hits: 90 },
+        { category: '门户/资讯', hits: 60 },
+        { category: '榜单/评测', hits: 50 },
+        { category: '官网', hits: 36 },
+        { category: 'unknown', hits: 10 },
+      ],
     },
     reputation: {
       total: 50,
@@ -323,6 +329,26 @@ describe('行业洞察组稿(运行 → 数据报告)', () => {
     const b2 = heat.rows.find((r) => r.name === '品牌B')!;
     expect(b2.cells[0]).toBeNull();     // deepseek 无样本
     expect(b2.cells[1]).toBeCloseTo(0.5); // doubao 50% 命中 —— 名字关联命中
+  });
+
+  it('信源类型构成:细类归并五大桶,官网占比驱动总结叙述', () => {
+    const c = composeIndustryInsight(fixture());
+    const mix = c.blocks.find((b) => b.type === 'barRank' && b.title === '信源类型构成') as BarRankBlock;
+    expect(mix).toBeTruthy();
+    expect(mix.unit).toBe('%');
+    // ugc90+门户60+榜单50+官网36+unknown10 → 合计 246;UGC 90/246=36.6%
+    expect(mix.items[0]).toEqual({ name: 'UGC/社区', value: 36.6, n: 90 });
+    const names = mix.items.map((i) => i.name);
+    expect(names).toContain('新闻/垂媒');
+    expect(names).toContain('榜单/评测');
+    expect(names).toContain('品牌官网');
+    expect(names).toContain('其他');
+    const sum = mix.items.reduce((a, i) => a + i.value, 0);
+    expect(Math.round(sum)).toBe(100); // 百分比守恒
+    // 品牌官网被引=品牌 ownedHits 合计 12/总被引 300=4% <5% → 走「几乎不来自官方渠道」叙述
+    expect(mix.summary).toContain('UGC/社区');
+    expect(mix.summary).toContain('4%');
+    expect(mix.summary).toContain('第三方');
   });
 
   it('信源按平台中文名聚合(sina 系多域名合并为「新浪」)', () => {

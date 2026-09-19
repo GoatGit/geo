@@ -484,6 +484,47 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
       total: agg.citations.total,
       items: platformTop.map((d) => ({ name: d.platform || d.domain, value: d.hits })),
     } satisfies BarRankBlock);
+
+    // ⑥.1 信源类型构成(UGC/媒体/榜单/官网……):回答"AI 的判断从哪类内容来"
+    const bucketOf = (cat: string): string => {
+      const c = cat.toLowerCase();
+      if (c.startsWith('ugc') || c.includes('社区') || c.includes('社交') || c.includes('问答')) return 'UGC/社区';
+      if (c.includes('榜单') || c.includes('评测')) return '榜单/评测';
+      if (c.includes('官网')) return '品牌官网';
+      if (c.includes('门户') || c.includes('资讯') || c.includes('垂媒') || c.includes('媒体')) return '新闻/垂媒';
+      if (c.includes('百科')) return '百科';
+      return '其他';
+    };
+    const bucketTot = new Map<string, number>();
+    for (const c of agg.citations.categories) {
+      const b = bucketOf(c.category);
+      bucketTot.set(b, (bucketTot.get(b) ?? 0) + c.hits);
+    }
+    const catTotal = [...bucketTot.values()].reduce((a, b) => a + b, 0);
+    if (catTotal > 0 && bucketTot.size >= 2) {
+      const rank = [...bucketTot.entries()].sort((a, b) => b[1] - a[1]);
+      const [topName, topHits] = rank[0]!;
+      const ownedPct = ownedTotal / agg.citations.total;
+      let summary: string;
+      if (ownedPct < 0.05) {
+        summary = `AI 的引用里 ${topName} 占 ${Math.round((topHits / catTotal) * 100)}%,品牌官网仅 ${pctText(ownedPct)} —— AI 的判断几乎不来自官方渠道,内容阵地在第三方。`;
+      } else {
+        summary = `AI 的引用里 ${topName} 占 ${Math.round((topHits / catTotal) * 100)}%,品牌官网被引占 ${pctText(ownedPct)},官方内容已有一定话语权。`;
+      }
+      blocks.push({
+        type: 'barRank',
+        title: '信源类型构成',
+        summary,
+        note: `按被引次数归类(n = 被引次数);行业合计 ${catTotal} 次`,
+        total: 100,
+        unit: '%',
+        items: rank.map(([name, hits]) => ({
+          name,
+          value: Math.round((hits / catTotal) * 1000) / 10,
+          n: hits,
+        })),
+      } satisfies BarRankBlock);
+    }
   }
 
   // ⑦ 头部品牌五维形状对比(雷达)

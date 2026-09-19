@@ -45,8 +45,6 @@ const SUB = '#8a877e';
 const LINE = '#e4e0d8';
 const SOFT = '#f4f6f3';
 
-const SERIES_COLORS = [NAVY, ORANGE, BRAND, '#8a7ba8', '#3d8f8a', '#b0885e'];
-
 /** 品牌稳定色:与网页版(insight-charts.tsx nameColor)同色板同哈希,跨媒介同色。 */
 const BRAND_PALETTE = ['#1d4ed8', '#c2570b', '#15803d', '#7c3aed', '#b45309', '#0e7490'];
 function brandColor(name: string): string {
@@ -278,8 +276,8 @@ export async function renderInsightPdf(detail: PdfInsight): Promise<Buffer> {
           lineBreak: false,
         });
     });
-    b.series.forEach((s, si) => {
-      const color = SERIES_COLORS[si % SERIES_COLORS.length];
+    b.series.forEach((s) => {
+      const color = brandColor(s.name);
       doc.moveTo(cx + R * (s.values[0] ?? 0) * Math.cos(angle(0)), cy + R * (s.values[0] ?? 0) * Math.sin(angle(0)));
       for (let k = 1; k < n; k++) {
         const v = s.values[k] ?? 0;
@@ -290,8 +288,8 @@ export async function renderInsightPdf(detail: PdfInsight): Promise<Buffer> {
     y = cy + R + 16;
     doc.fontSize(8);
     let lx = PAGE.left;
-    b.series.forEach((s, si) => {
-      const color = SERIES_COLORS[si % SERIES_COLORS.length];
+    b.series.forEach((s) => {
+      const color = brandColor(s.name);
       const label = truncate(s.name, 96, 8);
       doc.roundedRect(lx, y - 1, 7, 7, 2).fill(color);
       doc.fillColor(INK).text(label, lx + 11, y - 2, { lineBreak: false });
