@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BarRankBlock, FunnelBlock, HeatmapBlock, SankeyBlock, TrendBlock } from '@geo/shared';
-import { composeIndustryInsight, type IndustryAggregates } from '../src/insight-builder';
+import { composeIndustryInsight, extractPrevMetrics, type IndustryAggregates } from '../src/insight-builder';
 import type { BarRankBlock, RadarBlock } from '@geo/shared';
 
 /** 合成聚合输入:2 品牌、2 引擎、完整漏斗/信源/口碑/趋势。 */
@@ -277,6 +277,45 @@ describe('行业洞察组稿(运行 → 数据报告)', () => {
     const rank = c.blocks.find((b) => b.type === 'barRank') as BarRankBlock;
     expect(rank.items.every((i) => i.delta === undefined)).toBe(true);
     expect(rank.summary ?? '').not.toContain('较上期');
+  });
+
+  it('环比扩展(rubric 2.9):上期 blocks 解析全维度基线,热力/雷达带期际变化', () => {
+    const first = composeIndustryInsight(fixture());
+    const pm = extractPrevMetrics(first.blocks);
+    expect(pm).toBeTruthy();
+    // 解析:引擎列中文标签反查 slug;层列原值;雷达五维
+    expect(pm!.engineCells!.get('品牌A:doubao')).toBeCloseTo(0.9);
+    expect(pm!.layerCells!.get('品牌A:场景人群层')).toBeCloseTo(0.9);
+    expect(pm!.radar!.get('品牌A')![0]).toBeCloseTo(0.8);
+
+    // 第二期:豆包 0.9→0.8(-10pp)、deepseek 0.7→0.703(+0.3pp 噪声)、
+    // 场景层 0.9→0.933(+3.3pp)、提及率 80%→75%(-5pp)
+    const agg = fixture();
+    agg.engineHits[0] = { brandId: 1, engine: 'doubao', rate: 0.8, valid: 50 };
+    agg.engineHits[1] = { brandId: 1, engine: 'deepseek', rate: 0.703, valid: 50 };
+    agg.layerHits[0] = { layer: '场景人群层', brand: '品牌A', rate: 0.933, valid: 30, mentioned: 28 };
+    agg.brands[0] = { ...agg.brands[0]!, mentioned: 75 };
+    const c = composeIndustryInsight(agg, pm!);
+
+    const engHeat = c.blocks.find((b) => b.type === 'heatmap' && b.title === '品牌 × 引擎命中率') as HeatmapBlock;
+    const aRow = engHeat.rows.findIndex((r) => r.name === '品牌A');
+    expect(engHeat.deltas![aRow]![engHeat.columns.indexOf('豆包')]).toBe(-10);
+    expect(engHeat.deltas![aRow]![engHeat.columns.indexOf('DeepSeek')]).toBeNull(); // +0.3pp < 0.5 阈值
+
+    const layerHeat = c.blocks.find((b) => b.type === 'heatmap' && b.title === '品牌 × 问题层命中率') as HeatmapBlock;
+    expect(layerHeat.deltas![aRow]![layerHeat.columns.indexOf('场景人群层')]).toBe(3.3);
+
+    const radar = c.blocks.find((b) => b.type === 'radar') as RadarBlock;
+    const sa = radar.series.find((s) => s.name === '品牌A')!;
+    expect(sa.deltas![0]).toBe(-5); // 提及率轴
+  });
+
+  it('环比基线仅排行(Map 兼容旧调用):热力与雷达不产生 deltas', () => {
+    const c = composeIndustryInsight(fixture(), new Map([['品牌A', 0.5]]));
+    const heats = c.blocks.filter((b) => b.type === 'heatmap') as HeatmapBlock[];
+    heats.forEach((h) => expect(h.deltas).toBeUndefined());
+    const radar = c.blocks.find((b) => b.type === 'radar') as RadarBlock;
+    radar.series.forEach((s) => expect(s.deltas).toBeUndefined());
   });
 
   it('小样本守门:样本不足的品牌不进 headline/格局叙述,数据说明块披露', () => {

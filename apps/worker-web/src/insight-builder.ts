@@ -1,5 +1,5 @@
 import { and, desc, eq, ne, sql } from 'drizzle-orm';
-import { INSIGHT_QUESTION_LAYERS, WEB_ENGINES, engineLabel } from '@geo/shared';
+import { ENGINE_LABELS, INSIGHT_QUESTION_LAYERS, WEB_ENGINES, engineLabel } from '@geo/shared';
 import type { Db } from '@geo/db';
 import { insightIndustries, industryInsights, loadPlatformSettings } from '@geo/db';
 import { classifyDomain } from '@geo/metrics';
@@ -118,10 +118,26 @@ const r3 = (v: number | null) => (v == null ? null : Math.round(v * 1000) / 1000
 
 // ===== 组稿(纯函数,可单测) =====
 
+/** 上期同维度基线(取自上期报告 blocks):环比扩展(rubric 2.9)。 */
+export interface PrevMetrics {
+  /** 各品牌有效提及率(0-1),取自上期排行块 */
+  rank: Map<string, number>;
+  /** 品牌 → 五维值(0-1),取自上期雷达块 */
+  radar?: Map<string, number[]>;
+  /** `${品牌}:${引擎slug}` → 命中率(0-1),取自上期引擎热力块 */
+  engineCells?: Map<string, number>;
+  /** `${品牌}:${问题层}` → 命中率(0-1),取自上期分层热力块 */
+  layerCells?: Map<string, number>;
+}
+
 /**
- * @param prev 上期各品牌有效提及率(0-1),取自同行业上一期报告;首期传 undefined
+ * @param prev 上期基线:PrevMetrics(全维度环比)或 Map(仅提及率,兼容旧调用);首期传 undefined
  */
-export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<string, number>): ComposedInsight {
+export function composeIndustryInsight(
+  agg: IndustryAggregates,
+  prev?: Map<string, number> | PrevMetrics,
+): ComposedInsight {
+  const pm: PrevMetrics | null = prev instanceof Map ? { rank: prev } : (prev ?? null);
   // 信源条目域名 → 平台中文名聚合(auto.sina.cn/k.sina.cn/sina.cn →「新浪」);
   // 纯函数层做(可单测),SQL 只出原始域名
   const platformTop = (() => {
@@ -181,9 +197,9 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
     const tailRate = last && last !== head ? rateOf(last.mentioned, last.valid) : null;
     // 环比叙述:样本充足且上期有值的品牌中,取提升/回落最陡者
     let deltaLine = '';
-    if (prev && prev.size > 0) {
+    if (pm?.rank.size) {
       const movers = narratable
-        .map((b) => ({ b, d: prev.has(b.name) ? (rateOf(b.mentioned, b.valid) - (prev.get(b.name) ?? 0)) * 100 : null }))
+        .map((b) => ({ b, d: pm.rank.has(b.name) ? (rateOf(b.mentioned, b.valid) - (pm.rank.get(b.name) ?? 0)) * 100 : null }))
         .filter((m) => m.d != null) as Array<{ b: (typeof narratable)[number]; d: number }>;
       if (movers.length > 0) {
         const up = movers.reduce((a, m) => (m.d > a.d ? m : a));
@@ -219,8 +235,8 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
           value: v,
           n: b.valid,
           drill: { kind: 'mentions', subject: b.name },
-          ...(prev && prev.has(b.name) && b.valid >= MIN_SAMPLE
-            ? { delta: Math.round((v - (prev.get(b.name) ?? 0) * 100) * 10) / 10 }
+          ...(pm?.rank.has(b.name) && b.valid >= MIN_SAMPLE
+            ? { delta: Math.round((v - (pm.rank.get(b.name) ?? 0) * 100) * 10) / 10 }
             : {}),
         };
       }),
@@ -311,6 +327,20 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
           return c && c.valid > 0 ? r3(c.rate) : null;
         }),
       })),
+      // 期际变化(百分点):上期同格有值才比;|Δ|<0.5pp 视为噪声不标
+      ...(pm?.engineCells
+        ? {
+            deltas: agg.brands.map((b) =>
+              engines.map((e) => {
+                const c = cell.get(`${b.name}:${e}`) ?? cell.get(`${b.brandId}:${e}`);
+                const pv = pm.engineCells!.get(`${b.name}:${e}`);
+                if (!c || c.valid <= 0 || pv == null) return null;
+                const d = Math.round((c.rate - pv) * 1000) / 10;
+                return Math.abs(d) >= 0.5 ? d : null;
+              }),
+            ),
+          }
+        : {}),
     } satisfies HeatmapBlock);
   }
 
@@ -347,6 +377,19 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
           return c && c.valid > 0 ? r3(c.rate) : null;
         }),
       })),
+      ...(pm?.layerCells
+        ? {
+            deltas: agg.brands.map((b) =>
+              layerOrder.map((layer) => {
+                const c = cell.get(`${b.name}:${layer}`);
+                const pv = pm.layerCells!.get(`${b.name}:${layer}`);
+                if (!c || c.valid <= 0 || pv == null) return null;
+                const d = Math.round((c.rate - pv) * 1000) / 10;
+                return Math.abs(d) >= 0.5 ? d : null;
+              }),
+            ),
+          }
+        : {}),
     } satisfies HeatmapBlock);
   }
 
@@ -548,6 +591,23 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
         b.repTotal > 0 ? r3(b.repPos / b.repTotal) ?? 0 : 0,
         agg.citations.total > 0 ? r3(b.ownedHits / agg.citations.total) ?? 0 : 0,
       ],
+      // 各轴较上期变化(百分点):上期雷达有该品牌才比;|Δ|<0.5pp 不标
+      ...(pm?.radar?.has(b.name)
+        ? {
+            deltas: [
+              r3(rateOf(b.mentioned, b.valid)) ?? 0,
+              r3(rateOf(b.top3, b.ranked)) ?? 0,
+              r3(rateOf(b.top1, b.ranked)) ?? 0,
+              b.repTotal > 0 ? r3(b.repPos / b.repTotal) ?? 0 : 0,
+              agg.citations.total > 0 ? r3(b.ownedHits / agg.citations.total) ?? 0 : 0,
+            ].map((v, i) => {
+              const pv = pm.radar!.get(b.name)?.[i];
+              if (pv == null) return null;
+              const d = Math.round((v - pv) * 1000) / 10;
+              return Math.abs(d) >= 0.5 ? d : null;
+            }),
+          }
+        : {}),
     }));
   if (radarBrands.length >= 2) {
     const avg = (v: number[]) => v.reduce((a, b) => a + b, 0) / v.length;
@@ -1029,6 +1089,49 @@ function extractRankItems(blocks: InsightBlock[]): Map<string, number> | undefin
   return m.size > 0 ? m : undefined;
 }
 
+/** 引擎中文名 → slug 反查(解析上期热力块的中文列头)。 */
+const ENGINE_BY_LABEL: Record<string, string> = Object.entries(ENGINE_LABELS).reduce(
+  (m, [slug, label]) => {
+    m[label] = slug;
+    return m;
+  },
+  {} as Record<string, string>,
+);
+
+/**
+ * 从上期报告 blocks 提取全维度环比基线(rubric 2.9):
+ * 排行(提及率)+ 雷达五维 + 引擎/分层热力格子。旧报告无 columnKind 时按标题识别。
+ */
+export function extractPrevMetrics(blocks: InsightBlock[]): PrevMetrics | null {
+  const rank = extractRankItems(blocks);
+  if (!rank) return null;
+  const radar = new Map<string, number[]>();
+  const engineCells = new Map<string, number>();
+  const layerCells = new Map<string, number>();
+  for (const b of blocks) {
+    if (b.type === 'radar' && Array.isArray(b.series)) {
+      for (const s of b.series) if (Array.isArray(s.values) && s.values.every((v) => typeof v === 'number')) radar.set(s.name, s.values);
+    } else if (b.type === 'heatmap' && Array.isArray(b.rows) && Array.isArray(b.columns)) {
+      const kind = b.columnKind ?? (b.title === '品牌 × 引擎命中率' ? 'engine' : b.title === '品牌 × 问题层命中率' ? 'layer' : null);
+      if (!kind) continue;
+      const target = kind === 'engine' ? engineCells : layerCells;
+      b.columns.forEach((col, ci) => {
+        const key = kind === 'engine' ? (ENGINE_BY_LABEL[col] ?? col) : col;
+        for (const r of b.rows) {
+          const v = r.cells?.[ci];
+          if (r?.name && typeof v === 'number') target.set(`${r.name}:${key}`, v);
+        }
+      });
+    }
+  }
+  return {
+    rank,
+    radar: radar.size > 0 ? radar : undefined,
+    engineCells: engineCells.size > 0 ? engineCells : undefined,
+    layerCells: layerCells.size > 0 ? layerCells : undefined,
+  };
+}
+
 // ===== 运行编排(队列消费入口) =====
 
 export interface InsightBuildJob {
@@ -1062,9 +1165,9 @@ export async function runInsightBuild(db: Db, job: InsightBuildJob): Promise<voi
         .limit(5)
     )
       .filter((r) => r.blocks != null)
-      .map((r) => extractRankItems(r.blocks as InsightBlock[]))
+      .map((r) => extractPrevMetrics(r.blocks as InsightBlock[]))
       .find((m) => m != null);
-    const prevSelf = row.blocks ? extractRankItems(row.blocks as InsightBlock[]) : undefined;
+    const prevSelf = row.blocks ? extractPrevMetrics(row.blocks as InsightBlock[]) : undefined;
     const prev = prevRow ?? prevSelf ?? undefined;
     let composed = composeIndustryInsight(agg, prev);
     // LLM 撰稿层:标题/摘要/核心洞察由 GLM 基于聚合事实撰写;失败保留模板稿(降级可复现)

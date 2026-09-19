@@ -243,6 +243,14 @@ export async function renderInsightPdf(detail: PdfInsight): Promise<Buffer> {
             .fillColor(v > 0.55 ? '#ffffff' : INK)
             .fontSize(8)
             .text(`${Math.round(v * 100)}%`, cx, ry + 6, { width: cellW - 5, align: 'center', lineBreak: false });
+          // 期际变化角标(rubric 2.9):右上角小字 ↑/↓
+          const d = b.deltas?.[i]?.[j];
+          if (d != null) {
+            doc
+              .fillColor(v > 0.55 ? '#e8e8e8' : d > 0 ? '#15803d' : '#b91c1c')
+              .fontSize(5.5)
+              .text(`${d > 0 ? '↑' : '↓'}${Math.abs(d)}`, cx + cellW - 20, ry + 3, { width: 15, align: 'right', lineBreak: false });
+          }
         }
       });
     });
@@ -294,6 +302,18 @@ export async function renderInsightPdf(detail: PdfInsight): Promise<Buffer> {
       doc.roundedRect(lx, y - 1, 7, 7, 2).fill(color);
       doc.fillColor(INK).text(label, lx + 11, y - 2, { lineBreak: false });
       lx += 11 + doc.widthOfString(label) + 14;
+    });
+    // 各轴较上期变化(rubric 2.9):每品牌一行紧凑文本
+    const axisShort = ['提及', 'Top3', '首位', '口碑', '被引'];
+    y += 12;
+    b.series.forEach((s) => {
+      if (!Array.isArray(s.deltas) || !s.deltas.some((d) => d != null)) return;
+      const parts = s.deltas.map((d, i) =>
+        d == null ? null : `${axisShort[i] ?? b.axes[i] ?? ''}${d > 0 ? '↑' : '↓'}${Math.abs(d)}`,
+      ).filter(Boolean);
+      if (parts.length === 0) return;
+      doc.fillColor(SUB).fontSize(7.5).text(`${s.name}:${parts.join('  ')}`, PAGE.left, y, { width: CONTENT_W, lineBreak: false });
+      y += 10;
     });
     y += 14;
   };

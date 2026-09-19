@@ -234,7 +234,7 @@ function FunnelChart({ stages }: Extract<InsightBlock, { type: 'funnel' }>) {
 
 /* ===== 品牌 × 维度命中热力图 ===== */
 
-function HeatmapChart({ columns, rows, columnKind, onDrill }: Extract<InsightBlock, { type: 'heatmap' }> & { onDrill?: (d: InsightDrill) => void }) {
+function HeatmapChart({ columns, rows, columnKind, deltas, onDrill }: Extract<InsightBlock, { type: 'heatmap' }> & { onDrill?: (d: InsightDrill) => void }) {
   // 格子点击 → 该品牌在该列(引擎/问题层)的命中明细
   const cellDrill = (name: string, col: string): InsightDrill | null => {
     if (!onDrill || !columnKind) return null;
@@ -256,18 +256,19 @@ function HeatmapChart({ columns, rows, columnKind, onDrill }: Extract<InsightBlo
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {rows.map((r, ri) => (
             <tr key={r.name}>
               <td className="p-1.5 text-left text-[13px] font-medium text-slate-800">{r.name}</td>
               {r.cells.map((v, ci) => {
                 const drill = v != null ? cellDrill(r.name, columns[ci]!) : null;
+                const d = deltas?.[ri]?.[ci];
                 return (
                 <td key={ci} className="p-1">
                   {v == null ? (
                     <div className="rounded bg-slate-50 py-2 text-slate-300">—</div>
                   ) : (
                     <div
-                      className={`rounded py-2 font-semibold ${drill ? 'cursor-pointer outline-offset-1 hover:outline hover:outline-1 hover:outline-brand-400' : ''}`}
+                      className={`relative rounded py-2 font-semibold ${drill ? 'cursor-pointer outline-offset-1 hover:outline hover:outline-1 hover:outline-brand-400' : ''}`}
                       style={{
                         backgroundColor: v === 0 ? '#f8fafc' : `rgba(29, 63, 174, ${0.12 + v * 0.88})`,
                         color: v > 0.55 ? '#ffffff' : '#334155',
@@ -276,6 +277,15 @@ function HeatmapChart({ columns, rows, columnKind, onDrill }: Extract<InsightBlo
                       onClick={drill ? () => onDrill?.(drill) : undefined}
                     >
                       {Math.round(v * 100)}%
+                      {/* 期际变化角标(rubric 2.9):↑绿 ↓红,深色格用白字 */}
+                      {d != null && (
+                        <span
+                          className={`metric-num absolute right-1 top-0.5 text-[9px] font-bold ${v > 0.55 ? 'text-white/80' : d > 0 ? 'text-good' : 'text-bad'}`}
+                          title={`较上期 ${d > 0 ? '+' : ''}${d} 个百分点`}
+                        >
+                          {d > 0 ? '↑' : '↓'}{Math.abs(d)}
+                        </span>
+                      )}
                     </div>
                   )}
                 </td>
@@ -285,6 +295,9 @@ function HeatmapChart({ columns, rows, columnKind, onDrill }: Extract<InsightBlo
           ))}
         </tbody>
       </table>
+      {deltas && deltas.some((row) => row.some((d) => d != null)) && (
+        <p className="mt-2 text-[10px] text-slate-400">角标 = 较上期变化(百分点,±0.5 以内不标)。</p>
+      )}
     </div>
   );
 }
@@ -303,8 +316,12 @@ function RadarChart({ axes, series }: Extract<InsightBlock, { type: 'radar' }>) 
     return [cx + R * v * Math.cos(ang), cy + R * v * Math.sin(ang)];
   };
   const ring = (v: number) => axes.map((_, ai) => pt(ai, v).join(',')).join(' ');
+  const hasDeltas = series.some((s) => Array.isArray(s.deltas) && s.deltas.some((d) => d != null));
+  // 轴短名(变动表列头,五维固定序与组稿器一致)
+  const axisShort = ['提及', 'Top3', '首位', '口碑', '被引'];
   return (
-    <div className="flex flex-wrap items-start gap-4">
+    <div>
+      <div className="flex flex-wrap items-start gap-4">
       <svg viewBox={`0 0 ${W - 70} ${H}`} className="w-full max-w-[350px]" role="img">
         {[0.25, 0.5, 0.75, 1].map((v) => (
           <polygon key={v} points={ring(v)} fill="none" stroke="#e2e8f0" strokeWidth={v === 1 ? 1.2 : 0.8} strokeDasharray={v === 1 ? undefined : '3 3'} />
@@ -338,6 +355,40 @@ function RadarChart({ axes, series }: Extract<InsightBlock, { type: 'radar' }>) 
           </li>
         ))}
       </ul>
+      </div>
+      {/* 各轴较上期变化(rubric 2.9):↑绿 ↓红,±0.5pp 以内不标 */}
+      {hasDeltas && (
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full border-collapse text-center text-[11px]">
+            <thead>
+              <tr className="text-slate-400">
+                <th className="p-1.5 text-left font-medium">较上期(百分点)</th>
+                {axes.map((a, i) => (
+                  <th key={a} className="p-1.5 font-medium">{axisShort[i] ?? a}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {series.map((s) => (
+                <tr key={s.name} className="border-t border-slate-50">
+                  <td className="p-1.5 text-left font-medium text-slate-700">
+                    <span className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle" style={{ backgroundColor: nameColor(s.name) }} />
+                    {s.name}
+                  </td>
+                  {axes.map((a, i) => {
+                    const d = s.deltas?.[i];
+                    return (
+                      <td key={a} className="metric-num p-1.5">
+                        {d == null ? <span className="text-slate-300">—</span> : <span className={d > 0 ? 'font-semibold text-good' : 'font-semibold text-bad'}>{d > 0 ? '↑' : '↓'}{Math.abs(d)}</span>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

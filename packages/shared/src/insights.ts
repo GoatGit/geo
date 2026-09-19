@@ -73,6 +73,8 @@ export interface HeatmapBlock {
   rows: Array<{ name: string; cells: Array<number | null> }>;
   /** 列语义(下钻用):engine=引擎 slug 反查,layer=问题层原值;缺省不可点 */
   columnKind?: 'engine' | 'layer';
+  /** 期际变化(百分点,与 rows×columns 对齐;|Δ|<0.5pp 视为噪声置 null);首期无此字段 */
+  deltas?: Array<Array<number | null>>;
 }
 
 /** 多品牌维度形状对比(雷达):values 为 0-1 */
@@ -83,7 +85,12 @@ export interface RadarBlock {
   /** 图表上方的一句话结论(数据驱动的「所以呢」),由组稿器生成 */
   summary?: string;
   axes: string[];
-  series: Array<{ name: string; values: number[] }>;
+  series: Array<{
+    name: string;
+    values: number[];
+    /** 各轴较上期变化(百分点,null=上期无值或噪声);首期无此字段 */
+    deltas?: Array<number | null>;
+  }>;
 }
 
 /** 每日趋势(折线):points 按时间升序,value=null 表示当日无有效样本(断线) */
