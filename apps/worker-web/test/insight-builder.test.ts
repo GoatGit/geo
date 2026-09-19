@@ -218,4 +218,23 @@ describe('行业洞察组稿(运行 → 数据报告)', () => {
     const landscape = c.blocks.find((b) => b.title === 'AI 眼中的行业格局')!;
     expect(JSON.stringify(landscape)).not.toContain('品牌B');
   });
+
+  it('精品图表:0% 长尾折叠、n=0 不进象限、空引擎列被过滤', () => {
+    const fx = fixture();
+    // 追加 3 个零提及零样本品牌 + 1 个全空引擎
+    fx.brands = [...fx.brands, ...[3, 4, 5].map((id) => ({
+      brandId: id, name: `零品牌${id}`, valid: 0, mentioned: 0, ranked: 0, top3: 0, top1: 0,
+      avgRank: null, questions: 0, answers: 0, failed: 0, quotaBlocked: 0,
+    }))];
+    fx.engineHits = [...fx.engineHits, { brandId: 1, engine: 'yuanbao', rate: 0, valid: 0 }];
+    const c = composeIndustryInsight(fx);
+    const rank = c.blocks.find((b) => b.type === 'barRank' && b.title === '品牌有效提及率排行') as BarRankBlock;
+    expect(rank.items.every((i) => i.name !== '零品牌3')).toBe(true); // 0% 且 n=0 折叠
+    expect(rank.note).toContain('另有 3 家提及率 0%');
+    const scatter = c.blocks.find((b) => b.type === 'scatter')!;
+    expect(JSON.stringify(scatter)).not.toContain('零品牌'); // n=0 不画点
+    expect((scatter as { note?: string }).note).toContain('另有 3 家本期无有效提及');
+    const heat = c.blocks.find((b) => b.type === 'heatmap') as HeatmapBlock;
+    expect(heat.columns).not.toContain('yuanbao'); // 全空引擎列被过滤
+  });
 });

@@ -172,6 +172,9 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
               : '较上期,头部格局基本未变。';
       }
     }
+    // 0% 长尾折叠:提及率 0 且无有效样本的品牌整列罗列只添噪声(12 家榜单 8 家全 0 的实测)
+    const listed = sorted.filter((b) => rateOf(b.mentioned, b.valid) > 0 || b.valid >= MIN_SAMPLE);
+    const zeroHidden = sorted.length - listed.length;
     blocks.push({
       type: 'barRank',
       title: '品牌有效提及率排行',
@@ -181,10 +184,10 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
           : head
             ? `${head.name} 以 ${pctText(headRate)} 领跑监测品牌。`
             : '') + deltaLine,
-      note: `条目右侧 n = 该品牌有效回答数(样本量),n<${MIN_SAMPLE} 的比率仅供参考`,
+      note: `条目右侧 n = 该品牌有效回答数(样本量),n<${MIN_SAMPLE} 的比率仅供参考${zeroHidden > 0 ? `;另有 ${zeroHidden} 家提及率 0%(无有效提及,未列出)` : ''}`,
       total: 100,
       unit: '%',
-      items: sorted.map((b) => {
+      items: listed.map((b) => {
         const v = Math.round(rateOf(b.mentioned, b.valid) * 1000) / 10;
         return {
           name: b.name,
@@ -218,8 +221,8 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
     } satisfies FunnelBlock);
   }
 
-  // ④ 品牌 × 引擎命中率热力图
-  const engines = [...new Set(agg.engineHits.map((e) => e.engine))].sort();
+  // ④ 品牌 × 引擎命中率热力图(整列无样本的引擎不显示,避免全空表占版面)
+  const engines = [...new Set(agg.engineHits.filter((e) => e.valid > 0).map((e) => e.engine))].sort();
   if (engines.length > 0 && agg.brands.length > 0) {
     const cell = new Map<string, { rate: number; valid: number }>();
     for (const e of agg.engineHits) cell.set(`${e.brandId}:${e.engine}`, { rate: e.rate, valid: e.valid });
@@ -365,26 +368,28 @@ export function composeIndustryInsight(agg: IndustryAggregates, prev?: Map<strin
     } satisfies TrendBlock);
   }
 
-  // ⑨ 品牌象限(提及率 × Top3 率)
-  if (sorted.length >= 2 && agg.funnel.answers > 0) {
-    const dual = sorted.filter((b) => rateOf(b.mentioned, b.valid) >= 0.5 && rateOf(b.top3, b.ranked) >= 0.5);
-    const weak = sorted.filter((b) => rateOf(b.mentioned, b.valid) < 0.3);
+  // ⑨ 品牌象限(提及率 × Top3 率);无有效样本(n=0)的品牌不画点,以注记说明
+  const plotted = sorted.filter((b) => b.valid > 0);
+  const unplotted = sorted.length - plotted.length;
+  if (plotted.length >= 2 && agg.funnel.answers > 0) {
+    const dual = plotted.filter((b) => rateOf(b.mentioned, b.valid) >= 0.5 && rateOf(b.top3, b.ranked) >= 0.5);
+    const weak = plotted.filter((b) => b.valid >= MIN_SAMPLE && rateOf(b.mentioned, b.valid) < 0.3);
     blocks.push({
       type: 'scatter',
       title: '品牌可见度象限',
       summary: dual.length > 0
         ? `${dual.map((b) => b.name).join('、')} 落在「提及+推荐」双强区${weak.length > 0 ? `,${weak.map((b) => b.name).join('、')} 仍在待补量区` : ''}。`
         : '暂无品牌同时跨过提及与推荐双线,格局尚未固化。',
-      note: '横轴=有效提及率,纵轴=Top3 率,气泡=有效回答量',
+      note: `横轴=有效提及率,纵轴=Top3 率,气泡=有效回答量${unplotted > 0 ? `;另有 ${unplotted} 家本期无有效提及,未画出` : ''}`,
       xLabel: '有效提及率',
       yLabel: 'Top3 率',
       diagonal: true,
-      points: sorted.map((b) => ({
+      points: plotted.map((b) => ({
         name: b.name,
         x: r3(rateOf(b.mentioned, b.valid)) ?? 0,
         y: r3(rateOf(b.top3, b.ranked)) ?? 0,
         size: b.valid,
-        note: `平均名次 ${b.avgRank ?? '—'}`,
+        note: b.avgRank != null ? `平均名次 ${b.avgRank}` : undefined,
       })),
     } satisfies ScatterBlock);
   }

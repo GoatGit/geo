@@ -319,11 +319,15 @@ function TrendChart({ unit, points }: Extract<InsightBlock, { type: 'trend' }>) 
 function ScatterChart({ xLabel, yLabel, diagonal, points, groups }: Extract<InsightBlock, { type: 'scatter' }>) {
   const W = 520;
   const H = 360;
-  const m = { l: 46, r: 20, t: 14, b: 40 };
+  const m = { l: 46, r: 24, t: 18, b: 40 };
   const iw = W - m.l - m.r;
   const ih = H - m.t - m.b;
-  const X = (v: number) => m.l + v * iw;
-  const Y = (v: number) => m.t + (1 - v) * ih;
+  // 比率域固定 0-100%:坐标与刻度同域归一,数据点 clamp 防溢出(此前 axisMax 随数据算出 1.1,
+  // 网格画到负坐标、点越出画布、标签被截断)
+  const axisMax = 1;
+  const clamp01 = (v: number) => Math.min(1, Math.max(0, Number.isFinite(v) ? v : 0));
+  const X = (v: number) => m.l + clamp01(v / axisMax) * iw;
+  const Y = (v: number) => H - m.b - clamp01(v / axisMax) * ih;
   const maxBySize = Math.max(...points.map((p) => p.size ?? 1), 1);
   const colorOf = (p: (typeof points)[number]) => {
     const g = groups?.find((x) => x.key === p.group);
@@ -332,31 +336,41 @@ function ScatterChart({ xLabel, yLabel, diagonal, points, groups }: Extract<Insi
     if (g?.color === 'brand') return NAVY;
     return GROUP_COLORS[p.group ?? 'normal'] ?? BLUE;
   };
-  const ticks = [0, 0.1, 0.2, 0.3, 0.4, 0.5];
-  const maxTick = Math.max(0.5, ...points.map((p) => Math.max(p.x, p.y))) + 0.05;
-  const axisMax = Math.ceil(maxTick * 10) / 10;
+  const ticks = [0, 0.25, 0.5, 0.75, 1];
+  // 标签防溢出:点落在右半区时标签翻到点左侧,画布内永远完整
+  const labelLeft = (px: number) => px > W * 0.62;
   return (
     <div>
       <svg width="100%" viewBox={`0 0 ${W} ${H}`} role="img">
-        {ticks.filter((t) => t <= axisMax).map((t) => (
+        {ticks.map((t) => (
           <g key={t}>
-            <line x1={X(t / axisMax)} y1={Y(0)} x2={X(t / axisMax)} y2={Y(axisMax)} stroke="#eef2f7" />
-            <line x1={X(0)} y1={Y(t / axisMax)} x2={X(axisMax)} y2={Y(t / axisMax)} stroke="#eef2f7" />
-            <text x={X(t / axisMax)} y={H - m.b + 16} textAnchor="middle" fontSize={10} fill="#94a3b8">{Math.round(t * 100)}%</text>
-            <text x={m.l - 8} y={Y(t / axisMax) + 3} textAnchor="end" fontSize={10} fill="#94a3b8">{Math.round(t * 100)}%</text>
+            <line x1={X(t)} y1={Y(0)} x2={X(t)} y2={Y(1)} stroke="#eef2f7" />
+            <line x1={X(0)} y1={Y(t)} x2={X(1)} y2={Y(t)} stroke="#eef2f7" />
+            <text x={X(t)} y={H - m.b + 16} textAnchor="middle" fontSize={10} fill="#94a3b8">{Math.round(t * 100)}%</text>
+            <text x={m.l - 8} y={Y(t) + 3} textAnchor="end" fontSize={10} fill="#94a3b8">{Math.round(t * 100)}%</text>
           </g>
         ))}
-        <line x1={X(0)} y1={Y(0)} x2={X(axisMax)} y2={Y(0)} stroke="#cbd5e1" />
-        <line x1={X(0)} y1={Y(0)} x2={X(0)} y2={Y(axisMax)} stroke="#cbd5e1" />
+        <line x1={X(0)} y1={Y(0)} x2={X(1)} y2={Y(0)} stroke="#cbd5e1" />
+        <line x1={X(0)} y1={Y(0)} x2={X(0)} y2={Y(1)} stroke="#cbd5e1" />
         {diagonal && (
           <line x1={X(0)} y1={Y(0)} x2={X(1)} y2={Y(1)} stroke="#94a3b8" strokeDasharray="4 4" />
         )}
         {points.map((p) => {
           const r = 5 + ((p.size ?? 1) / maxBySize) * 9;
+          const px = X(p.x);
+          const py = Y(p.y);
+          const flip = labelLeft(px);
           return (
             <g key={p.name}>
-              <circle cx={X(p.x)} cy={Y(p.y)} r={r} fill={colorOf(p)} fillOpacity={0.92} />
-              <text x={X(p.x) + r + 4} y={Y(p.y) + 3} fontSize={11} fontWeight={600} fill={colorOf(p) === GRAY ? '#64748b' : colorOf(p)}>
+              <circle cx={px} cy={py} r={r} fill={colorOf(p)} fillOpacity={0.92} />
+              <text
+                x={flip ? px - r - 4 : px + r + 4}
+                y={py + 3}
+                textAnchor={flip ? 'end' : 'start'}
+                fontSize={11}
+                fontWeight={600}
+                fill={colorOf(p) === GRAY ? '#64748b' : colorOf(p)}
+              >
                 {p.name}
                 {p.note ? ` ${p.note}` : ''}
               </text>
