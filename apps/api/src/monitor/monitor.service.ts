@@ -474,6 +474,30 @@ export class MonitorService {
   /** 竞品透视(docs/01 §3.4):同批查询同口径解析。 */
   async competitors(brandId: number, days: number) {
     const since = new Date(Date.now() - days * 24 * 3600 * 1000);
+    // 本品三率(与 rankings 同口径):作为均值对比的"本品"侧
+    const selfRow = (await this.db.execute(sql`
+      select count(*) filter (where true) as valid,
+             count(*) filter (where mf.mentioned) as mentioned,
+             count(*) filter (where mf.mentioned and mf.rank <= 3) as top3,
+             count(*) filter (where mf.mentioned and mf.rank = 1) as top1
+      from mention_facts mf
+      where mf.brand_id = ${brandId} and mf.ran_at >= ${since}
+        and mf.subject_kind = 'self'
+    `)) as unknown as { rows: Array<{ valid: string; mentioned: string; top3: string; top1: string }> };
+    const s = selfRow.rows[0];
+    const rate = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 1000) / 1000 : null);
+    const selfRates = {
+      mention: rate(Number(s?.mentioned ?? 0), Number(s?.valid ?? 0)),
+      top3: rate(Number(s?.top3 ?? 0), Number(s?.valid ?? 0)),
+      top1: rate(Number(s?.top1 ?? 0), Number(s?.valid ?? 0)),
+    };
+    const benchmark = await this.benchmark(brandId, since, {
+      mentioned: Number(s?.mentioned ?? 0),
+      top3: Number(s?.top3 ?? 0),
+      top1: Number(s?.top1 ?? 0),
+      valid: Number(s?.valid ?? 0),
+      ranked: Number(s?.valid ?? 0),
+    });
     const res = await this.db.execute(sql`
       select
         mf.subject_key, mf.subject_name,
@@ -488,7 +512,7 @@ export class MonitorService {
       order by mentions desc
       limit 50
     `);
-    return res.rows.map((r) => {
+    const competitors = res.rows.map((r) => {
       const row = r as Record<string, string>;
       const runs = Number(row.runs);
       const mentions = Number(row.mentions);
@@ -504,6 +528,7 @@ export class MonitorService {
         top1Rate: rate(top1),
       };
     });
+    return { competitors, selfRates, benchmark };
   }
 
     /** 引用源分析(docs/01 §3.5):明细 + 信源平台偏好 + 自有占比。 */

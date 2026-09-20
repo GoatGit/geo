@@ -6,7 +6,6 @@ import { MetricCardView } from '@/components/metric-card';
 import { EmptyState, PageHeader, Skeleton, pct } from '@/components/ui';
 import { useRankings } from '@/lib/queries';
 import { EvidenceModal } from '@/components/evidence-modal';
-import { BenchmarkBars } from '@/components/benchmark-bars';
 import { LayerSankey } from '@/components/layer-sankey';
 
 /** 排名透视(docs/01 §3.3,对标竞品全景矩阵重构):
@@ -126,18 +125,8 @@ export default function RankingsPage() {
         </div>
       </section>
 
-      {/* ===== 品牌洞察图表:问题层→结局 桑基 + 本品 vs 行业均值 ===== */}
+      {/* ===== 品牌洞察图表:问题层→结局 桑基(本品 vs 行业均值在竞品透视) ===== */}
       {data.layerSankey && data.layerSankey.length > 0 && <LayerSankey rows={data.layerSankey} />}
-      {data.benchmark?.industry && (
-        <BenchmarkBars
-          data={data.benchmark}
-          selfRates={{
-            mention: data.cards.find((c) => c.metric === 'mentionRate')?.value ?? null,
-            top3: data.cards.find((c) => c.metric === 'top3Rate')?.value ?? null,
-            top1: data.cards.find((c) => c.metric === 'top1Rate')?.value ?? null,
-          }}
-        />
-      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <select

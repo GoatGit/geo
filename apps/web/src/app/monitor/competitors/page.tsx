@@ -4,6 +4,7 @@ import { engineLabel } from '@geo/shared';
 import { useQuery } from '@tanstack/react-query';
 import { api, useBrandId } from '@/lib/queries';
 import { EmptyState, PageHeader, Skeleton, pct } from '@/components/ui';
+import { BenchmarkBars } from '@/components/benchmark-bars';
 
 interface CompetitorsMatrixDto {
   rows: Array<{
@@ -24,13 +25,25 @@ interface LeaderRow {
   top1Rate: number | null;
 }
 
+interface CompetitorsDto {
+  competitors: LeaderRow[];
+  selfRates: { mention: number | null; top3: number | null; top1: number | null };
+  benchmark: {
+    industry: string | null;
+    mentionRate: number | null;
+    top3Rate: number | null;
+    top1Rate: number | null;
+    brandCount: number;
+  };
+}
+
 /** 竞品透视(docs/01 §3.4):竞品榜单 + 竞品×引擎 分引擎对比热力矩阵(同批查询同口径)。 */
 export default function CompetitorsPage() {
   const brandId = useBrandId();
   const days = 7;
   const leader = useQuery({
     queryKey: ['competitors', brandId],
-    queryFn: () => api<LeaderRow[]>(`/monitor/competitors?brand=${brandId}&days=${days}`),
+    queryFn: () => api<CompetitorsDto>(`/monitor/competitors?brand=${brandId}&days=${days}`),
     enabled: !!brandId,
   });
   const matrix = useQuery({
@@ -43,7 +56,9 @@ export default function CompetitorsPage() {
   if (leader.isLoading || matrix.isLoading) return <Skeleton />;
   const rows = matrix.data?.rows ?? [];
   const engines = matrix.data?.engines ?? [];
-  const board = leader.data ?? [];
+  const board = leader.data?.competitors ?? [];
+  const selfRates = leader.data?.selfRates;
+  const benchmark = leader.data?.benchmark;
 
   const heat = (v: number | null): string => {
     if (v == null) return 'transparent';
@@ -52,7 +67,7 @@ export default function CompetitorsPage() {
   };
   const heatText = (v: number | null): string => (v != null && v > 0.55 ? '#f4f6f3' : 'inherit');
 
-  const top = leader.data?.[0];
+  const top = leader.data?.competitors?.[0];
   return (
     <div className="space-y-6">
       <PageHeader
@@ -78,6 +93,13 @@ export default function CompetitorsPage() {
             <p className="metric-num mt-1 text-2xl font-extrabold text-slate-900">{pct(top.top3Rate)}</p>
           </div>
         </section>
+      )}
+
+      {benchmark?.industry && selfRates && (
+        <BenchmarkBars
+          data={{ ...benchmark, selfMentionRate: selfRates.mention }}
+          selfRates={{ mention: selfRates.mention, top3: selfRates.top3, top1: selfRates.top1 }}
+        />
       )}
 
       {board.length === 0 && rows.length === 0 ? (
