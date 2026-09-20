@@ -166,18 +166,15 @@ function BarRankChart({ total, unit, items, onDrill }: Extract<InsightBlock, { t
             <div className="h-4 flex-1 overflow-hidden rounded-sm bg-slate-100">
               <div className="h-full rounded-sm" style={{ width: `${(it.value / max) * 100}%`, backgroundColor: color }} />
             </div>
-            <span className="metric-num w-16 shrink-0 text-right font-medium" style={{ color: it.group === 'highlight' ? ORANGE : INK }}>
+            <span
+              className="metric-num w-[76px] shrink-0 text-right font-medium"
+              style={{ color: it.group === 'highlight' ? ORANGE : INK }}
+              title={it.n != null ? `${it.value}${unit === '%' ? '%' : `/${total}`} / 样本量 ${it.n}(样本越小比率波动越大)` : undefined}
+            >
               {unit === '%' ? `${it.value}%` : `${it.value}/${total}`}
+              {it.n != null && <span className="text-[10px] font-normal text-slate-400">/{it.n}</span>}
             </span>
             {delta != null && <span className="metric-num w-12 shrink-0 text-[11px]">{delta}</span>}
-            {it.n != null && (
-              <span
-                className="metric-num w-10 shrink-0 text-right text-[10px] text-slate-400"
-                title={`该品牌有效回答 ${it.n} 条,样本量越小比率波动越大`}
-              >
-                n={it.n}
-              </span>
-            )}
           </div>
         );
       })}
