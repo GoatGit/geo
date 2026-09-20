@@ -41,6 +41,30 @@ export class MonitorService {
 
   /** 排名透视聚合 DTO(docs/01 §3.3):指标卡 + 矩阵 + 漏斗 + 引擎分化 + 健康。 */
   async rankings(input: { brandId: number; days: number; engine?: EngineId }) {
+    const direct = await this.rankingsWindow(input);
+    // 所选窗口无有效数据 → 依序回落更大窗口(docs/02 §8:无数据回退最近完成日,
+    // 旧数据必须保留展示;今日采集中断/被拦截时页面不能看起来像数据被清空)
+    const validOf = (r: Awaited<ReturnType<MonitorService['rankingsWindow']>>) =>
+      r.cards[0]?.denominator ?? 0;
+    if (validOf(direct) > 0 || input.days >= 30) return direct;
+    for (const d of [7, 30].filter((x) => x > input.days)) {
+      const alt = await this.rankingsWindow({ ...input, days: d });
+      if (validOf(alt) > 0) {
+        return {
+          ...alt,
+          fallback: {
+            requestedDays: input.days,
+            actualDays: d,
+            quotaBlocked: direct.excluded.quotaBlocked,
+            failed: direct.excluded.failed,
+          },
+        };
+      }
+    }
+    return direct;
+  }
+
+  private async rankingsWindow(input: { brandId: number; days: number; engine?: EngineId }) {
     const since = new Date(Date.now() - input.days * 24 * 3600 * 1000);
     const engineFilter = input.engine ? sql`and mf.engine = ${input.engine}` : sql``;
 

@@ -19,6 +19,8 @@ export function useBrandId(): number | null {
 }
 
 export interface RankingsDto {
+  /** 所选窗口无数据时自动回落到更大窗口(旧数据保留展示);仅回落时存在 */
+  fallback?: { requestedDays: number; actualDays: number; quotaBlocked: number; failed: number };
   cards: Array<{
     metric: string;
     value: number | null;

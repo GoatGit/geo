@@ -71,6 +71,19 @@ export default function RankingsPage() {
         }
       />
 
+      {/* 窗口回落提示:今日/近 N 天无新数据时自动展示更大窗口,旧数据不清空 */}
+      {data.fallback && (
+        <div className="rise rounded-lg border border-warn/30 bg-warn-50 px-4 py-2.5 text-xs leading-5 text-warn">
+          <b>{data.fallback.requestedDays === 1 ? '今日' : `近 ${data.fallback.requestedDays} 天`}暂无新数据</b>
+          {data.fallback.quotaBlocked > 0
+            ? `(采集被配额拦截 ${data.fallback.quotaBlocked} 次,引擎额度按日恢复)`
+            : data.fallback.failed > 0
+              ? `(${data.fallback.failed} 次采集失败)`
+              : '(本轮采集尚未完成)'}
+          ——已为你展示<b>近 {data.fallback.actualDays} 天</b>的数据;次日额度恢复后自动切回。
+        </div>
+      )}
+
       <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <MetricCardView title="提及率" card={data.cards.find((c) => c.metric === 'mentionRate')} spark={data.trend.map((t) => t.mentionRate)} sparkLabel="提及率" />
         <MetricCardView title="Top3 率" card={data.cards.find((c) => c.metric === 'top3Rate')} spark={data.trend.map((t) => t.top3Rate)} sparkLabel="Top3 率" />
