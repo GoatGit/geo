@@ -3,7 +3,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Redis } from 'ioredis';
 import { brands, collectionPlans, loadPlatformSettings, monitoringQuestions, recognitionEntries, subscriptions } from '@geo/db';
-import { PLAN_LIMITS, type PlanTier, type QuestionType } from '@geo/shared';
+import { PLAN_LIMITS, INSIGHT_QUESTION_LAYERS, type PlanTier, type QuestionType } from '@geo/shared';
 import { InsightAgent } from '@geo/insight-agent';
 import { DB, REDIS } from '../common/infra.module';
 
@@ -81,9 +81,36 @@ export class QuestionsService {
     const syncTimeout = Math.min(insightCfg.timeoutMs, 3_000);
     const llmTypes = new Map<object, QuestionType>();
     const llmExpansions = new Map<object, string>();
+    // 语义分层由 LLM 定义(与行业侧同一 buildLayerPrompt/校验):失败回落 null →「未分层」,
+    // 由列表读取时的惰性兜底再补
+    const llmLayers = new Map<string, string>();
     if (insightCfg.enabled) {
       const year = new Date().getFullYear();
+      const layerJudge = (async () => {
+        try {
+          const texts = input.items.map((i) => i.text);
+          const { buildLayerPrompt, validateLayerOutput, chatCompletion } = await import('@geo/insight-agent');
+          const p = buildLayerPrompt({ industry: brandName, questions: texts, layers: INSIGHT_QUESTION_LAYERS });
+          const raw = await chatCompletion(
+            {
+              protocol: insightCfg.protocol as 'openai' | 'anthropic',
+              endpoint: insightCfg.endpoint,
+              apiKey: insightCfg.apiKey,
+              model: insightCfg.model,
+              timeoutMs: Math.min(insightCfg.timeoutMs, 8_000),
+            },
+            { system: p.system, user: p.user, maxTokens: 1200 },
+          );
+          const m = raw.text.match(/\{[\s\S]*\}/);
+          if (!m) return;
+          const judged = validateLayerOutput(JSON.parse(m[0]), { questions: texts, layers: INSIGHT_QUESTION_LAYERS });
+          if (judged.ok) for (const it of judged.value.items) llmLayers.set(it.q, it.layer);
+        } catch {
+          // 静默:分层缺失可由读取侧惰性兜底
+        }
+      })();
       await Promise.all([
+        layerJudge,
         Promise.all(
           input.items.map(async (item) => {
             const r = await agent.classify(item.text, syncTimeout);
@@ -117,6 +144,7 @@ export class QuestionsService {
             type,
             textRaw: item.text,
             textExpanded: llmExpansions.get(item) ?? expandQuestion(item.text, brandName),
+            groupName: llmLayers.get(item.text) ?? null,
           })
           .returning()
       )[0]!;
@@ -151,11 +179,48 @@ export class QuestionsService {
 
   async list(accountId: number, brandId: number) {
     await this.planOf(brandId, accountId);
-    return this.db
+    const rows = await this.db
       .select()
       .from(monitoringQuestions)
       .where(and(eq(monitoringQuestions.brandId, brandId), eq(monitoringQuestions.status, 'active')));
+    // 惰性分层兜底:历史问题(分层功能前创建/LLM 当次失败)group_name 为空 →
+    // 首次列表读取时 LLM 批量补齐并回写;失败静默(桑基仍按「未分层」展示,不阻断)
+    const pending = rows.filter((r) => r.groupName == null);
+    if (pending.length > 0) {
+      void this.backfillLayers(brandId, pending.map((r) => ({ id: r.id, text: r.textRaw }))).catch(() => undefined);
+    }
+    return rows;
   }
+
+  /** 历史问题 LLM 分层兜底:批量归类(与创建路径同一 prompt/校验),回写 group_name。 */
+  private async backfillLayers(brandId: number, items: Array<{ id: number; text: string }>): Promise<void> {
+    const insightCfg = (await loadPlatformSettings(this.db)).insightAgent;
+    if (!insightCfg.enabled || !insightCfg.endpoint || !insightCfg.apiKey || !insightCfg.model) return;
+    const brand = (await this.db.select({ name: brands.name }).from(brands).where(eq(brands.id, brandId)).limit(1))[0];
+    const { buildLayerPrompt, validateLayerOutput, chatCompletion } = await import('@geo/insight-agent');
+    const texts = items.map((i) => i.text);
+    const p = buildLayerPrompt({ industry: brand?.name ?? '', questions: texts, layers: INSIGHT_QUESTION_LAYERS });
+    const raw = await chatCompletion(
+      {
+        protocol: insightCfg.protocol as 'openai' | 'anthropic',
+        endpoint: insightCfg.endpoint,
+        apiKey: insightCfg.apiKey,
+        model: insightCfg.model,
+        timeoutMs: Math.min(insightCfg.timeoutMs, 15_000),
+      },
+      { system: p.system, user: p.user, maxTokens: 1500 },
+    );
+    const m = raw.text.match(/\{[\s\S]*\}/);
+    if (!m) return;
+    const judged = validateLayerOutput(JSON.parse(m[0]), { questions: texts, layers: INSIGHT_QUESTION_LAYERS });
+    if (!judged.ok) return;
+    for (const it of judged.value.items) {
+      const row = items.find((i) => i.text === it.q);
+      if (row) await this.db.update(monitoringQuestions).set({ groupName: it.layer }).where(eq(monitoringQuestions.id, row.id));
+    }
+  }
+
+
 
   /** 删除=归档:历史数据保留,仅停止后续采集(docs/01 §3.2)。 */
   async deleteQuestion(accountId: number, brandId: number, questionId: number) {
