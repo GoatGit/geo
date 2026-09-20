@@ -1171,7 +1171,7 @@ export function waitingInsight(agg: IndustryAggregates, diag: CollectDiagnosis):
   const reason =
     diag.totalRuns === 0
       ? diag.autoCollected
-        ? `该行业此前没有采集记录,本次生成已自动触发首轮采集 —— 约 5~15 分钟采集完成后,再点一次「生成新一期」即可出完整报告。`
+        ? `该行业此前没有采集记录,本次生成已自动触发首轮采集 —— 采集约 20~60 分钟(视题量与引擎登录态)完成,期间可再次采集补充样本;之后再点「生成新一期」出完整报告。`
         : `该行业还没有采集数据:生成报告不会自动采集。请先在行业配置面板点「立即采集」,完成后重新生成。`
       : `近 ${agg.windowDays ?? 30} 天 0 条有效回答:采集任务失败 ${diag.failed} 次、被配额拦截 ${diag.quotaBlocked} 次 —— 通常是引擎登录态缺失,请在账号池完成登录后重新采集。`;
   return {
