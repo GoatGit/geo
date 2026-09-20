@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { RateLimit, RateLimitGuard } from '../common/rate-limit.guard';
 import { IsIn, IsInt, IsOptional, IsString, Length, MaxLength, Min } from 'class-validator';
 import type { Request } from 'express';
 import { currentAccount } from '../common/auth';
@@ -110,6 +111,8 @@ export class BrandsController {
   /** AI 品牌挖掘:基于现有档案(名称/行业/官网/描述)生成结构化品牌画像 + 建议竞品。
    *  LLM 生成 20-40s,超过网关代理超时 → 改为后台执行立即返回,前端轮询资料库与品牌资料。
    *  产物自动入资料库(source='dig'),竞品建议由用户在既有「待确认」机制确认后生效。 */
+  @UseGuards(RateLimitGuard)
+  @RateLimit(3, 60, 'brand-dig')
   @Post(':id/dig')
   async dig(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
     const accountId = currentAccount(req).accountId;

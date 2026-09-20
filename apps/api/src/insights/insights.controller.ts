@@ -17,6 +17,7 @@ import {
 import type { Request, Response } from 'express';
 import { IsArray, IsBoolean, IsIn, IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { AdminGuard } from '../admin/admin.guard';
+import { RateLimit, RateLimitGuard } from '../common/rate-limit.guard';
 import { currentAccount, Public, verifyAccessToken } from '../common/auth';
 import { loadEnv } from '../config/env';
 import { InsightsService, type UpsertInsightInput } from './insights.service';
@@ -167,8 +168,10 @@ export class InsightsController {
     return this.insights.assertOwnedThen(id, currentAccount(req).accountId, () => this.insights.listIndustryBrands(id));
   }
 
+  @UseGuards(RateLimitGuard)
+  @RateLimit(6, 60, 'insights-suggest-brands')
   @Post('industries/:id/suggest-brands')
-  mySuggestBrands(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
+  suggestBrands(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
     return this.insights.suggestBrandsForAccount(currentAccount(req).accountId, id);
   }
 
@@ -220,6 +223,8 @@ export class InsightsController {
     );
   }
 
+  @UseGuards(RateLimitGuard)
+  @RateLimit(6, 60, 'insights-suggest-questions')
   @Post('industries/:id/questions')
   mySuggestQuestions(
     @Req() req: Request,
@@ -451,6 +456,8 @@ export class AdminInsightsController {
   }
 
   /** 运行行业洞察:数据聚合在 worker 队列执行,前端轮询 buildStatus。 */
+  @UseGuards(RateLimitGuard)
+  @RateLimit(4, 60, 'insights-run')
   @Post('industries/:id/run')
   runIndustry(@Param('id', ParseIntPipe) id: number, @Body() dto: RunInsightDto) {
     return this.insights.runIndustry(id, dto.windowDays ?? null);

@@ -1,5 +1,6 @@
 import {
   Body,
+  UseGuards,
   Controller,
   Get,
   HttpException,
@@ -17,6 +18,7 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Request, Response } from 'express';
 import { IsIn, IsInt } from 'class-validator';
 import { Queue } from 'bullmq';
+import { RateLimit, RateLimitGuard } from '../common/rate-limit.guard';
 import type { Redis } from 'ioredis';
 import { REPORT_TYPES, PLAN_LIMITS, PLAN_LABELS, type ReportType } from '@geo/shared';
 import { brands, reports } from '@geo/db';
@@ -90,6 +92,8 @@ export class ReportsController implements OnModuleDestroy {
   }
 
   /** 手动触发生成(docs/05 §6);周/月报另由 worker cron 自动生成。套餐门控 + 当日频控。 */
+  @UseGuards(RateLimitGuard)
+  @RateLimit(4, 60, 'report-generate')
   @Post('generate')
   async generate(@Req() req: Request, @Body() dto: GenerateReportDto) {
     const account = currentAccount(req);

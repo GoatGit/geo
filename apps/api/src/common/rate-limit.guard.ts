@@ -2,6 +2,8 @@ import { CanActivate, ExecutionContext, HttpException, HttpStatus, Inject, Injec
 import { Reflector } from '@nestjs/core';
 import type { Redis } from 'ioredis';
 import { REDIS } from './infra.module';
+import { loadEnv } from '../config/env';
+import { verifyAccessToken } from './auth';
 
 export const RATE_LIMIT_KEY = 'rate-limit';
 
@@ -25,6 +27,20 @@ function clientIp(req: { headers: Record<string, unknown>; ip?: string; socket?:
   return first || req.ip || req.socket?.remoteAddress || 'unknown';
 }
 
+/** 限流主体:登录请求优先按账号(同办公网 NAT 不互相误伤),匿名按 IP。 */
+function actorId(req: { headers: Record<string, unknown> }): string {
+  const header = req.headers.authorization;
+  if (typeof header === 'string' && header.startsWith('Bearer ')) {
+    try {
+      const accountId = verifyAccessToken(loadEnv(), header.slice(7)).accountId;
+      return `acct:${accountId}`;
+    } catch {
+      // 无效 token 落回 IP
+    }
+  }
+  return `ip:${clientIp(req)}`;
+}
+
 /**
  * 公开端点限流(登录/验证码/支付回调等无鉴权面):
  * Redis 不可用时 fail-open(限流是防护层,不能反过来成为登录不可用的单点),但记录告警。
@@ -44,7 +60,7 @@ export class RateLimitGuard implements CanActivate {
       ip?: string;
       socket?: { remoteAddress?: string };
     }>();
-    const key = `rl:${rule.name}:${clientIp(req)}`;
+    const key = `rl:${rule.name}:${actorId(req)}`;
     try {
       const n = await this.redis.incr(key);
       if (n === 1) await this.redis.expire(key, rule.windowSec);
