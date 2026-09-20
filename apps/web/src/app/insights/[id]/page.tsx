@@ -7,7 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Badge, EmptyState, Skeleton } from '@/components/ui';
 import { InsightBlocks } from '@/components/insight-charts';
 import { InsightFactsDrawer } from '@/components/insight-facts-drawer';
-import { api } from '@/lib/api';
+import { api, apiDownload } from '@/lib/api';
 import type { InsightDetailDto, InsightDrill } from '@geo/shared';
 
 /**
@@ -42,6 +42,7 @@ export default function InsightDetailPage() {
 
   // 1.5 数字下钻:图表数字点击 → 事实明细抽屉(排行条目/热力格子/桑基标签)
   const [drill, setDrill] = useState<InsightDrill | null>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   if (query.isLoading) return <Skeleton />;
   if (query.error || !query.data) {
@@ -66,14 +67,31 @@ export default function InsightDetailPage() {
               <button className="btn-soft h-8 px-3 text-xs" onClick={() => router.back()} title="返回上一页">
                 ← 返回
               </button>
-              <a
-                href={`/api/insights/${d.id}/pdf`}
-                className="btn-soft h-8 px-3 text-xs"
-                download
+              {/* 带 token 的 blob 下载:裸 <a download> 不带 Authorization,草稿报告会被
+                  404 的 JSON 错误体当作文件存下来(实测 insight-5.json) */}
+              <button
+                className="btn-soft h-8 px-3 text-xs disabled:opacity-50"
+                disabled={pdfBusy}
                 title="下载 PDF 版报告"
+                onClick={async () => {
+                  setPdfBusy(true);
+                  try {
+                    const hasToken = typeof window !== 'undefined' && !!localStorage.getItem('geo.accessToken');
+                    // 匿名访客(已发布报告)走直链;登录用户走带 token 的 blob 下载
+                    if (!hasToken) {
+                      window.open(`/api/insights/${d.id}/pdf`, '_blank');
+                      return;
+                    }
+                    await apiDownload(`/insights/${d.id}/pdf`, `青柠GEO-行业洞察-${d.industry}-${d.issue || d.id}.pdf`);
+                  } catch (e) {
+                    window.alert((e as Error).message);
+                  } finally {
+                    setPdfBusy(false);
+                  }
+                }}
               >
-                下载 PDF
-              </a>
+                {pdfBusy ? '生成中…' : '下载 PDF'}
+              </button>
             </span>
           </p>
           <h1 className="mt-3 text-[30px] font-bold leading-tight tracking-tight text-slate-900">{d.title}</h1>
