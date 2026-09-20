@@ -474,7 +474,7 @@ export class MonitorService {
   /** 竞品透视(docs/01 §3.4):同批查询同口径解析。 */
   async competitors(brandId: number, days: number) {
     const since = new Date(Date.now() - days * 24 * 3600 * 1000);
-    // 本品三率(与 rankings 同口径):作为均值对比的"本品"侧
+    // 本品三率(与 rankings 同口径):作为对比的"本品"侧
     const selfRow = (await this.db.execute(sql`
       select count(*) filter (where true) as valid,
              count(*) filter (where mf.mentioned) as mentioned,
@@ -491,13 +491,6 @@ export class MonitorService {
       top3: rate(Number(s?.top3 ?? 0), Number(s?.valid ?? 0)),
       top1: rate(Number(s?.top1 ?? 0), Number(s?.valid ?? 0)),
     };
-    const benchmark = await this.benchmark(brandId, since, {
-      mentioned: Number(s?.mentioned ?? 0),
-      top3: Number(s?.top3 ?? 0),
-      top1: Number(s?.top1 ?? 0),
-      valid: Number(s?.valid ?? 0),
-      ranked: Number(s?.valid ?? 0),
-    });
     const res = await this.db.execute(sql`
       select
         mf.subject_key, mf.subject_name,
@@ -528,7 +521,17 @@ export class MonitorService {
         top1Rate: rate(top1),
       };
     });
-    return { competitors, selfRates, benchmark };
+    // 竞品均值 = 上表各竞品三率的算术平均(仅计有数据的竞品)
+    const avgOf = (pick: (c: { mentionRate: number | null; top3Rate: number | null; top1Rate: number | null }) => number | null) => {
+      const vals = competitors.map(pick).filter((v): v is number => v != null);
+      return vals.length > 0 ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 1000) / 1000 : null;
+    };
+    const competitorAvg = {
+      mention: avgOf((c) => c.mentionRate),
+      top3: avgOf((c) => c.top3Rate),
+      top1: avgOf((c) => c.top1Rate),
+    };
+    return { competitors, selfRates, competitorAvg };
   }
 
     /** 引用源分析(docs/01 §3.5):明细 + 信源平台偏好 + 自有占比。 */

@@ -28,13 +28,7 @@ interface LeaderRow {
 interface CompetitorsDto {
   competitors: LeaderRow[];
   selfRates: { mention: number | null; top3: number | null; top1: number | null };
-  benchmark: {
-    industry: string | null;
-    mentionRate: number | null;
-    top3Rate: number | null;
-    top1Rate: number | null;
-    brandCount: number;
-  };
+  competitorAvg: { mention: number | null; top3: number | null; top1: number | null };
 }
 
 /** 竞品透视(docs/01 §3.4):竞品榜单 + 竞品×引擎 分引擎对比热力矩阵(同批查询同口径)。 */
@@ -58,7 +52,7 @@ export default function CompetitorsPage() {
   const engines = matrix.data?.engines ?? [];
   const board = leader.data?.competitors ?? [];
   const selfRates = leader.data?.selfRates;
-  const benchmark = leader.data?.benchmark;
+  const competitorAvg = leader.data?.competitorAvg;
 
   const heat = (v: number | null): string => {
     if (v == null) return 'transparent';
@@ -95,11 +89,8 @@ export default function CompetitorsPage() {
         </section>
       )}
 
-      {benchmark?.industry && selfRates && (
-        <BenchmarkBars
-          data={{ ...benchmark, selfMentionRate: selfRates.mention }}
-          selfRates={{ mention: selfRates.mention, top3: selfRates.top3, top1: selfRates.top1 }}
-        />
+      {competitorAvg && selfRates && (
+        <BenchmarkBars selfRates={selfRates} avgRates={competitorAvg} />
       )}
 
       {board.length === 0 && rows.length === 0 ? (
