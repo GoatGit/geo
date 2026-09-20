@@ -785,15 +785,24 @@ export class InsightsService implements OnModuleDestroy {
         }),
     );
     const official = await this.publishedList();
-    // 行业库(0014 跨行业订阅):全部可订阅行业 - 我的 = 可订阅;带最新一期摘要做选择依据
-    const byName = new Map(mine.map((m) => [m.industry, m]));
-    const library = all
-      .filter((ind) => !myIds.has(ind.id))
-      .map((ind) => {
-        const m = byName.get(ind.name); // mine 与 library 互斥,此行仅为类型占位
-        void m;
-        return { industryId: ind.id, industry: ind.name, configured: true };
-      });
+    // 行业库(0014 跨行业订阅):全部可订阅行业 - 我的;configured 如实返回
+    // (此前硬编码 true——用户订阅「待配置」行业后才发现生成按钮要等,实测误导)
+    const library = await Promise.all(
+      all
+        .filter((ind) => !myIds.has(ind.id))
+        .map(async (ind) => ({
+          industryId: ind.id,
+          industry: ind.name,
+          configured:
+            (
+              await this.db
+                .select({ id: insightBrands.id })
+                .from(insightBrands)
+                .where(eq(insightBrands.industryId, ind.id))
+                .limit(1)
+            ).length > 0,
+        })),
+    );
     const quota = isAdmin ? Number.MAX_SAFE_INTEGER : PLAN_LIMITS[await this.planOf(accountId)].insightIndustries;
     return { mine, official, library, quota, used: mine.length, hasBrands: (await this.industriesOfAccount(accountId)).length > 0 };
   }

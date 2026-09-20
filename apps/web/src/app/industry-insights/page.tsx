@@ -49,8 +49,8 @@ interface IndustryQuestionRow {
 interface HubDto {
   mine: MineIndustry[];
   official: InsightSummaryDto[];
-  /** 可订阅行业库(0014 跨行业洞察) */
-  library: Array<{ industryId: number; industry: string }>;
+  /** 可订阅行业库(0014 跨行业洞察);configured=平台已配监测品牌(否则订阅后需等配置) */
+  library: Array<{ industryId: number; industry: string; configured: boolean }>;
   /** 套餐可开通行业数与已用 */
   quota: number;
   used: number;
@@ -265,6 +265,14 @@ export default function IndustryInsightsPage() {
                         <p className="mt-1 text-[11px] text-bad">驳回理由:{ins.shareNote}</p>
                       )}
                     </>
+                  ) : !m.configured && m.subscribed ? (
+                    <p className="mt-2 text-xs leading-5 text-slate-500">
+                      该行业的监测品牌与问题由平台侧配置,暂未完成 —— 完成后即可生成第一期。订阅已保留,无需重复操作。
+                    </p>
+                  ) : !m.configured ? (
+                    <p className="mt-2 text-xs leading-5 text-slate-500">
+                      还没有监测品牌与问题,点下方「先配置品牌与问题」完成配置后即可生成第一期。
+                    </p>
                   ) : (
                     <p className="mt-2 text-xs leading-5 text-slate-500">该行业还没有洞察报告,点下方按钮生成第一期。</p>
                   )}
@@ -335,23 +343,30 @@ export default function IndustryInsightsPage() {
         )}
       </section>
 
-      {/* 行业库(跨行业订阅,0014) */}
+      {/* 行业库(跨行业订阅) */}
       {(data?.library ?? []).length > 0 && (
         <section>
           <div className="mb-3 flex items-baseline justify-between">
             <h2 className="font-semibold text-slate-900">行业库</h2>
-            <span className="text-xs text-slate-400">订阅后即可生成任何行业的洞察报告(计入行业额度)</span>
+            <span className="text-xs text-slate-400">订阅后即可生成(计入行业额度);「待配置」行业需平台先完成品牌与问题配置</span>
           </div>
           <div className="grid gap-3 md:grid-cols-3">
             {(data?.library ?? []).map((lib) => {
               const full = (data?.used ?? 0) >= (data?.quota ?? 0);
               return (
                 <div key={lib.industryId} className="card rise flex items-center justify-between gap-2 p-4">
-                  <span className="text-sm font-medium text-slate-800">{lib.industry}</span>
+                  <span className="flex items-center gap-2 text-sm font-medium text-slate-800">
+                    {lib.industry}
+                    {!lib.configured && (
+                      <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-400" title="平台暂未配置该行业的监测品牌与问题,配置完成前无法生成报告">
+                        待配置
+                      </span>
+                    )}
+                  </span>
                   <button
                     className="h-8 rounded-lg border bg-white px-3 text-xs font-medium text-slate-600 transition-colors hover:border-brand-300 hover:text-brand-700 disabled:opacity-40"
                     disabled={busy === `sub-${lib.industryId}` || full}
-                    title={full ? '行业额度已满:升级套餐或退订后再试' : undefined}
+                    title={full ? '行业额度已满:升级套餐或退订后再试' : lib.configured ? undefined : '可先订阅占位;平台完成配置后即可生成报告'}
                     onClick={() => void subscribe(lib.industryId, lib.industry)}
                   >
                     {busy === `sub-${lib.industryId}` ? '订阅中…' : full ? '额度已满' : '+ 订阅'}
