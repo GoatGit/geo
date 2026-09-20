@@ -1,13 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { MetricCardView } from '@/components/metric-card';
 import { Badge, EmptyState, Skeleton, pct } from '@/components/ui';
-import { IconArrowRight, IconCheck, IconChevron, IconList, IconLogo, IconPulse, IconRank, IconReport, IconShield, IconVoice } from '@/components/icons';
+import { IconArrowRight, IconCheck, IconList, IconLogo, IconPulse, IconRank, IconReport, IconShield, IconVoice } from '@/components/icons';
 import { api, useBrandId, useRankings } from '@/lib/queries';
 import { CountUp } from '@/components/motion';
+import { SnapPager, SnapRail } from '@/components/rail';
 import type { InsightSummaryDto } from '@geo/shared';
 
 const HEALTH_LABELS: Record<string, string> = {
@@ -503,7 +503,7 @@ function InsightSection() {
         </div>
       </div>
       {/* 横向滑动轨道:每屏 3 张(scroll-snap),超出部分左右滑动/按钮翻页 */}
-      <InsightRail id="insight-rail" className={cards.length > 3 ? 'mr-[-0.5rem] pr-2' : undefined}>
+      <SnapRail id="insight-rail" className={cards.length > 3 ? 'mr-[-0.5rem] pr-2' : undefined}>
         {cards.map((c) => (
           <Link
             key={c.key}
@@ -518,65 +518,7 @@ function InsightSection() {
             {c.foot && <p className="metric-num mt-2 text-[10px] text-slate-400">{c.foot}</p>}
           </Link>
         ))}
-      </InsightRail>
+      </SnapRail>
     </section>
-  );
-}
-
-/** 横向 scroll-snap 轨道:隐藏滚动条,移动端自然手势。 */
-function InsightRail({ id, className, children }: { id: string; className?: string; children: React.ReactNode }) {
-  return (
-    <div
-      id={id}
-      className={`-mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${className ?? ''}`}
-    >
-      {children}
-    </div>
-  );
-}
-
-/** 翻页按钮:按轨道实际可滚动状态启停;data-rail 属性标记可滚容器。 */
-function SnapPager({ scrollerId, className }: { scrollerId: string; className?: string }) {
-  const [canLeft, setCanLeft] = useState(false);
-  const [canRight, setCanRight] = useState(false);
-  useEffect(() => {
-    const el = document.getElementById(scrollerId);
-    if (!el) return;
-    const update = () => {
-      setCanLeft(el.scrollLeft > 8);
-      setCanRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 8);
-    };
-    update();
-    el.addEventListener('scroll', update, { passive: true });
-    window.addEventListener('resize', update);
-    return () => {
-      el.removeEventListener('scroll', update);
-      window.removeEventListener('resize', update);
-    };
-  }, [scrollerId]);
-  const page = (dir: 1 | -1) => {
-    const el = document.getElementById(scrollerId);
-    if (!el) return;
-    el.scrollBy({ left: dir * el.clientWidth * 0.9, behavior: 'smooth' });
-  };
-  return (
-    <span className={`flex items-center gap-1 ${className ?? ''}`}>
-      <button
-        aria-label="上一页"
-        className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 text-slate-400 transition-colors hover:border-brand-300 hover:text-brand disabled:opacity-30 disabled:hover:border-slate-200 disabled:hover:text-slate-400"
-        disabled={!canLeft}
-        onClick={() => page(-1)}
-      >
-        <IconChevron width={13} height={13} className="-rotate-90" />
-      </button>
-      <button
-        aria-label="下一页"
-        className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 text-slate-400 transition-colors hover:border-brand-300 hover:text-brand disabled:opacity-30 disabled:hover:border-slate-200 disabled:hover:text-slate-400"
-        disabled={!canRight}
-        onClick={() => page(1)}
-      >
-        <IconChevron width={13} height={13} className="rotate-90" />
-      </button>
-    </span>
   );
 }

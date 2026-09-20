@@ -19,6 +19,7 @@ import {
 } from '../components/icons';
 import { Clouds } from '../components/canvasui/Clouds';
 import { Reveal } from '../components/motion';
+import { SnapPager, SnapRail } from '../components/rail';
 
 const ENGINES = ['豆包', 'DeepSeek', '文心', '千问', '元宝'];
 
@@ -313,29 +314,40 @@ export default function LandingPage() {
               title="各行业在 AI 里的真实存在感"
               sub="抢答题实测 × 6 大引擎 —— 命中高 ≠ 评价好,量的是被 AI 主动提及。"
             />
-            <Reveal className="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-              {featured.data.map((it) => (
-                <Link
-                  key={it.id}
-                  href={`/insights/${it.id}`}
-                  className="card group flex flex-col p-6 transition-all duration-200 hover:-translate-y-1"
-                >
-                  <p className="flex items-center gap-2 text-[11px] font-medium text-slate-400">
-                    <span className="rounded bg-brand-50 px-1.5 py-0.5 font-semibold text-brand-700">{it.industry}</span>
-                    {it.issue}
-                  </p>
-                  <h3 className="mt-3 text-[15px] font-bold leading-6 text-slate-900 group-hover:text-brand-700">{it.title}</h3>
-                  <p className="mt-2 line-clamp-3 flex-1 text-[13px] leading-6 text-slate-500">{it.summary}</p>
-                  {(it.cover.brands || it.cover.questions) && (
-                    <p className="metric-num mt-3 text-[11px] text-slate-400">
-                      {[it.cover.brands && `${it.cover.brands} 品牌`, it.cover.questions && `${it.cover.questions} 题`, it.cover.answers && `${it.cover.answers} 条回答`].filter(Boolean).join(' · ')}
+            <Reveal className="mt-12">
+              <SnapRail id="home-insight-rail" className="gap-5">
+                {featured.data.map((it) => (
+                  <Link
+                    key={it.id}
+                    href={`/insights/${it.id}`}
+                    className={`card group flex snap-start shrink-0 flex-col p-6 transition-all duration-200 hover:-translate-y-1 ${
+                      featured.data!.length > 3
+                        ? 'w-[80%] md:w-[calc((100%-2.5rem)/3)]'
+                        : 'w-full md:w-auto md:flex-1'
+                    }`}
+                  >
+                    <p className="flex items-center gap-2 text-[11px] font-medium text-slate-400">
+                      <span className="rounded bg-brand-50 px-1.5 py-0.5 font-semibold text-brand-700">{it.industry}</span>
+                      {it.issue}
                     </p>
-                  )}
-                  <span className="mt-3 flex items-center gap-1 text-xs font-medium text-brand-600">
-                    阅读报告 <IconArrowRight width={13} height={13} />
-                  </span>
-                </Link>
-              ))}
+                    <h3 className="mt-3 text-[15px] font-bold leading-6 text-slate-900 group-hover:text-brand-700">{it.title}</h3>
+                    <p className="mt-2 line-clamp-3 flex-1 text-[13px] leading-6 text-slate-500">{it.summary}</p>
+                    {(it.cover.brands || it.cover.questions) && (
+                      <p className="metric-num mt-3 text-[11px] text-slate-400">
+                        {[it.cover.brands && `${it.cover.brands} 品牌`, it.cover.questions && `${it.cover.questions} 题`, it.cover.answers && `${it.cover.answers} 条回答`].filter(Boolean).join(' · ')}
+                      </p>
+                    )}
+                    <span className="mt-3 flex items-center gap-1 text-xs font-medium text-brand-600">
+                      阅读报告 <IconArrowRight width={13} height={13} />
+                    </span>
+                  </Link>
+                ))}
+              </SnapRail>
+              {featured.data.length > 3 && (
+                <div className="mt-5 flex justify-center">
+                  <SnapPager scrollerId="home-insight-rail" />
+                </div>
+              )}
             </Reveal>
           </div>
         </section>

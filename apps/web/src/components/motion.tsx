@@ -96,6 +96,8 @@ export function Reveal({
         delay,
         stagger,
         ease: 'power2.out',
+        // 入场完成即清 inline 样式:残留的 transform 会覆盖卡片的 CSS hover 浮起
+        clearProps: 'transform,opacity',
         scrollTrigger: { trigger: el, start: 'top 92%', once: true },
       });
       // 内容可见性死线:任何原因(锚点跳转竞态/晚到布局)导致触发点未结算时,
