@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Badge, EmptyState, Skeleton } from '@/components/ui';
+import { useToast } from '@/components/toast';
 import { InsightBlocks } from '@/components/insight-charts';
 import { InsightFactsDrawer } from '@/components/insight-facts-drawer';
 import { api, apiDownload } from '@/lib/api';
@@ -43,6 +44,7 @@ export default function InsightDetailPage() {
   // 1.5 数字下钻:图表数字点击 → 事实明细抽屉(排行条目/热力格子/桑基标签)
   const [drill, setDrill] = useState<InsightDrill | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const toast = useToast();
 
   if (query.isLoading) return <Skeleton />;
   if (query.error || !query.data) {
@@ -84,7 +86,7 @@ export default function InsightDetailPage() {
                     }
                     await apiDownload(`/insights/${d.id}/pdf`, `青柠GEO-行业洞察-${d.industry}-${d.issue || d.id}.pdf`);
                   } catch (e) {
-                    window.alert((e as Error).message);
+                    toast((e as Error).message, 'err');
                   } finally {
                     setPdfBusy(false);
                   }
