@@ -5,7 +5,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, accountStore, tokenStore, type SessionAccount } from '../../lib/api';
 import { LOGIN_REASONS, loginReasonKey, safeNext } from '../../lib/login-reasons';
-import { IconArrowRight, IconCheck, IconLogo, IconShield } from '../../components/icons';
+import { IconArrowRight, IconCheck, IconShield } from '../../components/icons';
+import { LogoMark } from '../../components/logo';
 
 const VALUE_POINTS = [
   { title: '看见', text: '中立账号向 5 大 AI 引擎批量提问,量化提及率、推荐位次与引用来源' },
@@ -88,9 +89,7 @@ export default function LoginPage() {
 
         <div className="relative flex h-full flex-col justify-between p-12">
           <Link href="/" className="rise flex items-center gap-2.5">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-600 text-white shadow-glow">
-              <IconLogo width={20} height={20} />
-            </span>
+            <LogoMark className="h-9 w-9" />
             <span>
               <span className="block text-base font-semibold leading-4 text-white">青柠GEO</span>
             </span>
@@ -134,9 +133,7 @@ export default function LoginPage() {
       <div className="flex items-center justify-center bg-white px-6">
         <div className="rise w-full max-w-sm">
           <div className="lg:hidden">
-            <span className="mb-6 flex h-10 w-10 items-center justify-center rounded-xl bg-brand-600 text-white">
-              <IconLogo width={20} height={20} />
-            </span>
+            <LogoMark className="mb-6 h-10 w-10" />
           </div>
           <h2 className="text-2xl font-semibold tracking-tight text-slate-900">登录 / 注册</h2>
           <p className="mt-1.5 text-sm text-slate-500">未注册的手机号验证后将自动创建账号</p>
