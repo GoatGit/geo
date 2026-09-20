@@ -154,7 +154,7 @@ export function validateLayerOutput(
   const qs = new Set(ctx.questions);
   const layers = new Set(ctx.layers);
   const items: LayerOutput['items'] = [];
-  for (const [i, item] of (v.items as unknown[]).entries()) {
+  for (const item of (v.items as unknown[])) {
     if (!isRecord(item)) continue;
     const q = typeof item.q === 'string' ? item.q.trim() : '';
     const layer = typeof item.layer === 'string' ? item.layer.trim() : '';

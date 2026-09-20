@@ -1,10 +1,11 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { MetricCardView } from '@/components/metric-card';
 import { Badge, EmptyState, Skeleton, pct } from '@/components/ui';
-import { IconArrowRight, IconCheck, IconList, IconLogo, IconPulse, IconRank, IconReport, IconShield, IconVoice } from '@/components/icons';
+import { IconArrowRight, IconCheck, IconChevron, IconList, IconLogo, IconPulse, IconRank, IconReport, IconShield, IconVoice } from '@/components/icons';
 import { api, useBrandId, useRankings } from '@/lib/queries';
 import { CountUp } from '@/components/motion';
 import type { InsightSummaryDto } from '@geo/shared';
@@ -471,48 +472,111 @@ function InsightSection() {
   const mine = hub.data?.mine ?? [];
   const official = hub.data?.official ?? [];
   if (mine.length === 0 && official.length === 0) return null;
+  const cards = [
+    ...mine
+      .filter((m) => m.insight && m.insight.buildStatus === 'idle')
+      .map((m) => ({ key: `mine-${m.industryId}`, href: `/insights/${m.insight!.id}`, badgeSlot: (
+        <>
+          <Badge label="我的" tone="brand" />
+          <Badge label={m.industry} tone="slate" />
+          {m.insight!.status === 'published' ? <Badge label="已发布" tone="good" /> : m.insight!.shareStatus === 'pending' ? <Badge label="审核中" tone="warn" /> : null}
+        </>
+      ), title: m.insight!.title, summary: m.insight!.summary, mineCard: true, foot: null as string | null })),
+    ...official
+      .filter((o) => !mine.some((m) => m.insight?.id === o.id))
+      .map((it) => ({ key: `off-${it.id}`, href: `/insights/${it.id}`, badgeSlot: (
+        <>
+          <Badge label={it.industry} tone="brand" />
+          {it.issue && <span>{it.issue}</span>}
+        </>
+      ), title: it.title, summary: it.summary, mineCard: false, foot: (it.cover.brands || it.cover.questions)
+        ? [it.cover.brands && `${it.cover.brands} 品牌`, it.cover.questions && `${it.cover.questions} 题`, it.cover.answers && `${it.cover.answers} 条回答`].filter(Boolean).join(' · ')
+        : null })),
+  ];
   return (
     <section className="card rise p-6">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="font-semibold text-slate-900">行业洞察</h2>
-        <Link href="/industry-insights" className="text-[11px] text-brand-700 hover:underline">进入行业洞察 →</Link>
+        <div className="flex items-center gap-2.5">
+          <SnapPager scrollerId="insight-rail" className="shrink-0" />
+          <Link href="/industry-insights" className="text-[11px] text-brand-700 hover:underline">进入行业洞察 →</Link>
+        </div>
       </div>
-      <div className="grid gap-3 md:grid-cols-3">
-        {mine.filter((m) => m.insight && m.insight.buildStatus === 'idle').map((m) => (
+      {/* 横向滑动轨道:每屏 3 张(scroll-snap),超出部分左右滑动/按钮翻页 */}
+      <InsightRail id="insight-rail" className={cards.length > 3 ? 'mr-[-0.5rem] pr-2' : undefined}>
+        {cards.map((c) => (
           <Link
-            key={`mine-${m.industryId}`}
-            href={`/insights/${m.insight!.id}`}
-            className="group rounded-xl border border-brand-100 bg-brand-50/40 p-4 transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-card-hover"
+            key={c.key}
+            href={c.href}
+            className={`group snap-start shrink-0 rounded-xl p-4 transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-card-hover ${
+              cards.length > 3 ? 'w-[78%] min-w-0 md:w-[calc((100%-1.5rem)/3)]' : 'w-full md:w-auto md:flex-1'
+            } ${c.mineCard ? 'border border-brand-100 bg-brand-50/40' : 'border border-slate-100'}`}
           >
-            <p className="flex items-center gap-1.5 text-[10px] font-medium text-slate-400">
-              <Badge label="我的" tone="brand" />
-              <Badge label={m.industry} tone="slate" />
-              {m.insight!.status === 'published' ? <Badge label="已发布" tone="good" /> : m.insight!.shareStatus === 'pending' ? <Badge label="审核中" tone="warn" /> : null}
-            </p>
-            <h3 className="mt-2 text-[13px] font-semibold leading-5 text-slate-800 group-hover:text-brand-700">{m.insight!.title}</h3>
-            <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-slate-500">{m.insight!.summary}</p>
+            <p className="flex items-center gap-1.5 text-[10px] font-medium text-slate-400">{c.badgeSlot}</p>
+            <h3 className="mt-2 text-[13px] font-semibold leading-5 text-slate-800 group-hover:text-brand-700">{c.title}</h3>
+            <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-slate-500">{c.summary}</p>
+            {c.foot && <p className="metric-num mt-2 text-[10px] text-slate-400">{c.foot}</p>}
           </Link>
         ))}
-        {official.filter((o) => !mine.some((m) => m.insight?.id === o.id)).slice(0, 6).map((it) => (
-          <Link
-            key={it.id}
-            href={`/insights/${it.id}`}
-            className="group rounded-xl border border-slate-100 p-4 transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-card-hover"
-          >
-            <p className="flex items-center gap-1.5 text-[10px] font-medium text-slate-400">
-              <Badge label={it.industry} tone="brand" />
-              {it.issue && <span>{it.issue}</span>}
-            </p>
-            <h3 className="mt-2 text-[13px] font-semibold leading-5 text-slate-800 group-hover:text-brand-700">{it.title}</h3>
-            <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-slate-500">{it.summary}</p>
-            {(it.cover.brands || it.cover.questions) && (
-              <p className="metric-num mt-2 text-[10px] text-slate-400">
-                {[it.cover.brands && `${it.cover.brands} 品牌`, it.cover.questions && `${it.cover.questions} 题`, it.cover.answers && `${it.cover.answers} 条回答`].filter(Boolean).join(' · ')}
-              </p>
-            )}
-          </Link>
-        ))}
-      </div>
+      </InsightRail>
     </section>
+  );
+}
+
+/** 横向 scroll-snap 轨道:隐藏滚动条,移动端自然手势。 */
+function InsightRail({ id, className, children }: { id: string; className?: string; children: React.ReactNode }) {
+  return (
+    <div
+      id={id}
+      className={`-mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${className ?? ''}`}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** 翻页按钮:按轨道实际可滚动状态启停;data-rail 属性标记可滚容器。 */
+function SnapPager({ scrollerId, className }: { scrollerId: string; className?: string }) {
+  const [canLeft, setCanLeft] = useState(false);
+  const [canRight, setCanRight] = useState(false);
+  useEffect(() => {
+    const el = document.getElementById(scrollerId);
+    if (!el) return;
+    const update = () => {
+      setCanLeft(el.scrollLeft > 8);
+      setCanRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 8);
+    };
+    update();
+    el.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    return () => {
+      el.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+    };
+  }, [scrollerId]);
+  const page = (dir: 1 | -1) => {
+    const el = document.getElementById(scrollerId);
+    if (!el) return;
+    el.scrollBy({ left: dir * el.clientWidth * 0.9, behavior: 'smooth' });
+  };
+  return (
+    <span className={`flex items-center gap-1 ${className ?? ''}`}>
+      <button
+        aria-label="上一页"
+        className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 text-slate-400 transition-colors hover:border-brand-300 hover:text-brand disabled:opacity-30 disabled:hover:border-slate-200 disabled:hover:text-slate-400"
+        disabled={!canLeft}
+        onClick={() => page(-1)}
+      >
+        <IconChevron width={13} height={13} className="-rotate-90" />
+      </button>
+      <button
+        aria-label="下一页"
+        className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 text-slate-400 transition-colors hover:border-brand-300 hover:text-brand disabled:opacity-30 disabled:hover:border-slate-200 disabled:hover:text-slate-400"
+        disabled={!canRight}
+        onClick={() => page(1)}
+      >
+        <IconChevron width={13} height={13} className="rotate-90" />
+      </button>
+    </span>
   );
 }

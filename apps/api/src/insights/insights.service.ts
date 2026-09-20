@@ -696,13 +696,6 @@ export class InsightsService implements OnModuleDestroy {
   /** 用户删除自建行业:有报告时先删报告;影子品牌有采集数据时保留(不可见,无副作用)。 */
   async removeIndustryForAccount(accountId: number, industryId: number) {
     const ind = await this.assertIndustryOwner(industryId, accountId);
-    const reports = (
-      await this.db
-        .select({ id: industryInsights.id })
-        .from(industryInsights)
-        .where(eq(industryInsights.industryId, industryId))
-        .limit(1)
-    );
     // 自服务闭环:本人行业的洞察报告一并删除(blocks 在行内,删行即可)
     await this.db.delete(industryInsights).where(eq(industryInsights.industryId, industryId));
 
@@ -847,7 +840,8 @@ export class InsightsService implements OnModuleDestroy {
 
   /** 用户触发生成(0014 订阅制):自建/已订阅/管理员可触发;每行业 12h 频控。 */
   async runForAccount(accountId: number, industryId: number, windowDays: number | null, isAdmin = false) {
-    const industry = await this.assertIndustryAccess(industryId, accountId, isAdmin, '生成');
+    // 访问校验有副作用(抛 403),变量未消费但校验必须保留
+    await this.assertIndustryAccess(industryId, accountId, isAdmin, '生成');
     const latest = (
       await this.db
         .select({ builtAt: industryInsights.builtAt, cover: industryInsights.cover })

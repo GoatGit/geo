@@ -156,15 +156,6 @@ export default function IndustryInsightsPage() {
     onError: (e) => toast((e as Error).message, 'err'),
   });
 
-  const apply = useMutation({
-    mutationFn: (industry: string) =>
-      api(`/insights/industries/apply`, { method: 'POST', json: { industry } }),
-    onSuccess: () => {
-      toast('已申请开通,平台配置监测品牌后即可生成洞察');
-      void qc.invalidateQueries({ queryKey: ['insights-hub'] });
-    },
-    onError: (e) => toast((e as Error).message, 'err'),
-  });
 
   const share = useMutation({
     mutationFn: (id: number) => api(`/insights/${id}/share`, { method: 'POST', json: { note: shareNote || undefined } }),
