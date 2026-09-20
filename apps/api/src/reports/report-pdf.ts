@@ -78,19 +78,27 @@ export async function renderReportPdf(payload: ReportPayload, type: ReportType):
     while (out.length > 1 && doc.widthOfString(`${out}…`) > maxWidth) out = out.slice(0, -1);
     return `${out}…`;
   };
-  /** 通用表格:列宽数组 + 行数据(字符串);斑马纹 + 表头底色,行内文本超宽截断。 */
+  /** 通用表格:列宽数组 + 行数据(字符串);斑马纹 + 表头底色,行内文本超宽截断。
+   *  长表逐行换页(换页重画表头)——一次性 ensure 整表高度会让第 1 页只留标题、
+   *  近整页留白(实测周报 26 行问题表)。 */
   const table = (headers: string[], widths: number[], rows: string[][]) => {
     const rowH = 20;
-    ensure(rowH * 2 + rows.length * rowH + 8);
-    doc.rect(PAGE.left, y, CONTENT_W, rowH).fill(SOFT);
-    let x = PAGE.left;
-    headers.forEach((h, i) => {
-      doc.fillColor(SUB).fontSize(8.5).text(h, x + 6, y + 6, { width: widths[i]! - 12, lineBreak: false });
-      x += widths[i]!;
-    });
-    y += rowH;
+    const drawHeader = () => {
+      doc.rect(PAGE.left, y, CONTENT_W, rowH).fill(SOFT);
+      let x = PAGE.left;
+      headers.forEach((h, i) => {
+        doc.fillColor(SUB).fontSize(8.5).text(h, x + 6, y + 6, { width: widths[i]! - 12, lineBreak: false });
+        x += widths[i]!;
+      });
+      y += rowH;
+    };
+    ensure(rowH * 2); // 标题 + 表头 + 至少一行必须同页
+    drawHeader();
     rows.forEach((cells, r) => {
-      if (y + rowH > PAGE.h - PAGE.bottom) doc.addPage();
+      if (y + rowH > PAGE.h - PAGE.bottom) {
+        doc.addPage();
+        drawHeader();
+      }
       if (r % 2 === 1) doc.rect(PAGE.left, y, CONTENT_W, rowH).fill('#fafaf7');
       let cx = PAGE.left;
       cells.forEach((cell, i) => {
