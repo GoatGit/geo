@@ -21,11 +21,9 @@ export function BenchmarkBars({ data, selfRates }: { data: Benchmark; selfRates:
     <section className="card rise p-6">
       <h2 className="text-sm font-semibold text-slate-900">
         本品 vs 行业均值
-        <span className="ml-2 text-xs font-normal text-slate-400">
-          {data.industry} · 同行业 {data.brandCount} 个监测品牌(均值含本品;竞品主体数不在此列,见上方竞品总数)
-        </span>
+        <span className="ml-2 text-xs font-normal text-slate-400">{data.industry ?? ''}</span>
       </h2>
-      <p className="mt-1 text-xs text-slate-500">藏青 = 本品,灰 = 行业均值(含本品);领先/落后箭头直观可读。</p>
+      <p className="mt-1 text-xs text-slate-500">均值 = 本品所在行业全部监测品牌的平均水平(含本品);藏青 = 本品,灰 = 均值。</p>
       <div className="mt-4 space-y-4">
         {rows.map((r) => {
           const self = r.self ?? 0;
