@@ -21,6 +21,17 @@ export function useBrandId(): number | null {
 export interface RankingsDto {
   /** 所选窗口无数据时自动回落到更大窗口(旧数据保留展示);仅回落时存在 */
   fallback?: { requestedDays: number; actualDays: number; quotaBlocked: number; failed: number };
+  /** 问题层→转化结局(单品牌桑基):每层问题的提问/提及/Top3/首推/缺席次数 */
+  layerSankey?: Array<{ layer: string; asked: number; mentioned: number; top3: number; top1: number; missed: number }>;
+  /** 本品 vs 行业均值(行业=品牌所属行业的全部监测品牌;只出均值) */
+  benchmark?: {
+    industry: string | null;
+    mentionRate: number | null;
+    top3Rate: number | null;
+    top1Rate: number | null;
+    brandCount: number;
+    selfMentionRate: number | null;
+  };
   cards: Array<{
     metric: string;
     value: number | null;

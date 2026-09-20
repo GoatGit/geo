@@ -133,6 +133,10 @@ export class MonitorService {
 
     const trend = await this.trend(input.brandId, 7); // 迷你趋势固定近 7 天,不受所选周期影响
 
+    // ===== 品牌洞察图表(rubric 迁移):问题层→结局桑基 + 本品 vs 行业均值 =====
+    const layerSankey = await this.layerSankey(input.brandId, since);
+    const benchmark = await this.benchmark(input.brandId, since, { mentioned, top3, top1, valid, ranked });
+
     const calibrating = await this.inCalibrationWindow(input.brandId);
     // 情绪/自有信源实时口径:体检卡两项此前未传恒为"暂无数据"(docs/02 §3 六项体检)
     const rep = await this.reputation(input.brandId, input.days);
@@ -176,6 +180,80 @@ export class MonitorService {
       period: { days: input.days, since: since.toISOString() },
       asOf,
       source,
+      layerSankey,
+      benchmark,
+    };
+  }
+
+  /**
+   * 问题层→转化结局 桑基数据(单品牌):每层问题被提及/进Top3/被首推/缺席的次数。
+   * 数据源 mention_facts(self 主体,关联问题分层);无分层的问题归「未分层」。
+   */
+  private async layerSankey(brandId: number, since: Date) {
+    const rows = (await this.db.execute(sql`
+      select coalesce(q.group_name, '未分层') as layer,
+             count(*)::int as asked,
+             count(*) filter (where mf.mentioned)::int as mentioned,
+             count(*) filter (where mf.mentioned and mf.rank <= 3)::int as top3,
+             count(*) filter (where mf.mentioned and mf.rank = 1)::int as top1
+      from mention_facts mf
+      join monitoring_questions q on q.id = mf.question_id
+      where mf.brand_id = ${brandId} and mf.ran_at >= ${since}
+        and mf.subject_kind = 'self'
+        and q.status = 'active'
+      group by coalesce(q.group_name, '未分层')
+    `)) as unknown as { rows: Array<{ layer: string; asked: number; mentioned: number; top3: number; top1: number }> };
+    return rows.rows
+      .filter((r) => r.asked > 0)
+      .map((r) => ({
+        layer: r.layer,
+        asked: r.asked,
+        mentioned: r.mentioned,
+        top3: r.top3,
+        top1: r.top1,
+        missed: r.asked - r.mentioned,
+      }));
+  }
+
+  /**
+   * 本品 vs 行业均值(品牌所属行业的全部监测品牌,含竞品;只出均值不暴露他牌明细)。
+   * 品牌无行业归属时各均值返回 null(前端隐藏对比)。
+   */
+  private async benchmark(
+    brandId: number,
+    since: Date,
+    self: { mentioned: number; top3: number; top1: number; valid: number; ranked: number },
+  ) {
+    const brand = (await this.db.select({ industry: brands.industry }).from(brands).where(eq(brands.id, brandId)).limit(1))[0];
+    if (!brand?.industry) {
+      return { industry: null, mentionRate: null, top3Rate: null, top1Rate: null, brandCount: 0, selfMentionRate: self.ranked > 0 || self.valid > 0 ? Math.round((self.mentioned / Math.max(self.valid, 1)) * 1000) / 1000 : null };
+    }
+    const agg = (await this.db.execute(sql`
+      select count(*) filter (where true) as valid,
+             count(*) filter (where mf.mentioned) as mentioned,
+             count(*) filter (where mf.mentioned and mf.rank <= 3) as top3,
+             count(*) filter (where mf.mentioned and mf.rank = 1) as top1
+      from mention_facts mf
+      join brands b on b.id = mf.brand_id
+      where b.industry = ${brand.industry} and mf.ran_at >= ${since}
+        and mf.subject_kind = 'self'
+    `)) as unknown as { rows: Array<{ valid: string; mentioned: string; top3: string; top1: string }> };
+    const a = agg.rows[0];
+    const valid = Number(a?.valid ?? 0);
+    const mentioned = Number(a?.mentioned ?? 0);
+    const top3 = Number(a?.top3 ?? 0);
+    const top1 = Number(a?.top1 ?? 0);
+    const rate = (n: number) => (valid > 0 ? Math.round((n / valid) * 1000) / 1000 : null);
+    const brandsIn = (await this.db.execute(sql`
+      select count(*)::int as n from brands where industry = ${brand.industry}
+    `)) as unknown as { rows: Array<{ n: number }> };
+    return {
+      industry: brand.industry,
+      mentionRate: rate(mentioned),
+      top3Rate: rate(top3),
+      top1Rate: rate(top1),
+      brandCount: brandsIn.rows[0]?.n ?? 0,
+      selfMentionRate: self.valid > 0 ? Math.round((self.mentioned / self.valid) * 1000) / 1000 : null,
     };
   }
 
