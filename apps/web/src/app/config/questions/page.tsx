@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useBrandId } from '@/lib/queries';
@@ -34,6 +34,13 @@ export default function QuestionsPage() {
     queryFn: () => api<QuestionRow[]>(`/brands/${brandId}/questions`),
     enabled: !!brandId,
   });
+  // 语义层惰性兜底的可视化:页面加载 3 秒后若有「分层待定」项,自动刷新一次
+  // (list 请求已触发服务端后台补层,这里只是把结果取回来)
+  useEffect(() => {
+    if (!questions.data?.some((r) => !r.groupName)) return;
+    const t = setTimeout(() => void qc.invalidateQueries({ queryKey: ['questions', brandId] }), 3000);
+    return () => clearTimeout(t);
+  }, [questions.data, brandId, qc]);
   const quota = useQuery({
     queryKey: ['quota', brandId],
     queryFn: () => api<QuotaDto>(`/brands/${brandId}/quota`),
@@ -129,12 +136,23 @@ export default function QuestionsPage() {
               <tr key={row.id} className="border-t">
                 <td className="px-4 py-2.5">
                   <span
-                    className={`rounded px-1.5 py-0.5 text-xs ${
+                    className={`mr-1.5 rounded px-1.5 py-0.5 text-xs ${
                       row.type === 'ranking' ? 'bg-brand-50 text-brand' : 'bg-blush-50 text-blush-700'
                     }`}
                   >
                     {row.type === 'ranking' ? '排名词' : '口碑词'}
                   </span>
+                  {/* 语义层由 LLM 判定:已分层彩色徽标;未分层灰色并提示将自动补齐 */}
+                  {row.groupName ? (
+                    <span className="rounded bg-teal-50 px-1.5 py-0.5 text-xs text-teal-700">{row.groupName}</span>
+                  ) : (
+                    <span
+                      className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-400"
+                      title="语义层待 AI 判定,稍后刷新自动补齐"
+                    >
+                      分层待定
+                    </span>
+                  )}
                 </td>
                 <td className="max-w-64 truncate px-4 py-2.5">{row.textRaw}</td>
                 <td className="max-w-80 truncate px-4 py-2.5 text-slate-500">{row.textExpanded}</td>
