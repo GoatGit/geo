@@ -453,10 +453,23 @@ function IndustryConfigPanel({ industryId }: { industryId: number }) {
     queryKey: ['my-industry-questions', industryId],
     queryFn: () => api<IndustryQuestionRow[]>(`/insights/industries/${industryId}/questions`),
   });
+  // 采集状态:让「立即采集」的效果可见(数据在涨 / 失败多少);面板打开期间每分钟自刷
+  const collectStatus = useQuery({
+    queryKey: ['my-industry-collect-status', industryId],
+    queryFn: () =>
+      api<{
+        hasShadow: boolean;
+        questions: number;
+        last24h: { ok: number; failed: number; quotaBlocked: number };
+        lastRunAt: string | null;
+      }>(`/insights/industries/${industryId}/collect-status`),
+    refetchInterval: 60_000,
+  });
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ['my-industry-brands', industryId] });
     void qc.invalidateQueries({ queryKey: ['my-industry-questions', industryId] });
+    void qc.invalidateQueries({ queryKey: ['my-industry-collect-status', industryId] });
     void qc.invalidateQueries({ queryKey: ['insights-hub'] });
   };
   const run = (key: string, fn: () => Promise<unknown>, done?: () => void) => {
@@ -655,16 +668,32 @@ function IndustryConfigPanel({ industryId }: { industryId: number }) {
         </div>
       </div>
 
-      {/* 立即采集 */}
+      {/* 立即采集:采集 = 去 AI 引擎实际提问、把数据采回库(可反复点追加样本);生成新一期 = 把已采数据聚合成报告 */}
       <button
         className="h-9 w-full rounded-lg bg-good text-xs font-semibold text-white disabled:opacity-50"
         disabled={busy === 'collect'}
-        onClick={() => run('collect', () => api(`/insights/industries/${industryId}/collect`, { method: 'POST' }))}
+        onClick={() =>
+          run('collect', () => api(`/insights/industries/${industryId}/collect`, { method: 'POST' }), () =>
+            toast('已触发采集:约 1 分钟内开始,20~60 分钟出数;期间可再点追加样本。数据到库后点「生成新一期」出报告'),
+          )
+        }
       >
         {busy === 'collect' ? '触发中…' : '▶ 立即采集(品牌+问题已同步到采集引擎)'}
       </button>
+      {collectStatus.data && (
+        <p className="metric-num text-[10px] leading-4 text-slate-500">
+          采集状态:
+          {collectStatus.data.hasShadow
+            ? `${collectStatus.data.questions} 个问题在采 · 近 24h 有效回答 ${collectStatus.data.last24h.ok} 条` +
+              (collectStatus.data.last24h.failed > 0 || collectStatus.data.last24h.quotaBlocked > 0
+                ? ` · 失败 ${collectStatus.data.last24h.failed}` + (collectStatus.data.last24h.quotaBlocked > 0 ? ` / 拦截 ${collectStatus.data.last24h.quotaBlocked}` : '') + '(多为引擎未登录)'
+                : '') +
+              (collectStatus.data.lastRunAt ? ` · 最近采集 ${new Date(collectStatus.data.lastRunAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}` : '')
+            : '尚未初始化(点上方按钮开始首轮采集)'}
+        </p>
+      )}
       <p className="text-[10px] leading-4 text-slate-400">
-        配置完成后点「生成第一期」聚合出报告;采集约 20-60 分钟出数,期间可再次采集补充样本。
+        「立即采集」把 AI 回答采回数据库,可反复点击追加样本(数据越多比率越稳);「生成新一期」把已采数据聚合成报告,二者分工不同。
       </p>
     </div>
   );

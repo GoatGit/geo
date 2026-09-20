@@ -915,6 +915,50 @@ export class InsightsService implements OnModuleDestroy {
     return { triggered: true };
   }
 
+  /**
+   * 采集状态(配置面板「立即采集」的可视化):影子品牌近 24h 明细与最近采集时间。
+   * 只读不建影子——未初始化的行业返回零值(hasShadow=false)。
+   */
+  async collectStatusForAccount(accountId: number, industryId: number) {
+    await this.assertIndustryOwner(industryId, accountId);
+    const industry = (
+      await this.db.select().from(insightIndustries).where(eq(insightIndustries.id, industryId)).limit(1)
+    )[0];
+    if (!industry) throw new HttpException('行业不存在', HttpStatus.NOT_FOUND);
+    const shadowRows = (await this.db.execute(sql`
+      select b.id::text as id from brands b
+      join accounts a on a.id = b.account_id
+      where b.industry = ${industry.name} and a.phone = '10000000000'
+      limit 1
+    `)) as unknown as { rows: Array<{ id: string }> };
+    const shadowId = Number(shadowRows.rows[0]?.id ?? 0);
+    if (!shadowId) return { hasShadow: false, questions: 0, last24h: { ok: 0, failed: 0, quotaBlocked: 0 }, lastRunAt: null };
+
+    const qs = (await this.db.execute(sql`
+      select count(*)::int as n from monitoring_questions
+      where brand_id = ${shadowId} and status = 'active'
+    `)) as unknown as { rows: Array<{ n: number }> };
+    const stats = (await this.db.execute(sql`
+      select
+        count(*) filter (where r.status in ('ok_with_answer','ok_empty'))::int as ok,
+        count(*) filter (where r.status = 'failed')::int as failed,
+        count(*) filter (where r.status = 'quota_blocked')::int as quota_blocked,
+        max(r.ran_at) as last_run_at
+      from query_runs r
+      where r.brand_id = ${shadowId} and r.ran_at >= now() - interval '24 hours'
+    `)) as unknown as { rows: Array<{ ok: number; failed: number; quota_blocked: number; last_run_at: Date | null }> };
+    const s = stats.rows[0];
+    const lastAny = (await this.db.execute(sql`
+      select max(ran_at) as last_run_at from query_runs where brand_id = ${shadowId}
+    `)) as unknown as { rows: Array<{ last_run_at: Date | null }> };
+    return {
+      hasShadow: true,
+      questions: qs.rows[0]?.n ?? 0,
+      last24h: { ok: s?.ok ?? 0, failed: s?.failed ?? 0, quotaBlocked: s?.quota_blocked ?? 0 },
+      lastRunAt: (lastAny.rows[0]?.last_run_at ?? s?.last_run_at ?? null) as string | null,
+    };
+  }
+
   /** 用户提交分享:本人行业报告 → 待审核。 */
   async submitShare(accountId: number, insightId: number, note?: string) {
     const row = (await this.db.select().from(industryInsights).where(eq(industryInsights.id, insightId)).limit(1))[0];

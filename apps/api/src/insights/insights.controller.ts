@@ -243,6 +243,12 @@ export class InsightsController {
     return this.insights.collectNowForAccount(currentAccount(req).accountId, id);
   }
 
+  /** 采集状态(配置面板):近 24h 明细与最近采集时间——「立即采集」的可视化反馈。 */
+  @Get('industries/:id/collect-status')
+  myCollectStatus(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
+    return this.insights.collectStatusForAccount(currentAccount(req).accountId, id);
+  }
+
   /** 订阅行业(0014 跨行业洞察):公共/他人行业可订阅,配额挂套餐;管理员豁免。 */
   @Post('industries/:id/subscribe')
   subscribe(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
