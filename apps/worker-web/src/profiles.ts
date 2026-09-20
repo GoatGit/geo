@@ -39,6 +39,28 @@ export function nextHealthAction(score: number): 'retire' | 'cooldown' | 'keep' 
 export class AccountPoolService {
   constructor(private readonly db: Db) {}
 
+  /**
+   * 各引擎当日可承接的任务数(容量):∑ 每个可领账号的剩余日额度
+   * (DAILY_QUOTA_PER_PROFILE - daily_used;跨日自动视为满额)。
+   * 调度侧据此截断入队——没容量的引擎不入队,任务不再空转 15 次延迟
+   * 后落 quota_blocked(实测无账号引擎 26 题 × 3 引擎整轮僵尸)。
+   */
+  async capacityByEngine(engines: readonly string[]): Promise<Map<string, number>> {
+    if (engines.length === 0) return new Map();
+    const res = await (this.db.$client as Pool).query<{ engine: string; left: number }>(
+      `select engine,
+              sum(case when daily_date is distinct from current_date then $1
+                        else greatest($1 - daily_used, 0) end)::int as left
+       from account_profiles
+       where surface = 'web' and status = 'available'
+         and (cooldown_until is null or cooldown_until < now())
+         and engine = any($2)
+       group by engine`,
+      [DAILY_QUOTA_PER_PROFILE, [...engines]],
+    );
+    return new Map(res.rows.map((r) => [r.engine, r.left]));
+  }
+
   async acquire(engine: string, excludeIds: ReadonlySet<number> = new Set()): Promise<AcquiredProfile | null> {
     const client = this.db.$client as Pool;
     // 冷却到期自愈:瞬时登录误判(10min)与健康分 24h 冷却都把 status 置为 'cooldown',

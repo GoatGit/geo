@@ -17,6 +17,7 @@ import {
 } from '@geo/db';
 import { COLLECT_QUEUE, bullConnection, priorityOf, type CollectJobData } from './queue';
 import { EngineBreaker } from './breaker';
+import { AccountPoolService } from './profiles';
 
 /** 单 tick 的派发预算:全局与每引擎剩余额度(Infinity = 不限),随入队扣减。 */
 export interface Budget {
@@ -128,8 +129,11 @@ export class RoundScheduler {
   });
   private readonly redis = new Redis(bullConnection().url, { lazyConnect: true, maxRetriesPerRequest: 3 });
   private readonly breaker = new EngineBreaker(this.redis);
+  private readonly pool: AccountPoolService;
 
-  constructor(private readonly db: Db) {}
+  constructor(private readonly db: Db) {
+    this.pool = new AccountPoolService(db);
+  }
 
   start(intervalMs = Number(process.env.SCHEDULER_INTERVAL_MS ?? 60_000), concurrency?: number): void {
     this.concurrency = concurrency ?? Number(process.env.WORKER_CONCURRENCY ?? 4);
@@ -294,15 +298,34 @@ export class RoundScheduler {
       }
     }
 
-    // 引擎三重过滤:白名单 + 引擎日预算 + 熔断/手动暂停(熔断中不入队,避免任务堆积延迟重排)
+    // 引擎四重过滤:白名单 + 引擎日预算 + 熔断/手动暂停(熔断中不入队,避免任务堆积延迟重排)
+    // + 账号池当日容量(没账号/额度耗尽的引擎不入队——入队只会空转 15 次延迟后落
+    // quota_blocked,实测一晚烧出 130 条僵尸任务且一条数据都换不回)
+    const poolCapacity = await this.pool.capacityByEngine(cached);
     const engineList: string[] = [];
+    const skippedNoCapacity: string[] = [];
     for (const e of cached) {
       if (!(WEB_ENGINES as readonly string[]).includes(e)) continue;
       if ((budget.engineRemaining.get(e) ?? 0) <= 0) continue;
       if (await this.breaker.isTripped(e)) continue;
+      const cap = poolCapacity.get(e) ?? 0;
+      if (cap <= 0) {
+        skippedNoCapacity.push(e);
+        continue;
+      }
+      // 引擎日预算收紧到账号池真实容量:只入队今天真能执行的任务
+      budget.engineRemaining.set(e, Math.min(budget.engineRemaining.get(e) ?? 0, cap));
       engineList.push(e);
     }
-    if (engineList.length === 0) return true;
+    if (engineList.length === 0) {
+      if (cached.length > 0) {
+        console.warn(
+          `[scheduler] brand=${brandId} 本轮跳过:全部引擎无当日容量(${cached.join('/')};"` +
+            `${skippedNoCapacity.join('/')} 无可用账号或额度已尽,其余为预算/熔断)。次日额度恢复或账号池补号后自动续上`,
+        );
+      }
+      return true;
+    }
 
     // 入队计划:每任务复查全局/引擎额度(纯函数,预算账本被就地扣减)
     const jobs = planRoundJobs(questions, engineList, budget);
