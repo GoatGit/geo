@@ -65,6 +65,8 @@ COPY --from=build /app/apps/api/assets apps/api/assets/
 COPY --from=build /app/apps/worker-web/dist apps/worker-web/dist/
 COPY --from=build /app/apps/web/.next apps/web/.next/
 COPY --from=build /app/apps/web/next.config.mjs apps/web/next.config.mjs
+# public/(品牌 logo 等静态资源)由 next start 直接伺服,必须随镜像
+COPY --from=build /app/apps/web/public apps/web/public/
 RUN rm -rf apps/web/.next/cache
 
 # node:24-alpine 自带 uid 1000 的 node 用户
