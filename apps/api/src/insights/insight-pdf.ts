@@ -383,15 +383,26 @@ export async function renderInsightPdf(detail: PdfInsight): Promise<Buffer> {
     }
     const maxSize = Math.max(...b.points.map((p) => p.size ?? 1), 1);
     doc.fontSize(8);
+    // 贴轴点(y=0)逐泡标签会同行叠字(实测零食 6 家贴轴):脚注清单替代
+    const onAxis = b.points.filter((p) => p.y <= 0.001).map((p) => p.name);
     b.points.forEach((p) => {
+      if (p.y <= 0.001) return;
       const color = p.group === 'highlight' ? ORANGE : brandColor(p.name);
       const r = 4 + ((p.size ?? 1) / maxSize) * 7;
       doc.circle(sx(p.x), sy(p.y), r).fillColor(blend(color, 0.55)).fill();
       doc.fillColor(INK).fontSize(7.5).text(truncate(p.name, 70, 7.5), sx(p.x) + r + 3, sy(p.y) - 4, { lineBreak: false });
     });
+    if (onAxis.length > 0) {
+      doc.fillColor(SUB).fontSize(7.5).text(
+        `Top3 率 0%(横轴上):${onAxis.map((n) => truncate(n, 60, 7.5)).join('、')}`,
+        plotX,
+        plotY + size + 15,
+        { width: plotW, lineBreak: false },
+      );
+    }
     doc.fillColor(SUB).fontSize(7.5).text(b.xLabel, plotX, plotY + size + 6, { width: plotW, align: 'center' });
     doc.fillColor(SUB).fontSize(7.5).text(b.yLabel, plotX - 10, plotY - 12, { lineBreak: false });
-    y = plotY + size + 20;
+    y = plotY + size + (b.points.some((p) => p.y <= 0.001) ? 27 : 20);
   };
 
   const sankey = (b: SankeyBlock) => {

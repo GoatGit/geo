@@ -502,41 +502,43 @@ function ScatterChart({ xLabel, yLabel, diagonal, points, groups }: Extract<Insi
     const w = Math.min(textW(p.name, 10) + 8, 150);
     const h = 13;
     const color = colorOf(p);
-    // 名字放得下、且气泡不被邻居压住,才内嵌白字;否则外置
-    if (isolated && r >= 11 && textW(p.name, 9.5) <= r * 1.7) {
+    // 贴轴点(y=0)横排标签必然叠字(实测零食 6 家贴轴):一律进左侧引线栏
+    if (p.y > 0.001 && isolated && r >= 11 && textW(p.name, 9.5) <= r * 1.7) {
       placed.push({ x: cx - w / 2, y: cy - h / 2, w, h });
       labels.push({ key: p.name, x: cx, y: cy + 3.3, w, text: p.name, anchor: 'middle', color: '#ffffff', size: 9.5 });
       continue;
     }
-    const hit = (lx: number, ly: number) =>
-      lx < m.l || lx + w > W - m.r || placed.some((b) => lx < b.x + b.w && lx + w > b.x && ly < b.y + b.h && ly + h > b.y);
-    const cands: Array<[number, number]> = [
-      [cx + r + 4, cy - 7],
-      [cx - r - 4 - w, cy - 7],
-      [Math.max(m.l, cx - w / 2), cy - r - h - 2],
-    ];
-    const spot = cands.find(([lx, ly]) => !hit(lx, ly));
-    if (!spot) {
-      overflow.push({ p, cx, cy, r, color });
-      continue;
+    if (p.y > 0.001) {
+      const hit = (lx: number, ly: number) =>
+        lx < m.l || lx + w > W - m.r || placed.some((b) => lx < b.x + b.w && lx + w > b.x && ly < b.y + b.h && ly + h > b.y);
+      const cands: Array<[number, number]> = [
+        [cx + r + 4, cy - 7],
+        [cx - r - 4 - w, cy - 7],
+        [Math.max(m.l, cx - w / 2), cy - r - h - 2],
+      ];
+      const spot = cands.find(([lx, ly]) => !hit(lx, ly));
+      if (spot) {
+        const [lx, ly] = spot;
+        placed.push({ x: lx, y: ly, w, h });
+        labels.push({ key: p.name, x: lx, y: ly + 9.5, w, text: p.name, anchor: 'start', color: color === GRAY ? '#64748b' : color, size: 10 });
+        continue;
+      }
     }
-    const [lx, ly] = spot;
-    placed.push({ x: lx, y: ly, w, h });
-    labels.push({ key: p.name, x: lx, y: ly + 9.5, w, text: p.name, anchor: 'start', color: color === GRAY ? '#64748b' : color, size: 10 });
+    overflow.push({ p, cx, cy, r, color });
   }
 
-  // 引线队列:绘图区左缘自下而上排,细线指向气泡
+  // 引线队列:绘图区左缘栈排,细线指向气泡;按 x 升序(离原点近者靠下,引线不交叉)
   let scatterLeaders: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
   if (overflow.length > 0) {
-    let sy = Y(0) - 6 - overflow.length * 13;
-    sy = Math.max(m.t + 4, sy);
+    overflow.sort((a, b) => a.cx - b.cx);
+    let sy = Math.max(m.t + 4, Y(0) - 16 - overflow.length * 14);
     const leaders: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
     for (const o of overflow) {
       const w = Math.min(textW(o.p.name, 10) + 8, 150);
       const lx = m.l + 2;
-      labels.push({ key: `ov-${o.p.name}`, x: lx, y: sy + 9.5, w, text: o.p.name, anchor: 'start', color: o.color === GRAY ? '#64748b' : o.color, size: 10 });
-      leaders.push({ x1: o.cx - o.r * 0.7, y1: o.cy - o.r * 0.7, x2: lx + w - 2, y2: sy + 5.5 });
-      sy += 13;
+      labels.push({ key: `ov-${o.p.name}`, x: lx, y: sy + 10, w, text: o.p.name, anchor: 'start', color: o.color === GRAY ? '#64748b' : o.color, size: 10 });
+      leaders.push({ x1: o.cx - o.r * 0.7, y1: o.cy - o.r * 0.7, x2: lx + w - 2, y2: sy + 6 });
+      sy += 14;
     }
     scatterLeaders = leaders;
   }
