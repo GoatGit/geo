@@ -240,13 +240,20 @@ export default function ReportsPage() {
               <span className="text-sm font-semibold text-slate-800">
                 {preview.title}
                 <span className="ml-2 text-xs font-normal text-slate-400">
-                  {preview.id ? '打印时选择「另存为 PDF」即可获得 PDF 版本' : '样例数据,仅供查看版式'}
+                  {preview.id ? '如需编辑可下载 HTML;正式交付请下载 PDF' : '样例数据,仅供查看版式'}
                 </span>
               </span>
               <div className="flex items-center gap-2">
                 {preview.id && (
-                  <button className="btn-ghost" onClick={() => download(preview.id!)}>
-                    下载
+                  <button
+                    className="btn-ghost"
+                    disabled={pdfBusy === preview.id}
+                    onClick={() => {
+                      const row = (reports.data ?? []).find((r) => r.id === preview.id);
+                      if (row) void downloadPdf(row);
+                    }}
+                  >
+                    {pdfBusy === preview.id ? '生成中…' : '下载 PDF'}
                   </button>
                 )}
                 <button className="btn-primary" onClick={() => setPreview(null)}>
