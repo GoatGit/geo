@@ -3,7 +3,7 @@ import { ENGINE_LABELS, INSIGHT_QUESTION_LAYERS, WEB_ENGINES, engineLabel } from
 import type { Db } from '@geo/db';
 import { insightIndustries, industryInsights, loadPlatformSettings } from '@geo/db';
 import { classifyDomain } from '@geo/metrics';
-import { chatCompletion } from '@geo/insight-agent';
+import { chatCompletion, buildLayerPrompt, validateLayerOutput } from '@geo/insight-agent';
 import type {
   BarRankBlock,
   FunnelBlock,
@@ -1140,6 +1140,67 @@ export interface InsightBuildJob {
 }
 
 /**
+ * 历史问题分层补齐:影子品牌 active 问题里 group_name 为空的,用 LLM 批量归类
+ * (一次调用)并回写 monitoring_questions.group_name 与 insight_questions.layer
+ * (配置口径一致)。返回回写条数;LLM 未启用/失败返回 0,调用方忽略错误。
+ */
+export async function backfillQuestionLayers(db: Db, industry: string): Promise<number> {
+  if (!industry) return 0;
+  const settings = await loadPlatformSettings(db);
+  const cfg = settings.insightAgent;
+  if (!cfg.enabled || cfg.mode === 'rules' || !cfg.endpoint || !cfg.apiKey || !cfg.model) return 0;
+
+  const shadow = rowsOf<{ id: string }>(
+    await db.execute(sql`
+      select b.id::text as id from brands b
+      join accounts a on a.id = b.account_id
+      where b.industry = ${industry} and a.phone = '10000000000'
+      limit 1
+    `),
+  );
+  if (shadow.length === 0) return 0;
+  const pending = rowsOf<{ id: string; text: string }>(
+    await db.execute(sql`
+      select id::text as id, text_raw as text from monitoring_questions
+      where brand_id = ${shadow[0]!.id} and group_name is null and status = 'active'
+      order by id
+    `),
+  );
+  if (pending.length === 0) return 0;
+
+  const questions = pending.map((p) => p.text);
+  const { system, user } = buildLayerPrompt({ industry, questions, layers: INSIGHT_QUESTION_LAYERS });
+  const raw = await chatCompletion(
+    { protocol: cfg.protocol as 'openai' | 'anthropic', endpoint: cfg.endpoint, apiKey: cfg.apiKey, model: cfg.model, timeoutMs: 60_000 },
+    { system, user, maxTokens: 2000 },
+  );
+  const m = raw.text.match(/\{[\s\S]*\}/);
+  if (!m) return 0;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(m[0]);
+  } catch {
+    return 0;
+  }
+  const judged = validateLayerOutput(parsed, { questions, layers: INSIGHT_QUESTION_LAYERS });
+  if (!judged.ok) return 0;
+
+  let updated = 0;
+  for (const it of judged.value.items) {
+    const row = pending.find((p) => p.text === it.q);
+    if (!row) continue;
+    await db.execute(sql`update monitoring_questions set group_name = ${it.layer} where id = ${row.id}`);
+    await db.execute(sql`
+      update insight_questions set layer = ${it.layer}
+      where industry_id = (select id from insight_industries where name = ${industry})
+        and text_raw = ${it.q}
+    `);
+    updated += 1;
+  }
+  return updated;
+}
+
+/**
  * 运行一次行业洞察聚合:置 running → 取数组稿 → 回写内容(覆盖 blocks/cover/summary,
  * 保留 status/featured 等发布态)→ 置 idle;失败置 failed 并记录原因。
  */
@@ -1154,6 +1215,14 @@ export async function runInsightBuild(db: Db, job: InsightBuildJob): Promise<voi
     .where(eq(industryInsights.id, job.insightId));
 
   try {
+    // 分层补齐(构建时一次性):历史问题创建于分层功能前,group_name 为空 →
+    // 分层热力/桑基永远无数据;LLM 批量归类后持久化,失败静默(层维度缺省,不阻断生成)
+    try {
+      const filled = await backfillQuestionLayers(db, industry?.name ?? '');
+      if (filled > 0) console.log(`[insights] 已为 ${filled} 个历史问题补充分层 industry=${industry?.name}`);
+    } catch (err) {
+      console.error(`[insights] 分层补齐失败(忽略)industry=${industry?.name}:`, (err as Error).message.slice(0, 120));
+    }
     const agg = await collectIndustryAggregates(db, industry?.name ?? '', job.windowDays);
     // 上期环比基线:优先同行业其他报告行(多期并存);报告行复用制下,取自身被覆盖前的旧内容
     const prevRow = (

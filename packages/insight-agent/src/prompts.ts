@@ -86,3 +86,27 @@ export function buildWebsitePrompt(input: { name: string; industry?: string; pos
   const user = JSON.stringify({ 品牌: input.name, ...(input.industry ? { 行业: input.industry } : {}), ...(input.positioning ? { 定位: input.positioning } : {}) });
   return { system, user };
 }
+
+/**
+ * 问题语义分层补齐( rubric 2.4 数据覆盖):历史问题创建于分层功能之前,
+ * group_name 为空 → 分层热力/桑基无数据。构建时 LLM 批量归类(宁缺毋滥)。
+ */
+export function buildLayerPrompt(input: { industry: string; questions: string[]; layers: readonly string[] }): {
+  system: string;
+  user: string;
+} {
+  const system = [
+    '你是搜索意图分类器。把每个用户问题归入唯一的语义层(按问题的真实意图,不按字面品牌名):',
+    ...input.layers.map((l, i) => `${i + 1}. ${l}`),
+    '判定规则:',
+    '1. 「行业格局/排行榜/头部品牌有哪些」→ 品类行业层;',
+    '2. 「我该买什么/适合谁/人群场景推荐」→ 场景人群层;',
+    '3. 「XX 有什么功能/优缺点/怎么样」聚焦具体品牌的功能价值 → 消费功能层;',
+    '4. 「A 和 B 哪个好/对比」→ 竞品层;',
+    '5. 「哪里买/渠道/多少钱/优惠」→ 渠道市场层;',
+    '6. 不确定时给最接近的一层;禁止编造问题列表之外的问题。',
+    `输出 JSON:{"items":[{"q":"原问题逐字","layer":"层名"}]}。${JSON_ONLY}`,
+  ].join('\n');
+  const user = JSON.stringify({ 行业: input.industry, 问题列表: input.questions });
+  return { system, user };
+}

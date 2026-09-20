@@ -140,3 +140,29 @@ export function validateWebsiteOutput(v: unknown): ValidateResult<WebsiteOutput>
   const confidence = Number.isFinite(n) ? Math.min(Math.max(n, 0), 1) : 0.5;
   return { ok: true, value: { url, confidence } };
 }
+
+export interface LayerOutput {
+  items: Array<{ q: string; layer: string }>;
+}
+
+/** 分层补齐输出校验:层名必须在白名单、问题必须在输入列表(逐字匹配);越权条目直接丢弃。 */
+export function validateLayerOutput(
+  v: unknown,
+  ctx: { questions: string[]; layers: readonly string[] },
+): ValidateResult<LayerOutput> {
+  if (!isRecord(v) || !Array.isArray(v.items)) return { ok: false, errors: ['items not an array'] };
+  const qs = new Set(ctx.questions);
+  const layers = new Set(ctx.layers);
+  const items: LayerOutput['items'] = [];
+  for (const [i, item] of (v.items as unknown[]).entries()) {
+    if (!isRecord(item)) continue;
+    const q = typeof item.q === 'string' ? item.q.trim() : '';
+    const layer = typeof item.layer === 'string' ? item.layer.trim() : '';
+    if (!q || !layers.has(layer)) continue; // 层名越权 → 丢
+    if (!qs.has(q)) continue; // 编造问题 → 丢
+    if (items.some((x) => x.q === q)) continue; // 重复 → 丢
+    items.push({ q, layer });
+  }
+  if (items.length === 0) return { ok: false, errors: ['no valid items'] };
+  return { ok: true, value: { items } };
+}
