@@ -850,15 +850,20 @@ export class InsightsService implements OnModuleDestroy {
     const industry = await this.assertIndustryAccess(industryId, accountId, isAdmin, '生成');
     const latest = (
       await this.db
-        .select({ builtAt: industryInsights.builtAt })
+        .select({ builtAt: industryInsights.builtAt, cover: industryInsights.cover })
         .from(industryInsights)
         .where(eq(industryInsights.industryId, industryId))
         .orderBy(desc(industryInsights.builtAt))
         .limit(1)
     )[0];
     if (latest?.builtAt && Date.now() - latest.builtAt.getTime() < 12 * 3600 * 1000) {
-      const waitH = Math.ceil((12 * 3600 * 1000 - (Date.now() - latest.builtAt.getTime())) / 3600_000);
-      throw new HttpException(`该行业 ${waitH} 小时内已生成过,稍后再试`, HttpStatus.TOO_MANY_REQUESTS);
+      // 零数据等待稿豁免频控:重建不进 LLM(成本≈0),且「采集完成后重生成」的指引
+      // 恰好在几分钟内 —— 12h 锁会把刚起的首轮采集卡死到明天(实测零食行业)
+      const zeroData = ((latest.cover as { answers?: number } | null) ?? {}).answers === 0;
+      if (!zeroData) {
+        const waitH = Math.ceil((12 * 3600 * 1000 - (Date.now() - latest.builtAt.getTime())) / 3600_000);
+        throw new HttpException(`该行业 ${waitH} 小时内已生成过,稍后再试`, HttpStatus.TOO_MANY_REQUESTS);
+      }
     }
     return this.runIndustry(industryId, windowDays);
   }
