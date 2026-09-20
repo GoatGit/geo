@@ -516,7 +516,13 @@ export class AdminController implements OnModuleDestroy {
   async loginStatus(@Param('sessionId') sessionId: string) {
     const raw = await this.redis.get(loginStatusKey(sessionId));
     if (!raw) throw new NotFoundException('登录会话不存在或已过期');
-    return JSON.parse(raw) as { state: string; detail?: string; viewer?: boolean; updatedAt: string };
+    try {
+      return JSON.parse(raw) as { state: string; detail?: string; viewer?: boolean; updatedAt: string };
+    } catch {
+      // 状态体损坏:按过期处理并清理,避免管理端每次轮询都撞 500
+      await this.redis.del(loginStatusKey(sessionId));
+      throw new NotFoundException('登录会话状态已损坏,视为过期');
+    }
   }
 
   /**
@@ -547,7 +553,12 @@ export class AdminController implements OnModuleDestroy {
   ) {
     const raw = await this.redis.get(loginStatusKey(sessionId));
     if (!raw) throw new NotFoundException('登录会话不存在或已过期');
-    const status = JSON.parse(raw);
+    let status: { state?: string; viewer?: boolean };
+    try {
+      status = JSON.parse(raw);
+    } catch {
+      throw new NotFoundException('登录会话状态已损坏,视为过期');
+    }
     if (status.state !== 'running' || !status.viewer) throw new BadRequestException('登录会话当前不可操作');
     const coordinate = (value: unknown) => {
       if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 10_000) {

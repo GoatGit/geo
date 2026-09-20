@@ -162,9 +162,12 @@ export class InsightsService implements OnModuleDestroy {
     );
     const m = raw.text.match(/\{[\s\S]*\}/);
     if (!m) throw new HttpException('AI 返回格式异常,请重试', HttpStatus.BAD_GATEWAY);
-    const parsed = JSON.parse(m[0]) as {
-      brands?: Array<{ name?: string; website?: string; aliases?: string[]; positioning?: string }>;
-    };
+    let parsed: { brands?: Array<{ name?: string; website?: string; aliases?: string[]; positioning?: string }> };
+    try {
+      parsed = JSON.parse(m[0]);
+    } catch {
+      throw new HttpException('AI 返回格式异常,请重试', HttpStatus.BAD_GATEWAY);
+    }
     const suggestions = (parsed.brands ?? [])
       .map((b) => ({
         name: String(b.name ?? '').trim(),
@@ -407,7 +410,12 @@ export class InsightsService implements OnModuleDestroy {
     );
     const m = raw.text.match(/\{[\s\S]*\}/);
     if (!m) throw new HttpException('AI 返回格式异常,请重试', HttpStatus.BAD_GATEWAY);
-    const parsed = JSON.parse(m[0]) as { questions?: Array<{ type?: string; text?: string }> };
+    let parsed: { questions?: Array<{ type?: string; text?: string }> };
+    try {
+      parsed = JSON.parse(m[0]);
+    } catch {
+      throw new HttpException('AI 返回格式异常,请重试', HttpStatus.BAD_GATEWAY);
+    }
     const questions = (parsed.questions ?? [])
       .map((q) => ({ type: q.type === 'reputation' ? ('reputation' as const) : ('ranking' as const), text: String(q.text ?? '').trim() }))
       .filter((q) => q.text.length >= 8 && q.text.length <= 60)
