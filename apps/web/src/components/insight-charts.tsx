@@ -687,7 +687,7 @@ function SankeyChart({ left, right, links, onDrill }: Extract<InsightBlock, { ty
                 {n.name}
               </text>
               <text x={xR + nodeW + 8} y={rightYs[i]! + 10} fontSize={9.5} fill="#94a3b8">
-                {n.value} 次
+                {n.value} 次{n.questions != null ? ` · ${n.questions} 题` : ''}
               </text>
             </g>
           );

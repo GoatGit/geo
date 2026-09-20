@@ -457,7 +457,12 @@ export function composeIndustryInsight(
         summary,
         note: '带宽 = 该品牌在该层问题中被提及的次数;长尾品牌聚为「其他品牌」。比率视角见上图,本图看的是量的构成。',
         left: leftNames.map((n) => ({ name: n, value: n === '其他品牌' ? othersTotal : brandTotal.get(n) ?? 0 })),
-        right: rightOrder.map((l) => ({ name: l, value: layerTotal.get(l) ?? 0 })),
+        right: rightOrder.map((l) => ({
+          name: l,
+          value: layerTotal.get(l) ?? 0,
+          // 题量并置(对标竞品「N 次 · M 题」):该层在采问题数,读者同时看到产出与分母
+          questions: agg.layerQuestionCounts.find((q) => q.layer === l)?.count,
+        })),
         links: links.map((l) => ({
           from: leftNames.indexOf(l.brand),
           to: rightOrder.indexOf(l.layer),

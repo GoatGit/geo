@@ -128,7 +128,8 @@ export interface SankeyBlock {
   /** 图表上方的一句话结论(数据驱动的「所以呢」),由组稿器生成 */
   summary?: string;
   left: Array<{ name: string; value: number }>;
-  right: Array<{ name: string; value: number }>;
+  /** questions = 该层在采问题数(对标竞品「N 次 · M 题」的并置呈现) */
+  right: Array<{ name: string; value: number; questions?: number }>;
   /** from/to 为 left/right 数组下标 */
   links: Array<{ from: number; to: number; value: number }>;
 }
@@ -192,12 +193,15 @@ export type InsightPlanGate = PlanTier;
 
 /** 问题语义分层(docs/01 IA ⑤ 精品化,对标竞品方法论):
  *  消费功能层=「XX 有什么功能」 场景人群层=「我该买什么」 品类行业层=「行业格局如何」
- *  竞品层=「A 和 B 怎么选」 渠道市场层=「哪里买/渠道」。参与分层热力与存在形状图表。 */
+ *  竞品层=「A 和 B 怎么选」 价格决策层=「值不值/性价比」 渠道市场层=「哪里买/渠道」
+ *  风险信任层=「安全吗/投诉/翻车」(以风险为焦点的提问,即使提及其他品牌)。 */
 export const INSIGHT_QUESTION_LAYERS = [
   '消费功能层',
   '场景人群层',
   '品类行业层',
   '竞品层',
+  '价格决策层',
   '渠道市场层',
+  '风险信任层',
 ] as const;
 export type InsightQuestionLayer = (typeof INSIGHT_QUESTION_LAYERS)[number];
