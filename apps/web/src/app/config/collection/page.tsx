@@ -9,7 +9,7 @@ import { EmptyState, PageHeader, Skeleton } from '@/components/ui';
 interface StatusDto {
   plan: { engines: string[]; surfaces: string[]; freq: number; nextRunAt: string | null; active: boolean } | null;
   engines: Array<{ engine: string; paused: boolean; recent: number; ok: number; failed: number; successRate: number | null }>;
-  rounds: Array<{ id: number; startedAt: string; finishedAt: string | null; totals: { total?: number; done?: number; ok?: number; failed?: number } | null }>;
+  rounds: Array<{ id: number; startedAt: string; finishedAt: string | null; totals: { total?: number; done?: number; ok?: number; failed?: number; quota_blocked?: number } | null }>;
   lastRuns: Array<{ status: string; engine: string; ranAt: string }>;
 }
 
@@ -110,19 +110,26 @@ export default function CollectionPage() {
           <ul className="space-y-2 text-sm">
             {data.rounds.map((r) => {
               const t = r.totals ?? {};
-              const done = t.done ?? 0;
               const total = t.total ?? 0;
+              // done 含被拦截项,不能当成功展示:细分 ok(有效)/failed/quota_blocked(拦截)
               const failed = t.failed ?? 0;
+              const blocked = t.quota_blocked ?? 0;
+              const ok = t.ok ?? Math.max((t.done ?? 0) - failed - blocked, 0);
+              const pctOf = (n: number) => (total ? `${(n / total) * 100}%` : 0);
               return (
                 <li key={r.id} className="flex items-center justify-between gap-2">
                   <span>轮次 #{r.id}</span>
-                  <span className="metric-num text-xs text-slate-500">
-                    {done}/{total}
-                    {failed > 0 && <span className="text-bad"> · 失败 {failed}</span>}
+                  <span className="metric-num text-xs">
+                    <span className={ok > 0 ? 'text-good' : 'text-slate-300'}>{ok}✓</span>
+                    {failed > 0 && <span className="text-bad"> · {failed}✗</span>}
+                    {blocked > 0 && <span className="text-warn"> · {blocked} 被拦截</span>}
+                    <span className="text-slate-400"> / {total}</span>
                     {r.finishedAt ? ' · 已完成' : ' · 进行中'}
                   </span>
-                  <div className="h-1.5 w-32 rounded bg-slate-100">
-                    <div className="h-1.5 rounded bg-brand" style={{ width: total ? `${(done / total) * 100}%` : 0 }} />
+                  <div className="flex h-1.5 w-32 overflow-hidden rounded bg-slate-100">
+                    <div className="h-1.5 bg-good" style={{ width: pctOf(ok) }} />
+                    <div className="h-1.5 bg-bad" style={{ width: pctOf(failed) }} />
+                    <div className="h-1.5 bg-warn" style={{ width: pctOf(blocked) }} />
                   </div>
                   {r.finishedAt && failed > 0 && (
                     <button

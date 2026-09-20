@@ -30,7 +30,7 @@ interface QuotaDto {
   reputation: { used: number; limit: number };
 }
 interface StatusDto {
-  rounds: Array<{ id: number; startedAt: string; finishedAt: string | null; totals: { total?: number; done?: number; ok?: number; failed?: number } | null }>;
+  rounds: Array<{ id: number; startedAt: string; finishedAt: string | null; totals: { total?: number; done?: number; ok?: number; failed?: number; quota_blocked?: number } | null }>;
 }
 interface ActionsDto {
   rulesetVersion: string;
@@ -100,6 +100,10 @@ export default function DashboardPage() {
   const todayKey = new Date().toDateString();
   const todayRounds = (status.data?.rounds ?? []).filter((r) => new Date(r.startedAt).toDateString() === todayKey);
   const todayDone = todayRounds.reduce((a, r) => a + (r.totals?.done ?? 0), 0);
+  // 当日口径细分:被拦截/失败的采集不能混进"有效查询"里看着像成功(docs/02 §1.1)
+  const todayBlocked = todayRounds.reduce((a, r) => a + (r.totals?.quota_blocked ?? 0), 0);
+  const todayFailed = todayRounds.reduce((a, r) => a + (r.totals?.failed ?? 0), 0);
+  const todayOk = Math.max(todayDone - todayBlocked - todayFailed, 0);
   const runningNow = (status.data?.rounds ?? []).some((r) => !r.finishedAt && (r.totals?.total ?? 0) > 0);
   const latestRunAt = (status.data?.rounds ?? [])
     .map((r) => r.startedAt)
@@ -159,8 +163,13 @@ export default function DashboardPage() {
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-x-8 gap-y-3 border-t border-slate-100 pt-4">
           <div className="flex items-baseline gap-2">
-            <CountUp value={todayDone} className="metric-num text-2xl font-bold text-slate-900" />
-            <span className="text-xs text-slate-500">当日采集查询</span>
+            <CountUp value={todayOk} className="metric-num text-2xl font-bold text-slate-900" />
+            <span className="text-xs text-slate-500">
+              当日有效采集
+              {todayBlocked + todayFailed > 0 && (
+                <span className="text-warn">(另有 {todayBlocked} 次被配额拦截{todayFailed > 0 ? `、${todayFailed} 次失败` : ''},未计成功)</span>
+              )}
+            </span>
           </div>
           <div className="flex items-baseline gap-2">
             <CountUp value={quotaUsed} className="metric-num text-2xl font-bold text-slate-900" />
