@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BarRankBlock, FunnelBlock, HeatmapBlock, SankeyBlock, TrendBlock } from '@geo/shared';
-import { composeIndustryInsight, extractPrevMetrics, type IndustryAggregates } from '../src/insight-builder';
+import { composeIndustryInsight, extractPrevMetrics, waitingInsight, type IndustryAggregates } from '../src/insight-builder';
 import type { BarRankBlock, RadarBlock } from '@geo/shared';
 
 /** 合成聚合输入:2 品牌、2 引擎、完整漏斗/信源/口碑/趋势。 */
@@ -258,6 +258,28 @@ describe('行业洞察组稿(运行 → 数据报告)', () => {
     const rep = c.blocks.find((b) => b.title === '口碑与印象')!;
     expect(JSON.stringify(rep)).toContain('性价比高');
     expect(JSON.stringify(rep)).not.toContain('×12');
+  });
+
+  it('零数据等待稿:区分未采集/自动起采集/全失败,不进图表不虚构结论', () => {
+    const agg = fixture();
+    agg.funnel = { answers: 0, mentioned: 0, top3: 0, top1: 0 };
+
+    // 从未采集 + 未自动触发 → 指引手动「立即采集」
+    const a = waitingInsight(agg, { totalRuns: 0, failed: 0, quotaBlocked: 0, autoCollected: false });
+    expect(a.title).toContain('等待采集数据');
+    expect(a.blocks).toHaveLength(1);
+    expect(a.blocks.every((b) => b.type === 'takeaway')).toBe(true); // 不出任何比率图表
+    expect((a.blocks[0] as { text: string }).text).toContain('立即采集');
+
+    // 从未采集 + 已自动起采集 → 告知等几分钟再生成
+    const b = waitingInsight(agg, { totalRuns: 0, failed: 0, quotaBlocked: 0, autoCollected: true });
+    expect((b.blocks[0] as { text: string }).text).toContain('已自动触发首轮采集');
+
+    // 采集全失败 → 指向引擎登录态
+    const c = waitingInsight(agg, { totalRuns: 60, failed: 55, quotaBlocked: 5, autoCollected: false });
+    expect((c.blocks[0] as { text: string }).text).toContain('失败 55 次');
+    expect((c.blocks[0] as { text: string }).text).toContain('登录态');
+    expect(a.cover.answers).toBe(0);
   });
 
   it('环比:传入上期基线后 items 带 delta,summary 出现变动叙述', () => {

@@ -1137,6 +1137,56 @@ export function extractPrevMetrics(blocks: InsightBlock[]): PrevMetrics | null {
 export interface InsightBuildJob {
   insightId: number;
   windowDays: number | null;
+  /** 生成时行业从无采集记录 → 服务端已自动触发首轮采集(等待页文案据此告知) */
+  autoCollected?: boolean;
+}
+
+/** 哨兵账号(10000000000)在某行业的影子品牌 id;无则 null。 */
+async function shadowBrandId(db: Db, industry: string): Promise<number | null> {
+  if (!industry) return null;
+  const rows = rowsOf<{ id: string }>(
+    await db.execute(sql`
+      select b.id::text as id from brands b
+      join accounts a on a.id = b.account_id
+      where b.industry = ${industry} and a.phone = '10000000000'
+      limit 1
+    `),
+  );
+  return rows.length > 0 ? Number(rows[0]!.id) : null;
+}
+
+/** 零有效回答时的采集诊断:有没有跑过、失败/拦截各多少。 */
+export interface CollectDiagnosis {
+  totalRuns: number;
+  failed: number;
+  quotaBlocked: number;
+  autoCollected: boolean;
+}
+
+/**
+ * 零数据等待稿(rubric 1.1 极端形态):0 条有效回答时不出任何比率图表、
+ * 不进 LLM(没有事实就写行业结论是虚构),只诚实说明原因与下一步。
+ */
+export function waitingInsight(agg: IndustryAggregates, diag: CollectDiagnosis): ComposedInsight {
+  const reason =
+    diag.totalRuns === 0
+      ? diag.autoCollected
+        ? `该行业此前没有采集记录,本次生成已自动触发首轮采集 —— 约 5~15 分钟采集完成后,再点一次「生成新一期」即可出完整报告。`
+        : `该行业还没有采集数据:生成报告不会自动采集。请先在行业配置面板点「立即采集」,完成后重新生成。`
+      : `近 ${agg.windowDays ?? 30} 天 0 条有效回答:采集任务失败 ${diag.failed} 次、被配额拦截 ${diag.quotaBlocked} 次 —— 通常是引擎登录态缺失,请在账号池完成登录后重新采集。`;
+  return {
+    title: `${agg.industry}AI可见度监测:等待采集数据`,
+    summary: reason.slice(0, 90),
+    cover: { brands: agg.brands.length, answers: 0 },
+    blocks: [
+      {
+        type: 'takeaway',
+        title: '为什么还没有数据',
+        text: `${reason}品牌与问题配置已就绪(${agg.brands.length} 个监测品牌),数据一到即可生成完整报告:格局排行、引擎与场景热力、可见度来源桑基、信源与口碑全量分析。`,
+        tone: 'warn',
+      } satisfies TakeawayBlock,
+    ],
+  };
 }
 
 /**
@@ -1200,6 +1250,36 @@ export async function backfillQuestionLayers(db: Db, industry: string): Promise<
   return updated;
 }
 
+/** 组稿结果回写报告行(期数 = 同行业其他报告数 + 1)。 */
+async function finishBuild(
+  db: Db,
+  insightId: number,
+  composed: ComposedInsight,
+  row: { industryId: number },
+  windowDays: number | null,
+): Promise<void> {
+  const priorCount = await db.execute(sql`
+    select count(*)::int as n from industry_insights
+    where industry_id = ${row.industryId} and id <> ${insightId}
+  `);
+  const issueNo = (rowsOf<{ n: number }>(priorCount)[0]?.n ?? 0) + 1;
+  await db
+    .update(industryInsights)
+    .set({
+      title: composed.title,
+      summary: composed.summary,
+      cover: composed.cover as unknown as Record<string, unknown>,
+      blocks: composed.blocks as unknown[],
+      issue: `第 ${issueNo} 期`,
+      windowDays,
+      buildStatus: 'idle',
+      buildError: null,
+      builtAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(industryInsights.id, insightId));
+}
+
 /**
  * 运行一次行业洞察聚合:置 running → 取数组稿 → 回写内容(覆盖 blocks/cover/summary,
  * 保留 status/featured 等发布态)→ 置 idle;失败置 failed 并记录原因。
@@ -1224,6 +1304,28 @@ export async function runInsightBuild(db: Db, job: InsightBuildJob): Promise<voi
       console.error(`[insights] 分层补齐失败(忽略)industry=${industry?.name}:`, (err as Error).message.slice(0, 120));
     }
     const agg = await collectIndustryAggregates(db, industry?.name ?? '', job.windowDays);
+    // 零有效回答:出诚实的等待稿(区分「没采过」与「采集全失败」),不进 LLM 虚构行业结论
+    if (agg.funnel.answers === 0) {
+      const shadowId = await shadowBrandId(db, industry?.name ?? '');
+      const winQr = job.windowDays ? sql` and r.ran_at >= now() - (${job.windowDays} || ' days')::interval` : sql``;
+      const statuses = shadowId
+        ? rowsOf<{ status: string; n: number }>(
+            await db.execute(sql`
+              select r.status, count(*)::int as n from query_runs r
+              where r.brand_id = ${shadowId}${winQr} group by r.status
+            `),
+          )
+        : [];
+      const by = (s: string) => statuses.filter((r) => r.status === s).reduce((a, r) => a + r.n, 0);
+      const composed0 = waitingInsight(agg, {
+        totalRuns: statuses.reduce((a, r) => a + r.n, 0),
+        failed: by('failed'),
+        quotaBlocked: by('quota_blocked'),
+        autoCollected: job.autoCollected ?? false,
+      });
+      await finishBuild(db, job.insightId, composed0, row, job.windowDays);
+      return;
+    }
     // 上期环比基线:优先同行业其他报告行(多期并存);报告行复用制下,取自身被覆盖前的旧内容
     const prevRow = (
       await db
@@ -1245,29 +1347,7 @@ export async function runInsightBuild(db: Db, job: InsightBuildJob): Promise<voi
     } catch (err) {
       console.error(`[insights] LLM 撰稿失败,使用模板稿 insight=${job.insightId}:`, (err as Error).message.slice(0, 120));
     }
-
-    // 期数:同行业已有报告数 + 1(每次运行产生新一期)
-    const priorCount = await db.execute(sql`
-      select count(*)::int as n from industry_insights
-      where industry_id = ${row.industryId} and id <> ${job.insightId}
-    `);
-    const issueNo = (rowsOf<{ n: number }>(priorCount)[0]?.n ?? 0) + 1;
-
-    await db
-      .update(industryInsights)
-      .set({
-        title: composed.title,
-        summary: composed.summary,
-        cover: composed.cover as unknown as Record<string, unknown>,
-        blocks: composed.blocks as unknown[],
-        issue: `第 ${issueNo} 期`,
-        windowDays: job.windowDays,
-        buildStatus: 'idle',
-        buildError: null,
-        builtAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(industryInsights.id, job.insightId));
+    await finishBuild(db, job.insightId, composed, row, job.windowDays);
   } catch (err) {
     await db
       .update(industryInsights)

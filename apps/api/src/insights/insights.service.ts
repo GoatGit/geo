@@ -467,7 +467,26 @@ export class InsightsService implements OnModuleDestroy {
       throw new HttpException('该行业洞察正在聚合中,请稍候', HttpStatus.CONFLICT);
     }
 
-    await this.insightsQueue.add('build', { insightId: insight.id, windowDays }, { attempts: 1, removeOnComplete: 100 });
+    // 该行业从无采集记录 → 自动起首轮采集(否则首份报告必然全空,用户还得再猜一步)
+    let autoCollected = false;
+    try {
+      const everRan = (await this.db.execute(sql`
+        select 1 from query_runs qr
+        join brands b on b.id = qr.brand_id
+        join accounts a on a.id = b.account_id
+        where b.industry = ${industry.name} and a.phone = '10000000000'
+        limit 1
+      `)) as unknown as { rows: unknown[] };
+      if ((everRan.rows ?? []).length === 0) {
+        await this.collectNow(industryId);
+        autoCollected = true;
+      }
+    } catch (err) {
+      // 影子品牌未建成等场景:不阻断生成,等待稿会给出手动采集指引
+      console.error(`[insights] 自动起采集失败(忽略)industry=${industryId}:`, (err as Error).message.slice(0, 120));
+    }
+
+    await this.insightsQueue.add('build', { insightId: insight.id, windowDays, autoCollected }, { attempts: 1, removeOnComplete: 100 });
     return { insightId: insight.id, queued: true };
   }
 
