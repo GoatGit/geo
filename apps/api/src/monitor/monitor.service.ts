@@ -259,12 +259,6 @@ export class MonitorService {
 
     for (const run of runs) {
       try {
-        // 无论判定结果如何都打标:语义正确的 null 不应被反复重扫(会饿死更早的 run)
-        await this.db.execute(sql`
-          update query_runs
-          set meta = coalesce(meta, '{}'::jsonb) || '{"rankBackfillChecked":"true"}'::jsonb
-          where id = ${run.id}
-        `);
         const facts = (
           await this.db.execute(sql`
             select id, subject_key, subject_kind, subject_name, rank
@@ -286,9 +280,16 @@ export class MonitorService {
           subjects: facts.map((f) => ({ key: f.subject_key, kind: f.subject_kind, name: f.subject_name, aliases: [] })),
         });
         if (!judged) {
+          // 判定失败(LLM 超时/限流):不打标,下次批处理重试
           failed += 1;
           continue;
         }
+        // 判定成功才打标:语义正确的 null 不会被反复重扫
+        await this.db.execute(sql`
+          update query_runs
+          set meta = coalesce(meta, '{}'::jsonb) || '{"rankBackfillChecked":"true"}'::jsonb
+          where id = ${run.id}
+        `);
         const updates: Array<{ id: number; name: string; rank: number }> = [];
         for (const j of judged.judges) {
           if (j.rank == null || !j.mentioned) continue;
