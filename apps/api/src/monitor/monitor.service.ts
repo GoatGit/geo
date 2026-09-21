@@ -244,7 +244,7 @@ export class MonitorService {
         join monitoring_questions q on q.id = mf.question_id
         where mf.brand_id = ${brandId} and mf.mentioned = true and mf.rank is null
           and qr.answer_ref is not null
-        order by qr.id
+        order by qr.id desc
         limit ${limit}
       `)
     ).rows as unknown as Array<{ id: number; answer_ref: string; question: string }>;
