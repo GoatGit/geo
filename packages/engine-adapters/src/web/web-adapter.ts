@@ -772,5 +772,20 @@ export function stripAnswerNoise(
     while (i < lines.length && (lines[i]!.trim().length === 0 || lead.test(lines[i]!.trim()))) i += 1;
     out = lines.slice(i).join('\n');
   }
-  return out.trim();
+  return stripInlineCitationMarkers(out);
+}
+
+/**
+ * 内联引用角标剥离(全引擎通用,2026-09-21):DeepSeek 等引擎把引用角标刮成
+ * 「- 知乎 」「- 8 」「- 1 - 5 」文本碎片混进句子。仅清除紧邻句末标点的
+ * 已知站点名/纯数字标记(带空格的短横线形态),不触碰正文连字符词(如「增程-纯电」)。
+ */
+const INLINE_SITE_NAMES = '知乎|百家号|新浪新闻|新浪汽车|新浪网|手机新浪网|搜狐|搜狐汽车|汽车之家|有驾|腾讯新闻|网易|央视网|央视新闻|证券之星|太平洋汽车|太平洋汽车问答|懂车帝|易车|36氪|界面新闻|财联社|中国经济网|中国汽车报';
+const INLINE_MARKER_RE = new RegExp(
+  `(?:\\s*-\\s+(?:\\d{1,3}|${INLINE_SITE_NAMES}))+\\s*(?=[。！？；])`,
+  'g',
+);
+
+export function stripInlineCitationMarkers(text: string): string {
+  return text.replace(INLINE_MARKER_RE, '');
 }

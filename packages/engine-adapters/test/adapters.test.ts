@@ -136,3 +136,18 @@ describe('stripAnswerNoise(wenxin 引导块剥离)', async () => {
     expect(out.startsWith('‌理想汽车更适合')).toBe(true);
   });
 });
+
+describe('stripInlineCitationMarkers(内联引用角标,全引擎)', async () => {
+  const { stripInlineCitationMarkers } = await import('../src/web/web-adapter');
+  it('剥离句末的站点名/纯数字/连续数字链标记', () => {
+    expect(stripInlineCitationMarkers('对颠簸的过滤提升很直接- 知乎 。')).toBe('对颠簸的过滤提升很直接。');
+    expect(stripInlineCitationMarkers('也支持选装六座- 8 。')).toBe('也支持选装六座。');
+    expect(stripInlineCitationMarkers('正好落在你的预算里- 1 - 5 。')).toBe('正好落在你的预算里。');
+    expect(stripInlineCitationMarkers('销量非常强劲- 4 。')).toBe('销量非常强劲。');
+  });
+  it('不触碰正文连字符词与无句末标点的合法内容', () => {
+    expect(stripInlineCitationMarkers('增程-纯电双路线并行。')).toBe('增程-纯电双路线并行。');
+    expect(stripInlineCitationMarkers('理想 L6：延续家庭定位- 2 。')).toBe('理想 L6：延续家庭定位。');
+    expect(stripInlineCitationMarkers('没有标记的普通句子')).toBe('没有标记的普通句子');
+  });
+});
