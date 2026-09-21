@@ -39,7 +39,7 @@ export default function RankingsPage() {
     const lines = rows.map((r) => {
       const cells = engines.map((eng) => {
         const c = r.cells.find((x) => x.engine === eng);
-        return c ? (c.rank !== null ? `#${c.rank}` : c.mentioned ? '提及未上榜' : '未上榜') : '—';
+        return c ? (c.rank !== null ? `#${c.rank}` : c.mentioned ? '提及·无排名' : '未提及') : '—';
       });
       return [r.questionText, ...cells, r.compositeRank ?? '', pct(r.mentionRate), pct(r.top3Rate), pct(r.top1Rate)];
     });
@@ -170,8 +170,9 @@ export default function RankingsPage() {
             <span className="metric-num rounded bg-good-50 px-1.5 py-0.5 text-good">#1</span>首推
             <span className="metric-num ml-1 rounded bg-brand-50 px-1.5 py-0.5 text-brand-700">#2-3</span>Top3
             <span className="metric-num ml-1 rounded bg-slate-100 px-1.5 py-0.5">#4+</span>靠后
-            <span className="ml-1 rounded bg-bad-50 px-1.5 py-0.5 text-bad">未上榜</span>
-            <span className="ml-1.5 border-l border-slate-100 pl-1.5 text-slate-400">综合名次 = 未上榜记 N+1 取中位数</span>
+            <span className="ml-1 rounded bg-slate-50 px-1.5 py-0.5 text-slate-400">提及·无排名</span>
+            <span className="ml-1 rounded bg-bad-50 px-1.5 py-0.5 text-bad">未提及</span>
+            <span className="ml-1.5 border-l border-slate-100 pl-1.5 text-slate-400">综合名次 = 未提及记 N+1 取中位数;位次仅在 AI 给出榜单时产生</span>
           </span>
         </span>
       </div>
@@ -234,9 +235,19 @@ export default function RankingsPage() {
                               )}
                             </span>
                           ) : cell.mentioned ? (
-                            <span className="block px-1 py-0.5 text-xs text-slate-400">提及未上榜</span>
+                            <span
+                              className="block cursor-help px-1 py-0.5 text-xs text-slate-400"
+                              title="AI 回答提及了本品,但该回答是开放式评述、未给出推荐位次(排名类指标不计入此类)"
+                            >
+                              提及·无排名
+                            </span>
                           ) : (
-                            <span className="block rounded bg-bad-50 px-1.5 py-0.5 text-xs text-bad">未上榜</span>
+                            <span
+                              className="block cursor-help rounded bg-bad-50 px-1.5 py-0.5 text-xs text-bad"
+                              title="该条 AI 回答未出现本品"
+                            >
+                              未提及
+                            </span>
                           )}
                         </button>
                       )}
