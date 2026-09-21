@@ -79,7 +79,7 @@ export async function renderInsightPdf(detail: PdfInsight): Promise<Buffer> {
   const doc = new PDFDocument({
     size: 'A4',
     margins: { top: PAGE.top, bottom: DOC_BOTTOM, left: PAGE.left, right: PAGE.right },
-    info: { Title: detail.title, Creator: '青柠GEO' },
+    info: { Title: detail.title, Creator: '格尺GEO' },
   });
   const chunks: Buffer[] = [];
   doc.on('data', (c: Buffer) => chunks.push(c));
@@ -93,7 +93,7 @@ export async function renderInsightPdf(detail: PdfInsight): Promise<Buffer> {
     doc
       .fillColor(GRAY)
       .fontSize(7.5)
-      .text(`青柠GEO · 行业洞察 · ${detail.industry || ''} · 第 ${pageNo} 页`, PAGE.left, PAGE.h - 42, {
+      .text(`格尺GEO · 行业洞察 · ${detail.industry || ''} · 第 ${pageNo} 页`, PAGE.left, PAGE.h - 42, {
         width: CONTENT_W,
         align: 'center',
         lineBreak: false,
@@ -524,25 +524,20 @@ export async function renderInsightPdf(detail: PdfInsight): Promise<Buffer> {
     }
   }
 
-  // ===== 页眉(品牌标记「光圈青柠」:圆盘 + 三道楔形切口) =====
+  // ===== 页眉(品牌标记「六边形格尺」:实心六边形,与产品 logo 同构) =====
   const mcx = PAGE.left + 8;
   const mcy = PAGE.top + 8;
-  const mr = 8;
-  doc.circle(mcx, mcy, mr).fill(BRAND);
-  doc.fillColor('#ffffff');
-  for (const baseDeg of [-90, 30, 150]) {
-    const rad = (deg: number) => (deg * Math.PI) / 180;
-    const r1 = mr * 0.3;
-    const r2 = mr * 0.99;
-    const pts: Array<[number, number]> = [
-      [mcx + r1 * Math.cos(rad(baseDeg - 13)), mcy + r1 * Math.sin(rad(baseDeg - 13))],
-      [mcx + r2 * Math.cos(rad(baseDeg - 13)), mcy + r2 * Math.sin(rad(baseDeg - 13))],
-      [mcx + r2 * Math.cos(rad(baseDeg + 13)), mcy + r2 * Math.sin(rad(baseDeg + 13))],
-      [mcx + r1 * Math.cos(rad(baseDeg + 13)), mcy + r1 * Math.sin(rad(baseDeg + 13))],
-    ];
-    doc.moveTo(pts[0]![0], pts[0]![1]).lineTo(pts[1]![0], pts[1]![1]).lineTo(pts[2]![0], pts[2]![1]).lineTo(pts[3]![0], pts[3]![1]).closePath().fill('#ffffff');
+  const mr = 9.5;
+  doc.fillColor(BRAND);
+  for (let i = 0; i < 6; i++) {
+    const rad = ((90 + i * 60) * Math.PI) / 180; // 尖顶朝向,与 logo 一致
+    const hx = mcx + mr * Math.cos(rad);
+    const hy = mcy - mr * Math.sin(rad);
+    if (i === 0) doc.moveTo(hx, hy);
+    else doc.lineTo(hx, hy);
   }
-  doc.fillColor(BRAND).fontSize(10).text('青柠GEO · AI 搜索品牌可见性监测', PAGE.left + 22, PAGE.top - 1, { lineBreak: false });
+  doc.closePath().fill(BRAND);
+  doc.fillColor(BRAND).fontSize(10).text('格尺GEO · AI 搜索品牌可见性监测', PAGE.left + 22, PAGE.top - 1, { lineBreak: false });
   y = PAGE.top + 24;
   text(detail.title, 20, INK, { lineGap: 2 });
   const windowText = detail.windowDays ? `近 ${detail.windowDays} 天` : '全量历史';

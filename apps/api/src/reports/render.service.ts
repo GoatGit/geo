@@ -155,7 +155,7 @@ export class ReportRenderService {
 
     return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"/>
-<title>青柠GEO ${esc(tpl.name)} · ${esc(payload.brand?.name ?? '')} · ${esc(payload.period ?? '')}</title>
+<title>格尺GEO ${esc(tpl.name)} · ${esc(payload.brand?.name ?? '')} · ${esc(payload.period ?? '')}</title>
 <style>
   :root { --ink:#3f453e; --brand:#6f7c6d; --brand-50:#f4f6f3; --line:#e4e0d8; --bad:#bf8e88; --warn:#c2a26b; }
   * { box-sizing: border-box; }
@@ -184,7 +184,7 @@ export class ReportRenderService {
   @media print { body { background:#fff; padding:0; } .page { box-shadow:none; padding:12mm; border-radius:0; } }
 </style></head>
 <body><div class="page">
-  <div class="brandbar"><svg width="14" height="14" viewBox="0 0 24 24"><path fill="#6f7c6d" fill-rule="evenodd" d="M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0ZM11.28 8.88 9.8 2.45a9.8 9.8 0 0 1 4.4 0l1.51 6.43Zm3.78 4.05 4.59 1.93a10.02 10.02 0 0 1-2.2 3.74l-4.71-3.91 2.32-2.76Zm-5.4 1.25 4.84 4.51a9.97 9.97 0 0 1-9.7.01l4.86-4.52Z"/></svg><b>青柠GEO</b><span style="color:#8a877e;font-size:12px">AI 搜索品牌可见性监测</span></div>
+  <div class="brandbar"><svg width="14" height="14" viewBox="0 0 24 24"><path fill="#6f7c6d" fill-rule="evenodd" d="M12 2 20.66 7 20.66 17 12 22 3.34 17 3.34 7ZM12 5.8 17.37 8.9 17.37 15.1 12 18.2 6.63 15.1 6.63 8.9ZM12.2 7.4h1.5v4.2h-1.5ZM14.6 8.8h1.5v2.8h-1.5Z"/></svg><b>格尺GEO</b><span style="color:#8a877e;font-size:12px">AI 搜索品牌可见性监测</span></div>
   <h1>${esc(tpl.name)} · ${esc(payload.brand?.name ?? '')}</h1>
   <p class="meta">周期 ${esc(payload.period ?? '')} · 生成于 ${esc(payload.generatedAt ?? '')}${payload.brand?.website ? ' · ' + esc(payload.brand.website) : ''}</p>
   ${sections}

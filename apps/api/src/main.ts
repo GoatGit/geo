@@ -36,7 +36,7 @@ async function bootstrap() {
   app.enableShutdownHooks();
 
   await app.listen(env.port, '0.0.0.0');
-  new Logger('bootstrap').log(`青柠GEO API listening on :${env.port} (${env.nodeEnv})`);
+  new Logger('bootstrap').log(`格尺GEO API listening on :${env.port} (${env.nodeEnv})`);
 }
 
 void bootstrap();

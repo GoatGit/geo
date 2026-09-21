@@ -102,7 +102,7 @@ export default function ReportsPage() {
   const downloadPdf = async (r: ReportRow) => {
     setPdfBusy(r.id);
     try {
-      await apiDownload(`/reports/${r.id}/pdf`, `青柠GEO-${TYPE_LABEL[r.type] ?? r.type}-${r.period}-${r.id}.pdf`);
+      await apiDownload(`/reports/${r.id}/pdf`, `格尺GEO-${TYPE_LABEL[r.type] ?? r.type}-${r.period}-${r.id}.pdf`);
       toast('PDF 已开始下载');
     } catch (e) {
       toast((e as Error).message, 'err');

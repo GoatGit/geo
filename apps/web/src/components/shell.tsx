@@ -131,7 +131,7 @@ function ConsoleShell({ pathname, children }: { pathname: string; children: Reac
   useEffect(() => setNavOpen(false), [pathname]);
   useEffect(() => {
     const hit = ROUTE_TITLES.find(([re]) => re.test(pathname));
-    document.title = hit ? `${hit[1]} · 青柠GEO` : '青柠GEO · AI 搜索品牌可见性监测';
+    document.title = hit ? `${hit[1]} · 格尺GEO` : '格尺GEO · AI 搜索品牌可见性监测';
     // SPA 路由切换后复位滚动条(否则新页面继承上一页的滚动位置)
     window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
   }, [pathname]);
@@ -224,7 +224,7 @@ function Sidebar({ pathname }: { pathname: string }) {
             <LogoMark className="h-8 w-8 shrink-0" />
             {!rail && (
               <span>
-                <span className="block text-[15px] font-semibold leading-4 tracking-wide text-white">青柠GEO</span>
+                <span className="block text-[15px] font-semibold leading-4 tracking-wide text-white">格尺GEO</span>
               </span>
             )}
           </Link>
@@ -410,7 +410,7 @@ function MobileNav({ pathname, open, onClose }: { pathname: string; open: boolea
         <div className="flex items-center gap-2.5 px-5 pb-2 pt-6">
           <Link href="/dashboard" className="flex items-center gap-2.5" onClick={onClose}>
             <LogoMark className="h-8 w-8" />
-            <span className="block text-[15px] font-semibold tracking-wide text-white">青柠GEO</span>
+            <span className="block text-[15px] font-semibold tracking-wide text-white">格尺GEO</span>
           </Link>
           <button
             onClick={onClose}

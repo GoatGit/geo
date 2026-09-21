@@ -169,7 +169,7 @@ export class ReportsController implements OnModuleDestroy {
   async download(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
     const { row, payload } = await this.loadPayload(req, id);
     const html = this.renderer.render(payload, row.type as ReportType);
-    const name = `青柠GEO-${row.type}-${row.period}-${id}.html`;
+    const name = `格尺GEO-${row.type}-${row.period}-${id}.html`;
     return {
       filename: name,
       contentBase64: Buffer.from(html, 'utf8').toString('base64'),
@@ -182,7 +182,7 @@ export class ReportsController implements OnModuleDestroy {
   async pdf(@Req() req: Request, @Param('id', ParseIntPipe) id: number, @Res() res: Response) {
     const { row, payload } = await this.loadPayload(req, id);
     const buf = await renderReportPdf(payload as unknown as ReportPayload, row.type as ReportType);
-    const utf8Name = encodeURIComponent(`青柠GEO-${REPORT_TEMPLATES[row.type as ReportType]?.name ?? row.type}-${row.period}-${id}.pdf`);
+    const utf8Name = encodeURIComponent(`格尺GEO-${REPORT_TEMPLATES[row.type as ReportType]?.name ?? row.type}-${row.period}-${id}.pdf`);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="geo-report-${id}.pdf"; filename*=UTF-8''${utf8Name}`);
     res.end(buf);

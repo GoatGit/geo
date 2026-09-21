@@ -32,7 +32,7 @@ async function sendPdf(res: Response, detail: PdfInsight) {
     throw new HttpException('报告还没有内容:先在管理后台「运行」生成数据', HttpStatus.CONFLICT);
   }
   const buffer = await renderInsightPdf(detail);
-  const name = `青柠GEO-行业洞察-${detail.industry}-${detail.issue || detail.id}.pdf`;
+  const name = `格尺GEO-行业洞察-${detail.industry}-${detail.issue || detail.id}.pdf`;
   res.setHeader('content-type', 'application/pdf');
   res.setHeader('content-disposition', `attachment; filename="insight-${detail.id}.pdf"; filename*=UTF-8''${encodeURIComponent(name)}`);
   res.setHeader('content-length', String(buffer.length));

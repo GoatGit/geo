@@ -13,8 +13,8 @@ const base = (p: SVGProps<SVGSVGElement>) => ({
   ...p,
 });
 
-/** 青柠GEO 品牌标记「光圈青柠」:扁平圆盘 × 三道楔形切口。
- *  意象三读:青柠切片 / 相机光圈(看见) / 份额饼图(提及率)。
+/** 格尺GEO 品牌标记「六边形格尺」:六边形环 × 内侧刻度。
+ *  意象:格尺(给 AI 可见度做度量)/ 六边形(结构化、可审计)。
  *  evenodd 单色几何跟随 currentColor,任意底色可用。 */
 export const IconLogo = (p: SVGProps<SVGSVGElement>) => (
   <svg viewBox="0 0 24 24" fill="none" {...p}>
@@ -22,7 +22,7 @@ export const IconLogo = (p: SVGProps<SVGSVGElement>) => (
       fill="currentColor"
       fillRule="evenodd"
       clipRule="evenodd"
-      d="M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0ZM11.28 8.88 L9.8 2.45 A9.8 9.8 0 0 1 14.2 2.45 L12.72 8.88 ZM15.06 12.94 L21.37 14.87 A9.8 9.8 0 0 1 19.17 18.68 L14.34 14.18 ZM9.66 14.18 L4.83 18.68 A9.8 9.8 0 0 1 2.63 14.87 L8.94 12.94 Z"
+      d="M12 2 L20.66 7 L20.66 17 L12 22 L3.34 17 L3.34 7 Z M12 5.8 L17.37 8.9 L17.37 15.1 L12 18.2 L6.63 15.1 L6.63 8.9 Z M12.2 7.4 h1.5 v4.2 h-1.5 Z M14.6 8.8 h1.5 v2.8 h-1.5 Z"
     />
   </svg>
 );

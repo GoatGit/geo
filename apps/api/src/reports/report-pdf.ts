@@ -38,7 +38,7 @@ export async function renderReportPdf(payload: ReportPayload, type: ReportType):
   const doc = new PDFDocument({
     size: 'A4',
     margins: { top: PAGE.top, bottom: DOC_BOTTOM, left: PAGE.left, right: PAGE.right },
-    info: { Title: `青柠GEO ${tpl.name} · ${payload.brand?.name ?? ''}`, Creator: '青柠GEO' },
+    info: { Title: `格尺GEO ${tpl.name} · ${payload.brand?.name ?? ''}`, Creator: '格尺GEO' },
   });
   const chunks: Buffer[] = [];
   doc.on('data', (c: Buffer) => chunks.push(c));
@@ -52,7 +52,7 @@ export async function renderReportPdf(payload: ReportPayload, type: ReportType):
     doc
       .fillColor(SUB)
       .fontSize(7.5)
-      .text(`青柠GEO · ${tpl.name} · ${payload.brand?.name ?? ''} · 第 ${pageNo} 页`, PAGE.left, PAGE.h - 42, {
+      .text(`格尺GEO · ${tpl.name} · ${payload.brand?.name ?? ''} · 第 ${pageNo} 页`, PAGE.left, PAGE.h - 42, {
         width: CONTENT_W,
         align: 'center',
         lineBreak: false,
@@ -120,11 +120,20 @@ export async function renderReportPdf(payload: ReportPayload, type: ReportType):
     y += 18;
   };
 
-  // ===== 页眉 =====
+  // ===== 页眉(品牌标记「六边形格尺」:实心六边形,与产品 logo 同构) =====
   const mcx = PAGE.left + 8;
   const mcy = PAGE.top + 8;
-  doc.circle(mcx, mcy, 8).fill(BRAND);
-  doc.fillColor(SUB).fontSize(10).text('青柠GEO · AI 搜索品牌可见性监测', PAGE.left + 22, PAGE.top - 1, { lineBreak: false });
+  const mr = 9.5;
+  doc.fillColor(BRAND);
+  for (let i = 0; i < 6; i++) {
+    const rad = ((90 + i * 60) * Math.PI) / 180; // 尖顶朝向,与 logo 一致
+    const hx = mcx + mr * Math.cos(rad);
+    const hy = mcy - mr * Math.sin(rad);
+    if (i === 0) doc.moveTo(hx, hy);
+    else doc.lineTo(hx, hy);
+  }
+  doc.closePath().fill(BRAND);
+  doc.fillColor(SUB).fontSize(10).text('格尺GEO · AI 搜索品牌可见性监测', PAGE.left + 22, PAGE.top - 1, { lineBreak: false });
   y = PAGE.top + 24;
   text(`${tpl.name} · ${payload.brand?.name ?? ''}`, 20, INK, { lineGap: 2 });
   text(

@@ -35,9 +35,9 @@ export default function InsightDetailPage() {
   const title = query.data?.title;
   useEffect(() => {
     if (!title) return;
-    document.title = `${title} · 青柠GEO`;
+    document.title = `${title} · 格尺GEO`;
     return () => {
-      document.title = '青柠GEO · AI 搜索品牌可见性监测';
+      document.title = '格尺GEO · AI 搜索品牌可见性监测';
     };
   }, [title]);
 
@@ -59,7 +59,7 @@ export default function InsightDetailPage() {
         {/* 报告头(印刷风页眉) */}
         <header className="rise">
           <p className="flex flex-wrap items-center gap-2 text-xs font-semibold tracking-wide text-slate-500">
-            <Link href="/" className="text-brand-700 hover:underline">青柠GEO</Link>
+            <Link href="/" className="text-brand-700 hover:underline">格尺GEO</Link>
             <span>·</span>
             <span>{d.issue || '行业洞察'}</span>
             <span>·</span>
@@ -84,7 +84,7 @@ export default function InsightDetailPage() {
                       window.open(`/api/insights/${d.id}/pdf`, '_blank');
                       return;
                     }
-                    await apiDownload(`/insights/${d.id}/pdf`, `青柠GEO-行业洞察-${d.industry}-${d.issue || d.id}.pdf`);
+                    await apiDownload(`/insights/${d.id}/pdf`, `格尺GEO-行业洞察-${d.industry}-${d.issue || d.id}.pdf`);
                   } catch (e) {
                     toast((e as Error).message, 'err');
                   } finally {
@@ -129,7 +129,7 @@ export default function InsightDetailPage() {
             </a>
           </p>
           <p className="mt-1 flex items-center justify-between">
-            <span>数据来源:青柠GEO 实测(6 平台抢答)</span>
+            <span>数据来源:格尺GEO 实测(6 平台抢答)</span>
             <span>{d.publishedAt ? new Date(d.publishedAt).toLocaleDateString('zh-CN') : ''}</span>
           </p>
         </footer>

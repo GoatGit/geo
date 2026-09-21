@@ -31,7 +31,7 @@ export default function LoginPage() {
     const params = new URLSearchParams(window.location.search);
     setReasonKey(loginReasonKey(params.get('reason')));
     setNext(params.get('next'));
-    document.title = '登录 · 青柠GEO';
+    document.title = '登录 · 格尺GEO';
   }, []);
 
   useEffect(() => {
@@ -91,7 +91,7 @@ export default function LoginPage() {
           <Link href="/" className="rise flex items-center gap-2.5">
             <LogoMark className="h-9 w-9" />
             <span>
-              <span className="block text-base font-semibold leading-4 text-white">青柠GEO</span>
+              <span className="block text-base font-semibold leading-4 text-white">格尺GEO</span>
             </span>
           </Link>
 
