@@ -4,6 +4,7 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Request } from 'express';
 import { queryRuns } from '@geo/db';
 import { createStorageFromEnv, verifyEvidencePack, type EvidenceStorage } from '@geo/evidence';
+import { siteConfigOf, stripAnswerNoise, stripInlineCitationMarkers } from '@geo/engine-adapters';
 import { currentAccount } from '../common/auth';
 import { DB } from '../common/infra.module';
 import { BrandsService } from '../brands/brands.service';
@@ -133,7 +134,7 @@ export class RunsController {
       ranAt: run.ranAt,
       questionId: run.questionId,
       question: answer.question ?? null,
-      answerText: answer.answerText ?? '',
+      answerText: sanitizeForDisplay(run.engine, answer.answerText ?? ''),
       citations: answer.citations ?? [],
       manifestHash: run.evidenceHash,
       answerRef: run.answerRef,
@@ -141,4 +142,16 @@ export class RunsController {
       integrity,
     };
   }
+}
+
+/** 展示层净化(存证原文不动):按引擎站点配置剥离噪声/引导块 + 全引擎内联引用角标。 */
+function sanitizeForDisplay(engine: string, text: string): string {
+  if (!text) return text;
+  let out = stripInlineCitationMarkers(text);
+  try {
+    out = stripAnswerNoise(siteConfigOf(engine as never), out);
+  } catch {
+    // 未知引擎:仅内联角标剥离
+  }
+  return out;
 }
