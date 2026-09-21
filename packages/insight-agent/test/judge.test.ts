@@ -187,3 +187,31 @@ describe('schema 校验器', () => {
     if (partial.ok) expect(partial.value.impressions).toHaveLength(1);
   });
 });
+
+describe('buildMentionPrompt 位次口径(首位评述修订)', async () => {
+  const { buildMentionPrompt } = await import('../src/prompts');
+  const p = buildMentionPrompt({
+    question: '小米SU7的缺点和不足有哪些?',
+    answerMarkdown: '……',
+    subjects: SUBJECTS,
+  });
+  it('prompt 含首位评述规则与不推断偏好的边界', () => {
+    expect(p.system).toContain('首位评述');
+    expect(p.system).toContain('rank=1');
+    expect(p.system).toContain('不推断偏好');
+  });
+  it('回答围绕被点名主体展开 → 该主体 rank=1(即使无榜单)', () => {
+    const r = validateMentionOutput(
+      {
+        answerEmpty: false,
+        subjects: [
+          { key: 'self:su7', mentioned: true, rank: 1, confidence: 0.9, excerpt: '小米SU7的主要不足在于智驾方案……' },
+          { key: 'comp:zhijie', mentioned: false, rank: null, confidence: 1, excerpt: '' },
+        ],
+      },
+      SUBJECTS,
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.subjects.find((s) => s.key === 'self:su7')?.rank).toBe(1);
+  });
+});

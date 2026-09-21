@@ -172,7 +172,7 @@ export default function RankingsPage() {
             <span className="metric-num ml-1 rounded bg-slate-100 px-1.5 py-0.5">#4+</span>靠后
             <span className="ml-1 rounded bg-slate-50 px-1.5 py-0.5 text-slate-400">提及·无排名</span>
             <span className="ml-1 rounded bg-bad-50 px-1.5 py-0.5 text-bad">未提及</span>
-            <span className="ml-1.5 border-l border-slate-100 pl-1.5 text-slate-400">综合名次 = 未提及记 N+1 取中位数;位次仅在 AI 给出榜单时产生</span>
+            <span className="ml-1.5 border-l border-slate-100 pl-1.5 text-slate-400">综合名次 = 未提及记 N+1 取中位数;位次 = 榜单位次,或品牌评述题中的首位评述</span>
           </span>
         </span>
       </div>

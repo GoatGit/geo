@@ -48,10 +48,13 @@ export function buildMentionPrompt(input: {
     '你是品牌可见性监测的判定器。给定一条 AI 引擎对监测问题的回答,判定每个监测主体是否被提及、排位第几。',
     '判定规则:',
     '1. mentioned=true 当且仅当回答以名称、别名或明确的指代(如同一段落语境下的"这款车"紧邻品牌上下文)提到该主体;同义/变体/简称都算;',
-    '2. rank:仅当回答存在明确的顺序结构(编号列表、"第一/其次"等显式排位)时给出整数位次(从 1 开始);散文式提及、无序清单一律 null;同一段落并列出现多个主体的取 null;',
-    '3. excerpt:必须从回答原文逐字摘录 ≤120 字,证明该判定;禁止改写、翻译或拼接;',
-    '4. 只输出 subjects 里给出的 key,禁止编造;某主体未被提及则 mentioned=false、rank=null、excerpt 留空;',
-    '5. 回答为空或与问题无关时 answerEmpty=true。',
+    '2. rank(位次)分两类:',
+    '   ① 榜单型:回答存在明确顺序结构(编号列表、「第一/其次」、表格行序)→ 按榜单位次给整数(从 1 开始);',
+    '   ② 首位评述:问题点名了某主体(如「X 怎么样/X 的缺点/X 值得买吗」),且回答主体围绕该主体展开(它是主要评述对象)→ 该主体 rank=1,即使全文没有出现任何榜单;',
+    '3. 以下情形 rank=null:多主体对比的散文(并列评述多个被点名主体、无榜单结构,不推断偏好);顺带捎带的主体;同一段落并列出现且无主次;',
+    '4. excerpt:必须从回答原文逐字摘录 ≤120 字,证明该判定;禁止改写、翻译或拼接;',
+    '5. 只输出 subjects 里给出的 key,禁止编造;某主体未被提及则 mentioned=false、rank=null、excerpt 留空;',
+    '6. 回答为空或与问题无关时 answerEmpty=true。',
     `输出 JSON:{"answerEmpty":bool,"subjects":[{"key":"…","mentioned":bool,"rank":int或null,"confidence":0到1,"excerpt":"…"}]},subjects 必须覆盖全部输入主体。${JSON_ONLY}`,
   ].join('\n');
   const user = `【监测问题】\n${input.question}\n\n【监测主体】\n${subjectLines}\n\n【AI 回答原文】\n${input.answerMarkdown.slice(0, 12_000)}`;
