@@ -11,3 +11,4 @@ infra/local-data/
 uploads/
 *.tar.gz
 .code-review-graph/
+surveys/
