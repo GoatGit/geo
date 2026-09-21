@@ -558,15 +558,7 @@ export class DomWebAdapter implements EngineAdapter {
 
   /** 站点噪声行清理(如 wenxin 的工具调用状态行),逐行整行匹配移除。 */
   private stripNoiseLines(text: string): string {
-    if (this.site.answerNoisePatterns.length === 0) return text.trim();
-    const patterns = this.site.answerNoisePatterns.map((p) => new RegExp(p));
-    const lines = text
-      .split('\n')
-      .filter((line) => {
-        const t = line.trim();
-        return t.length > 0 && !patterns.some((re) => re.test(t));
-      });
-    return lines.join('\n').trim();
+    return stripAnswerNoise(this.site, text);
   }
 
   private fail(error: string, queuedAt: string): AskResult {
@@ -753,4 +745,32 @@ function pushNetCitation(
   // 净化内含 cp1252 mojibake 修复(CDP 对无 charset 文本响应按 latin1 转码,URL 是
   // ASCII 不受影响);样板句/裸 URL/修不动的脏标题宁缺毋滥置空
   out.push({ url: rawUrl, title: sanitizeCitationTitle(title) ?? undefined });
+}
+
+
+/** 站点噪声清理(纯函数,便于单测):行级噪声模式 + 引导块连续剥离(仅开头)。 */
+export function stripAnswerNoise(
+  site: { engine: string; answerNoisePatterns: string[]; leadingNoiseLineRe?: string },
+  text: string,
+): string {
+  let out = text;
+  if (site.answerNoisePatterns.length > 0) {
+    const patterns = site.answerNoisePatterns.map((p) => new RegExp(p));
+    out = out
+      .split('\n')
+      .filter((line) => {
+        const t = line.trim();
+        return t.length > 0 && !patterns.some((re) => re.test(t));
+      })
+      .join('\n');
+  }
+  if (site.leadingNoiseLineRe) {
+    // 引导块:仅剥离「开头」的连续匹配行(如 wenxin 引用源编号列表),正文中的编号榜单保留
+    const lead = new RegExp(site.leadingNoiseLineRe);
+    const lines = out.split('\n');
+    let i = 0;
+    while (i < lines.length && (lines[i]!.trim().length === 0 || lead.test(lines[i]!.trim()))) i += 1;
+    out = lines.slice(i).join('\n');
+  }
+  return out.trim();
 }

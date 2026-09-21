@@ -105,3 +105,34 @@ describe('isEchoOfQuestion(采集防污染:输入回显不得计为回答)', () 
     expect(isEchoOfQuestion('', q)).toBe(false);
   });
 });
+
+describe('stripAnswerNoise(wenxin 引导块剥离)', async () => {
+  const { stripAnswerNoise } = await import('../src/web/web-adapter');
+  const wenxinSite = {
+    engine: 'wenxin',
+    answerNoisePatterns: [
+      '^调用工具$', '^品牌官方$', '^搜索全网\\d+篇资料$', '^已搜索\\d+篇资料$',
+      '^搜索\\d+个关键词.*$', '^搜索关键词.*$', '^使用工具.*$', '^搜索全球\\d+篇资料$',
+    ],
+    leadingNoiseLineRe: '^(搜索|使用工具|\\d{1,2}\\.\\s)',
+  };
+  const sample = [
+    '搜索9个关键词 共参考30篇资料',
+    '搜索关键词“2026年值得期待的汽车”、“理想汽车核心优势”',
+    '1. 2026热门汽车推荐：吉利星愿夺冠-新浪新闻',
+    '2. 理想L6 vs 蔚来ES6：怎么选-有驾',
+    '30. 横评四款新能源SUV-新浪汽车-新浪网',
+    '‌理想汽车更适合多孩家庭全场景家用，蔚来汽车更适合看重补能效率的用户。',
+    '🎯 选购建议',
+    '1. 优先选理想汽车，空间设计是同级别标杆',
+  ].join('\n');
+
+  it('剥离头部状态行与引用源编号列表,保留正文与其中的编号榜单', () => {
+    const out = stripAnswerNoise(wenxinSite, sample);
+    expect(out).not.toContain('搜索9个关键词');
+    expect(out).not.toContain('吉利星愿夺冠');
+    expect(out).toContain('理想汽车更适合多孩家庭全场景家用');
+    expect(out).toContain('1. 优先选理想汽车'); // 正文内合法编号榜单保留
+    expect(out.startsWith('‌理想汽车更适合')).toBe(true);
+  });
+});

@@ -39,6 +39,9 @@ export interface EngineSiteConfig {
   minAskTimeoutMs?: number;
   /** 回答文本的站点噪声行(整行匹配移除,如工具调用状态行);正则字符串 */
   answerNoisePatterns: string[];
+  /** 引导块剥离(可选):从回答开头连续剥离匹配行(如文心的「搜索N个关键词+引用源列表」前置块),
+   *  直到首个不匹配行——避免整篇剥离正文中合法的编号榜单。 */
+  leadingNoiseLineRe?: string;
   /** 回答文本稳定窗口(docs/04 §2.1 完成判定三条件之二) */
   completionStableMs: number;
   navigationTimeoutMs: number;
@@ -116,8 +119,14 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     submitSelectors: ['#sendBtn', 'button[data-testid="send"]', 'button:has-text("发送")'],
     answerSelectors: ['div[class*="answer"]', 'div[class*="markdown"]'],
     stopSelectors: ['button:has-text("停止")'],
-    // 实测:回答头部混入工具调用状态行(wenxin 深度搜索 UI 文本)
-    answerNoisePatterns: ['^调用工具$', '^品牌官方$', '^搜索全网\\d+篇资料$', '^已搜索\\d+篇资料$'],
+    // 实测(2026-09-21):深度搜索回答头部混入「搜索N个关键词/使用工具/搜索全球N篇资料」
+    // 状态行 + 完整引用源编号列表(1. 标题-站点),须剥离——否则编号引用表会被判定器
+    // 当作推荐排位,引用源顺序污染位次测量
+    answerNoisePatterns: [
+      '^调用工具$', '^品牌官方$', '^搜索全网\\d+篇资料$', '^已搜索\\d+篇资料$',
+      '^搜索\\d+个关键词.*$', '^搜索关键词.*$', '^使用工具.*$', '^搜索全球\\d+篇资料$',
+    ],
+    leadingNoiseLineRe: '^(搜索|使用工具|\\d{1,2}\\.\\s)',
     completionStableMs: BASE_COMPLETION_STABLE_MS,
     navigationTimeoutMs: BASE_NAV_TIMEOUT_MS,
   },
