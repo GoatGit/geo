@@ -5,8 +5,6 @@
  * 空标题是诚实信号(展示层回退「未取到标题」),脏标题比空标题更误导,宁缺毋滥。
  */
 
-/** UTF-8 字节被按 latin1/cp1252 误读的典型形态(连续高区字符对,如 "ç»å…³")。 */
-const MOJIBAKE_HINT = /[\u00c0-\u00ff][\u0080-\u00ff]/;
 const URL_LIKE = /^(https?:\/\/|www\.)\S+$/i;
 /** 引擎引用区的样板锚文本:是交互文案/统计句,不是来源页面标题。 */
 const BOILERPLATE = [
@@ -42,15 +40,46 @@ function mojibakeToUtf8(s: string): string | null {
   }
 }
 
+/**
+ * latin1/cp1252 误读形态判定:连续 ≥2 个高区字符且其中至少一个是 ≥U+00C0 的重音区字母
+ * (CJK 的 UTF-8 首字节 E4-E9 全落在 C0-FF,真乱码必命中)。不能只看 [\u00c0-\u00ff]
+ * 配对——"ç›¸å…³æ–°é—»"里 ›(U+203A) 超出 \u00FF 会断对(gcmct.com 事故);
+ * 也不能把 ——/…/” 这类中文排版字符(全部 <C0)当乱码,会误杀正常标题。
+ */
+function looksMojibake(t: string): boolean {
+  let run = 0;
+  for (const ch of Array.from(t)) {
+    const cp = ch.codePointAt(0) ?? 0;
+    if ((cp >= 0x80 && cp <= 0xff) || CP1252_HIGH[cp] !== undefined) {
+      run += 1;
+      if (run >= 2 && cp >= 0xc0 && cp <= 0xff) return true;
+    } else {
+      run = 0;
+    }
+  }
+  return false;
+}
+
 /** 净化一条引用标题;不可修复/样板/URL 形态一律返回 null。展示截断 60 字。 */
 export function sanitizeCitationTitle(raw: string | null | undefined): string | null {
   if (!raw) return null;
   let t = raw.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
   if (!t) return null;
-  if (MOJIBAKE_HINT.test(t)) {
-    const fixed = mojibakeToUtf8(t);
-    if (!fixed) return null;
-    t = fixed.replace(/\s+/g, ' ').trim();
+  if (looksMojibake(t)) {
+    // 循环还原覆盖双重编码
+    let guard = 0;
+    while (guard < 3) {
+      const fixed = mojibakeToUtf8(t);
+      if (!fixed) break;
+      t = fixed;
+      if (!looksMojibake(t)) break;
+      guard += 1;
+    }
+    if (looksMojibake(t)) {
+      // 修不动:混有 CJK 的是截断/混写的脏数据;纯拉丁串可能是真实小语种标题,保留原文
+      return /[\u4e00-\u9fff]/.test(t) ? null : t;
+    }
+    t = t.replace(/\s+/g, ' ').trim();
   }
   if (t.length < 2 || t.length > 120) return null;
   if (URL_LIKE.test(t)) return null;
