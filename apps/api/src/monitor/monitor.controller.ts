@@ -43,7 +43,7 @@ export class MonitorController {
   @Post('rankings/backfill')
   async backfillRanks(
     @Req() req: Request,
-    @Body() body: { brandId?: number; dryRun?: boolean; limit?: number },
+    @Body() body: { brandId?: number; dryRun?: boolean; limit?: number; resetChecked?: boolean },
   ) {
     const brandId = Number(body?.brandId);
     if (!Number.isInteger(brandId) || brandId <= 0) throw new BadRequestException('brandId 非法');
@@ -51,6 +51,7 @@ export class MonitorController {
     return this.monitorService.backfillRanks(currentAccount(req).accountId, brandId, {
       dryRun: Boolean(body?.dryRun),
       limit: Number(body?.limit) || 120,
+      resetChecked: Boolean(body?.resetChecked),
     });
   }
 

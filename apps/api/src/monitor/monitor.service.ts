@@ -226,7 +226,7 @@ export class MonitorService {
   async backfillRanks(
     accountId: number,
     brandId: number,
-    opts: { dryRun?: boolean; limit?: number },
+    opts: { dryRun?: boolean; limit?: number; resetChecked?: boolean },
   ): Promise<{ scanned: number; changedRuns: number; changedFacts: number; failed: number; dryRun: boolean; sample: string[]; lastError: string | null }> {
     await this.brandsOwned(accountId, brandId);
     const settings = (await loadPlatformSettings(this.db)).insightAgent;
@@ -236,6 +236,19 @@ export class MonitorService {
     const agent = new InsightAgent({ settings });
     const storage = createStorageFromEnv(process.env);
     const limit = Math.min(Math.max(opts.limit ?? 120, 1), 300);
+    // 重试模式:清除已查标记,让判定失败(LLM 超时/限流)的 run 重新参与
+    if (opts.resetChecked) {
+      await this.db.execute(sql`
+        update query_runs qr
+        set meta = meta - 'rankBackfillChecked'
+        where qr.brand_id = ${brandId}
+          and coalesce(qr.meta->>'rankBackfillChecked', 'false') = 'true'
+          and exists (
+            select 1 from mention_facts mf
+            where mf.run_id = qr.id and mf.mentioned = true and mf.rank is null
+          )
+      `);
+    }
 
     const runs = (
       await this.db.execute(sql`
