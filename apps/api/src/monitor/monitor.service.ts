@@ -25,6 +25,7 @@ import { classifyDomain, evaluateHealth, generateActionList, sentimentScore as s
 import Redis from 'ioredis';
 import { chatCompletion, InsightAgent } from '@geo/insight-agent';
 import { createStorageFromEnv } from '@geo/evidence';
+import { siteConfigOf, stripAnswerNoise, stripInlineCitationMarkers } from '@geo/engine-adapters';
 import { loadPlatformSettings } from '@geo/db';
 import type { ActionItem } from '@geo/shared';
 import { DB, REDIS } from '../common/infra.module';
@@ -238,7 +239,7 @@ export class MonitorService {
 
     const runs = (
       await this.db.execute(sql`
-        select distinct qr.id, qr.answer_ref, q.text_expanded as question
+        select distinct qr.id, qr.answer_ref, qr.engine, q.text_expanded as question
         from mention_facts mf
         join query_runs qr on qr.id = mf.run_id
         join monitoring_questions q on q.id = mf.question_id
@@ -247,7 +248,7 @@ export class MonitorService {
         order by qr.id desc
         limit ${limit}
       `)
-    ).rows as unknown as Array<{ id: number; answer_ref: string; question: string }>;
+    ).rows as unknown as Array<{ id: number; answer_ref: string; engine: string; question: string }>;
 
     let changedRuns = 0;
     let changedFacts = 0;
@@ -263,9 +264,18 @@ export class MonitorService {
             from mention_facts where run_id = ${run.id}
           `)
         ).rows as unknown as Array<{ id: number; subject_key: string; subject_kind: string; subject_name: string; rank: number | null }>;
+        // 判定前净化:历史文心/DeepSeek 回答含搜索状态行+引用源编号列表,
+        // 会让 LLM 不认「首位评述」且可能把引用顺序误读为排位
+        const rawAnswer = (JSON.parse((await storage.get(run.answer_ref)).toString('utf8')).answerText ?? '') as string;
+        let cleanAnswer = stripInlineCitationMarkers(rawAnswer);
+        try {
+          cleanAnswer = stripAnswerNoise(siteConfigOf(run.engine as never), cleanAnswer);
+        } catch {
+          // 未知引擎:仅内联角标剥离
+        }
         const judged = await agent.judgeMention({
           question: run.question,
-          answerMarkdown: (JSON.parse((await storage.get(run.answer_ref)).toString('utf8')).answerText ?? '') as string,
+          answerMarkdown: cleanAnswer,
           subjects: facts.map((f) => ({ key: f.subject_key, kind: f.subject_kind, name: f.subject_name, aliases: [] })),
         });
         if (!judged) {

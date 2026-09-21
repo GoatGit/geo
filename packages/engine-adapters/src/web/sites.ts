@@ -126,7 +126,7 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
       '^调用工具$', '^品牌官方$', '^搜索全网\\d+篇资料$', '^已搜索\\d+篇资料$',
       '^搜索\\d+个关键词.*$', '^搜索关键词.*$', '^使用工具.*$', '^搜索全球\\d+篇资料$',
     ],
-    leadingNoiseLineRe: '^(搜索|使用工具|\\d{1,2}\\.\\s)',
+    leadingNoiseLineRe: '^(搜索|使用工具|全球搜|\\d{1,2}\\.\\s)',
     completionStableMs: BASE_COMPLETION_STABLE_MS,
     navigationTimeoutMs: BASE_NAV_TIMEOUT_MS,
   },
