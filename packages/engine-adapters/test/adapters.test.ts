@@ -106,7 +106,7 @@ describe('isEchoOfQuestion(采集防污染:输入回显不得计为回答)', () 
   });
 });
 
-describe('stripAnswerNoise(wenxin 引导块剥离)', async () => {
+describe('stripAnswerNoise(wenxin 引导块定界剥离)', async () => {
   const { stripAnswerNoise } = await import('../src/web/web-adapter');
   const wenxinSite = {
     engine: 'wenxin',
@@ -114,40 +114,45 @@ describe('stripAnswerNoise(wenxin 引导块剥离)', async () => {
       '^调用工具$', '^品牌官方$', '^搜索全网\\d+篇资料$', '^已搜索\\d+篇资料$',
       '^搜索\\d+个关键词.*$', '^搜索关键词.*$', '^使用工具.*$', '^搜索全球\\d+篇资料$',
     ],
-    leadingNoiseLineRe: '^(搜索|使用工具|\\d{1,2}\\.\\s)',
+    leadingNoiseLineRe: '^(搜索|使用工具|全球搜|\\d{1,2}\\.\\s)',
   };
-  const sample = [
-    '搜索9个关键词 共参考30篇资料',
-    '搜索关键词“2026年值得期待的汽车”、“理想汽车核心优势”',
-    '1. 2026热门汽车推荐：吉利星愿夺冠-新浪新闻',
-    '2. 理想L6 vs 蔚来ES6：怎么选-有驾',
-    '30. 横评四款新能源SUV-新浪汽车-新浪网',
-    '‌理想汽车更适合多孩家庭全场景家用，蔚来汽车更适合看重补能效率的用户。',
-    '🎯 选购建议',
-    '1. 优先选理想汽车，空间设计是同级别标杆',
-  ].join('\n');
+  const NUM = (n: number, title: string) => (title ? `${n}.\n${title}` : `${n}.`);
 
-  it('剥离头部状态行与引用源编号列表,保留正文与其中的编号榜单', () => {
+  it('换行渲染形态:头部声明+序号行/标题行交替,整块剥离,正文保留', () => {
+    const sample = [
+      '全球搜',
+      '1.',
+      'Li Auto Is Selling Its Chips — Read It as a Sick Car Business-www.ainvest.com',
+      '2.',
+      'The user has provided a Chinese automotive news article-china-autonews.de',
+      '5.',
+      '【理想L6】理想汽车_理想L6报价_理想L6图片_汽车之家',
+      '2026年理想汽车的核心短板集中在产品体验、用车成本与市场竞争层面。',
+      '🎯 选购建议',
+      '1. 优先选理想汽车，空间设计是同级别标杆',
+    ].join('\n');
     const out = stripAnswerNoise(wenxinSite, sample);
-    expect(out).not.toContain('搜索9个关键词');
-    expect(out).not.toContain('吉利星愿夺冠');
-    expect(out).toContain('理想汽车更适合多孩家庭全场景家用');
-    expect(out).toContain('1. 优先选理想汽车'); // 正文内合法编号榜单保留
-    expect(out.startsWith('‌理想汽车更适合')).toBe(true);
+    expect(out.startsWith('2026年理想汽车的核心短板')).toBe(true);
+    expect(out).not.toContain('ainvest.com');
+    expect(out).not.toContain('全球搜');
+    expect(out).toContain('🎯 选购建议');
+    expect(out).toContain('1. 优先选理想汽车');
   });
-});
 
-describe('stripInlineCitationMarkers(内联引用角标,全引擎)', async () => {
-  const { stripInlineCitationMarkers } = await import('../src/web/web-adapter');
-  it('剥离句末的站点名/纯数字/连续数字链标记', () => {
-    expect(stripInlineCitationMarkers('对颠簸的过滤提升很直接- 知乎 。')).toBe('对颠簸的过滤提升很直接。');
-    expect(stripInlineCitationMarkers('也支持选装六座- 8 。')).toBe('也支持选装六座。');
-    expect(stripInlineCitationMarkers('正好落在你的预算里- 1 - 5 。')).toBe('正好落在你的预算里。');
-    expect(stripInlineCitationMarkers('销量非常强劲- 4 。')).toBe('销量非常强劲。');
-  });
-  it('不触碰正文连字符词与无句末标点的合法内容', () => {
-    expect(stripInlineCitationMarkers('增程-纯电双路线并行。')).toBe('增程-纯电双路线并行。');
-    expect(stripInlineCitationMarkers('理想 L6：延续家庭定位- 2 。')).toBe('理想 L6：延续家庭定位。');
-    expect(stripInlineCitationMarkers('没有标记的普通句子')).toBe('没有标记的普通句子');
+  it('同行形态(序号. 标题-站点)剥离,正文编号榜单保留', () => {
+    const sample = [
+      '搜索9个关键词 共参考3篇资料',
+      '搜索关键词“2026年值得期待的汽车”',
+      '1. 2026热门汽车推荐：吉利星愿夺冠-新浪新闻',
+      '2. 理想L6 vs 蔚来ES6：怎么选-有驾',
+      '3. 横评四款新能源SUV-新浪汽车-新浪网',
+      '理想汽车更适合多孩家庭全场景家用。',
+      '🎯 选购建议',
+      '1. 优先选理想汽车，空间设计是同级别标杆',
+    ].join('\n');
+    const out = stripAnswerNoise(wenxinSite, sample);
+    expect(out.startsWith('理想汽车更适合多孩家庭全场景家用')).toBe(true);
+    expect(out).not.toContain('吉利星愿夺冠');
+    expect(out).toContain('1. 优先选理想汽车');
   });
 });

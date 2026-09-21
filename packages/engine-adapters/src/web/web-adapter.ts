@@ -765,12 +765,30 @@ export function stripAnswerNoise(
       .join('\n');
   }
   if (site.leadingNoiseLineRe) {
-    // 引导块:仅剥离「开头」的连续匹配行(如 wenxin 引用源编号列表),正文中的编号榜单保留
+    // 引导块定界剥离(wenxin 深度搜索):开头为「状态行(搜索N个关键词/全球搜/使用工具)」
+    // + 引用条目编号列表。条目有两种渲染:「N. 标题-站点」同行,或「N.」与标题各自成行。
+    // 状态机:头部状态行先消费;随后消费连续编号条目(裸序号行连带下一行标题);
+    // 首个非编号行 = 正文开始,保留(其中的合法编号榜单不受影响)。
     const lead = new RegExp(site.leadingNoiseLineRe);
+    const bareNum = new RegExp('^\\d{1,3}\\.?$');
+    const inlineNum = new RegExp('^\\d{1,3}\\.\\s');
     const lines = out.split('\n');
     let i = 0;
-    while (i < lines.length && (lines[i]!.trim().length === 0 || lead.test(lines[i]!.trim()))) i += 1;
-    out = lines.slice(i).join('\n');
+    let entries = 0;
+    while (i < lines.length) {
+      const t = lines[i]!.trim();
+      if (t.length === 0) { i += 1; continue; }
+      if (bareNum.test(t)) {
+        entries += 1;
+        i += 1;
+        if (i < lines.length && lines[i]!.trim().length > 0 && !bareNum.test(lines[i]!.trim()) && !inlineNum.test(lines[i]!.trim())) i += 1;
+        continue;
+      }
+      if (inlineNum.test(t)) { entries += 1; i += 1; continue; }
+      if (entries === 0 && lead.test(t)) { i += 1; continue; }
+      break;
+    }
+    if (entries >= 3) out = lines.slice(i).join('\n');
   }
   return stripInlineCitationMarkers(out);
 }
