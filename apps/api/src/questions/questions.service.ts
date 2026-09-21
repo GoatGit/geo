@@ -20,8 +20,13 @@ export function expandQuestion(text: string, brandName: string): string {
   if (/[?？]$/.test(t) && t.length >= 14) return t;
   if (/推荐|排行|哪些/.test(t))
     return `在可承受的预算内,${t.replace(/[?？]$/, '')},有什么值得推荐的吗?`;
-  if (classifyQuestion(t) === 'reputation')
-    return `${brandName}的口碑和质量到底怎么样?有什么优缺点?`;
+  if (classifyQuestion(t) === 'reputation') {
+    // 口碑拓写必须话题专属:固定句式会把所有口碑词坍缩成同一问句(品牌9 七条同文事故),
+    // 采集配额被同题重复消耗,矩阵/榜单也无法区分
+    const topic = t.replace(/[?？]$/, '');
+    const withBrand = brandName && !topic.includes(brandName) ? `${brandName}${topic}` : topic;
+    return /[吗呢样何]$/.test(withBrand) ? `${withBrand}?` : `${withBrand}怎么样?有哪些优缺点?`;
+  }
   return `${t}——2026 年有什么值得关注的?`;
 }
 
@@ -68,6 +73,15 @@ export class QuestionsService {
     const rejected: Array<{ text: string; reason: string }> = [];
 
     const used = { ranking: await this.used(input.brandId, 'ranking'), reputation: await this.used(input.brandId, 'reputation') };
+    // 同文去重:库内 active 问题与本次批内都不得出现相同拓写文(拓写坍缩/重复提交防线)
+    const existingExpanded = new Set(
+      (
+        await this.db
+          .select({ t: monitoringQuestions.textExpanded })
+          .from(monitoringQuestions)
+          .where(and(eq(monitoringQuestions.brandId, input.brandId), eq(monitoringQuestions.status, 'active')))
+      ).map((r) => r.t),
+    );
 
     // Insight Agent 判定(docs/09 §5 T3/T4):用户同步路径,预算 min(timeoutMs, 3s);
     // 未启用/超时/失败自动回落规则基线(classifyQuestion/expandQuestion),整批并行发起
@@ -136,6 +150,12 @@ export class QuestionsService {
         });
         continue;
       }
+      const expanded = llmExpansions.get(item) ?? expandQuestion(item.text, brandName);
+      if (existingExpanded.has(expanded)) {
+        rejected.push({ text: item.text, reason: '拓写后与已有监控问题同文,未重复创建' });
+        continue;
+      }
+      existingExpanded.add(expanded);
       const row = (
         await this.db
           .insert(monitoringQuestions)
@@ -143,7 +163,7 @@ export class QuestionsService {
             brandId: input.brandId,
             type,
             textRaw: item.text,
-            textExpanded: llmExpansions.get(item) ?? expandQuestion(item.text, brandName),
+            textExpanded: expanded,
             groupName: llmLayers.get(item.text) ?? null,
           })
           .returning()
