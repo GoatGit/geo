@@ -1,6 +1,7 @@
 import type { Page, Locator } from 'playwright-core';
 
 import type { AskStatus, EngineId, RawCitation } from '@geo/shared';
+import { sanitizeCitationTitle } from '@geo/shared';
 import type { AskOptions, AskResult, EngineAdapter, SessionContext } from '../types';
 import { ENGINE_SITES, siteConfigOf, type EngineSiteConfig } from './sites';
 
@@ -543,7 +544,8 @@ export class DomWebAdapter implements EngineAdapter {
           if (!host || isEngineHost(host)) continue;
           if (seen.has(url)) continue;
           seen.add(url);
-          out.push({ url, title: (text || undefined)?.slice(0, 80) });
+          // 锚文本常是样板句("引用 22 篇资料作为参考")或裸 URL,净化不过就宁缺毋滥
+          out.push({ url, title: sanitizeCitationTitle(text) ?? undefined });
           if (out.length >= 10) return out;
         } catch {
           // 单个链接失败不影响整体抽取
@@ -623,28 +625,6 @@ const NET_DENY_HOST_SUFFIX = [
   'wxqcloud.qq.com.cn', 'wuying.com', 'aliyuncs.com',
 ];
 const NET_ASSET_EXT = /\.(js|css|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|mp4|mp3|m3u8|ts|zip)([?#].*)?$/i;
-
-/** cp1252 高区(0x80-0x9F)与 Unicode 的对应:latin1 简单还原对 €/"/… 等字符会丢字节。 */
-const CP1252_HIGH: Record<number, number> = {
-  0x20ac: 0x80, 0x201a: 0x82, 0x0192: 0x83, 0x201e: 0x84, 0x2026: 0x85, 0x2020: 0x86,
-  0x2021: 0x87, 0x02c6: 0x88, 0x2030: 0x89, 0x0160: 0x8a, 0x2039: 0x8b, 0x0152: 0x8c,
-  0x017d: 0x8e, 0x2018: 0x91, 0x2019: 0x92, 0x201c: 0x93, 0x201d: 0x94, 0x2022: 0x95,
-  0x2013: 0x96, 0x2014: 0x97, 0x02dc: 0x98, 0x2122: 0x99, 0x0161: 0x9a, 0x203a: 0x9b,
-  0x0153: 0x9c, 0x017e: 0x9e, 0x0178: 0x9f,
-};
-
-/** cp1252 mojibake → 原始 UTF-8 文本;含不可逆字符或解码失败返回 null。 */
-function mojibakeToUtf8(s: string): string | null {
-  const bytes: number[] = [];
-  for (const ch of s) {
-    const cp = ch.codePointAt(0) ?? 0;
-    if (cp <= 0xff) bytes.push(cp);
-    else if (CP1252_HIGH[cp] !== undefined) bytes.push(CP1252_HIGH[cp]);
-    else return null;
-  }
-  const out = Buffer.from(bytes).toString('utf8');
-  return out.includes('\uFFFD') ? null : out;
-}
 
 interface NetCitationHarvester {
   citations: RawCitation[];
@@ -770,12 +750,7 @@ function pushNetCitation(
       }
     }
   }
-  if (title) {
-    // CDP 对无 charset 的文本响应按 latin1/cp1252 转码,UTF-8 中文变 mojibake(URL 是
-    // ASCII 不受影响);用 cp1252 高区逆映射还原字节再按 UTF-8 解码,失败宁缺毋滥置空
-    if (/[\u00c0-\u00ff][\u0080-\u00ff]/.test(title)) {
-      title = mojibakeToUtf8(title) ?? undefined;
-    }
-  }
-  out.push({ url: rawUrl, title: title || undefined });
+  // 净化内含 cp1252 mojibake 修复(CDP 对无 charset 文本响应按 latin1 转码,URL 是
+  // ASCII 不受影响);样板句/裸 URL/修不动的脏标题宁缺毋滥置空
+  out.push({ url: rawUrl, title: sanitizeCitationTitle(title) ?? undefined });
 }

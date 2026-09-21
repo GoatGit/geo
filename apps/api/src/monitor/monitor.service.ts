@@ -14,6 +14,7 @@ import {
   DEFAULT_HEALTH_THRESHOLDS,
   THRESHOLD_CALIBRATION_GRACE_DAYS,
   engineLabel,
+  sanitizeCitationTitle,
   type EngineId,
   type FunnelStage,
   type MatrixRow,
@@ -583,7 +584,8 @@ export class MonitorService {
         domain: r.domain,
         platform: classifyDomain(r.domain).platform,
         category: r.platformCategory,
-        title: r.title,
+        // 读出侧净化:存量脏标题(样板句/裸 URL/mojibake)在此归 null,展示层回退兜底
+        title: sanitizeCitationTitle(r.title),
         isOwned: r.isOwned,
         engine: r.engine,
         extractedAt: r.extractedAt,

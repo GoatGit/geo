@@ -1,5 +1,5 @@
 'use client';
-import { engineLabel } from '@geo/shared';
+import { engineLabel, sanitizeCitationTitle } from '@geo/shared';
 
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
@@ -72,18 +72,27 @@ export default function CitationsPage() {
             </tr>
           </thead>
           <tbody>
-            {data.items.map((c, i) => (
-              <tr key={i} className="border-t">
-                <td className="max-w-80 truncate px-4 py-2">
-                  <a href={/^https?:\/\//.test(c.url) ? c.url : undefined} target="_blank" rel="noreferrer" className="text-brand hover:underline">
-                    {c.title ?? c.url}
-                  </a>
-                </td>
-                <td className="px-3 py-2 text-xs text-slate-500">{c.domain}</td>
-                <td className="px-3 py-2 text-xs">{engineLabel(c.engine)}</td>
-                <td className="px-3 py-2 text-xs">{c.isOwned ? '✓' : ''}</td>
-              </tr>
-            ))}
+            {data.items.map((c, i) => {
+              const title = sanitizeCitationTitle(c.title);
+              return (
+                <tr key={i} className="border-t">
+                  <td className="max-w-80 truncate px-4 py-2">
+                    <a
+                      href={/^https?:\/\//.test(c.url) ? c.url : undefined}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={title ?? c.url}
+                      className={title ? 'text-brand hover:underline' : 'text-slate-400 hover:underline'}
+                    >
+                      {title ?? '未取到标题'}
+                    </a>
+                  </td>
+                  <td className="px-3 py-2 text-xs text-slate-500">{c.domain}</td>
+                  <td className="px-3 py-2 text-xs">{engineLabel(c.engine)}</td>
+                  <td className="px-3 py-2 text-xs">{c.isOwned ? '✓' : ''}</td>
+                </tr>
+              );
+            })}
             {data.items.length === 0 && (
               <tr>
                 <td colSpan={4} className="px-4 py-8 text-center text-slate-400">
