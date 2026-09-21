@@ -226,7 +226,7 @@ export class MonitorService {
     accountId: number,
     brandId: number,
     opts: { dryRun?: boolean; limit?: number },
-  ): Promise<{ scanned: number; changedRuns: number; changedFacts: number; failed: number; dryRun: boolean; sample: string[] }> {
+  ): Promise<{ scanned: number; changedRuns: number; changedFacts: number; failed: number; dryRun: boolean; sample: string[]; lastError: string | null }> {
     await this.brandsOwned(accountId, brandId);
     const settings = (await loadPlatformSettings(this.db)).insightAgent;
     if (!settings.enabled || settings.mode === 'rules' || !settings.endpoint || !settings.apiKey || !settings.model) {
@@ -252,6 +252,7 @@ export class MonitorService {
     let changedRuns = 0;
     let changedFacts = 0;
     let failed = 0;
+    let lastError: string | null = null;
     const sample: string[] = [];
 
     for (const run of runs) {
@@ -283,14 +284,19 @@ export class MonitorService {
         if (sample.length < 8) sample.push(`run #${run.id}: ${updates.map((u) => `${u.name}=第${u.rank}`).join(', ')}`);
         if (!opts.dryRun) {
           for (const u of updates) {
-            await this.db.execute(sql`update mention_facts set rank = ${u.rank}, confidence = 0.9 where id = ${u.id}`);
+            try {
+              await this.db.execute(sql`update mention_facts set rank = ${u.rank}, confidence = 0.9 where id = ${u.id}`);
+            } catch (err) {
+            lastError = `update fact ${u.id}: ${(err as Error).message.slice(0, 200)}`;
+            break;
+          }
           }
         }
       } catch {
         failed += 1;
       }
     }
-    return { scanned: runs.length, changedRuns, changedFacts, failed, dryRun: Boolean(opts.dryRun), sample };
+    return { scanned: runs.length, changedRuns, changedFacts, failed, dryRun: Boolean(opts.dryRun), sample, lastError };
   }
 
   private async brandsOwned(accountId: number, brandId: number): Promise<void> {
