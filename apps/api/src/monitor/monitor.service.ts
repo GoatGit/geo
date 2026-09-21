@@ -245,6 +245,7 @@ export class MonitorService {
         join monitoring_questions q on q.id = mf.question_id
         where mf.brand_id = ${brandId} and mf.mentioned = true and mf.rank is null
           and qr.answer_ref is not null
+          and coalesce(qr.meta->>'rankBackfillChecked', 'false') <> 'true'
         order by qr.id desc
         limit ${limit}
       `)
@@ -258,6 +259,12 @@ export class MonitorService {
 
     for (const run of runs) {
       try {
+        // 无论判定结果如何都打标:语义正确的 null 不应被反复重扫(会饿死更早的 run)
+        await this.db.execute(sql`
+          update query_runs
+          set meta = coalesce(meta, '{}'::jsonb) || '{"rankBackfillChecked":"true"}'::jsonb
+          where id = ${run.id}
+        `);
         const facts = (
           await this.db.execute(sql`
             select id, subject_key, subject_kind, subject_name, rank
