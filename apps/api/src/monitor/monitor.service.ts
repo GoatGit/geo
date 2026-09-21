@@ -23,7 +23,8 @@ import {
 } from '@geo/shared';
 import { classifyDomain, evaluateHealth, generateActionList, sentimentScore as sentimentScoreOf } from '@geo/metrics';
 import Redis from 'ioredis';
-import { chatCompletion } from '@geo/insight-agent';
+import { chatCompletion, InsightAgent } from '@geo/insight-agent';
+import { createStorageFromEnv } from '@geo/evidence';
 import { loadPlatformSettings } from '@geo/db';
 import type { ActionItem } from '@geo/shared';
 import { DB, REDIS } from '../common/infra.module';
@@ -214,6 +215,87 @@ export class MonitorService {
         top1: r.top1,
         missed: r.asked - r.mentioned,
       }));
+  }
+
+  /**
+   * 历史排名重判(2026-09-21 首位评述口径,b719d02):
+   * 扫描本品牌 mentioned=true 且 rank=null 的 run,取回答原文用新判定语义重判,
+   * 仅允许 null → 有值 的升级(不降级已有位次)。dryRun 只报告不写库。
+   */
+  async backfillRanks(
+    accountId: number,
+    brandId: number,
+    opts: { dryRun?: boolean; limit?: number },
+  ): Promise<{ scanned: number; changedRuns: number; changedFacts: number; failed: number; dryRun: boolean; sample: string[] }> {
+    await this.brandsOwned(accountId, brandId);
+    const settings = (await loadPlatformSettings(this.db)).insightAgent;
+    if (!settings.enabled || settings.mode === 'rules' || !settings.endpoint || !settings.apiKey || !settings.model) {
+      throw new Error('Insight Agent 未启用,无法重判(请先在管理后台配置)');
+    }
+    const agent = new InsightAgent({ settings });
+    const storage = createStorageFromEnv(process.env);
+    const limit = Math.min(Math.max(opts.limit ?? 120, 1), 300);
+
+    const runs = (
+      await this.db.execute(sql`
+        select distinct qr.id, qr.answer_ref, q.text_expanded as question
+        from mention_facts mf
+        join query_runs qr on qr.id = mf.run_id
+        join monitoring_questions q on q.id = mf.question_id
+        where mf.brand_id = ${brandId} and mf.mentioned = true and mf.rank is null
+          and qr.answer_ref is not null
+        order by qr.id
+        limit ${limit}
+      `)
+    ).rows as unknown as Array<{ id: number; answer_ref: string; question: string }>;
+
+    let changedRuns = 0;
+    let changedFacts = 0;
+    let failed = 0;
+    const sample: string[] = [];
+
+    for (const run of runs) {
+      try {
+        const facts = (
+          await this.db.execute(sql`
+            select id, subject_key, subject_kind, subject_name, rank
+            from mention_facts where run_id = ${run.id}
+          `)
+        ).rows as unknown as Array<{ id: number; subject_key: string; subject_kind: string; subject_name: string; rank: number | null }>;
+        const judged = await agent.judgeMention({
+          question: run.question,
+          answerMarkdown: (JSON.parse((await storage.get(run.answer_ref)).toString('utf8')).answerText ?? '') as string,
+          subjects: facts.map((f) => ({ key: f.subject_key, kind: f.subject_kind, name: f.subject_name, aliases: [] })),
+        });
+        if (!judged) {
+          failed += 1;
+          continue;
+        }
+        const updates: Array<{ id: number; name: string; rank: number }> = [];
+        for (const j of judged.judges) {
+          if (j.rank == null || !j.mentioned) continue;
+          const fact = facts.find((f) => f.subject_key === j.key);
+          if (fact && fact.rank == null) updates.push({ id: fact.id, name: j.name, rank: j.rank });
+        }
+        if (updates.length === 0) continue;
+        changedRuns += 1;
+        changedFacts += updates.length;
+        if (sample.length < 8) sample.push(`run #${run.id}: ${updates.map((u) => `${u.name}=第${u.rank}`).join(', ')}`);
+        if (!opts.dryRun) {
+          for (const u of updates) {
+            await this.db.execute(sql`update mention_facts set rank = ${u.rank}, confidence = 0.9 where id = ${u.id}`);
+          }
+        }
+      } catch {
+        failed += 1;
+      }
+    }
+    return { scanned: runs.length, changedRuns, changedFacts, failed, dryRun: Boolean(opts.dryRun), sample };
+  }
+
+  private async brandsOwned(accountId: number, brandId: number): Promise<void> {
+    const brand = (await this.db.select({ accountId: brands.accountId }).from(brands).where(eq(brands.id, brandId)).limit(1))[0];
+    if (!brand || brand.accountId !== accountId) throw new Error('品牌不存在或无权操作');
   }
 
   /**

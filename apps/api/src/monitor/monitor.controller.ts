@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { currentAccount } from '../common/auth';
 import { BrandsService } from '../brands/brands.service';
@@ -36,6 +36,21 @@ export class MonitorController {
       brandId,
       days: this.clampDays(days, 1),
       engine: engine as never,
+    });
+  }
+
+  /** 历史排名重判(首位评述口径):仅品牌所有者可触发;dryRun 先报告。 */
+  @Post('rankings/backfill')
+  async backfillRanks(
+    @Req() req: Request,
+    @Body() body: { brandId?: number; dryRun?: boolean; limit?: number },
+  ) {
+    const brandId = Number(body?.brandId);
+    if (!Number.isInteger(brandId) || brandId <= 0) throw new BadRequestException('brandId 非法');
+    await this.owned(req, brandId);
+    return this.monitorService.backfillRanks(currentAccount(req).accountId, brandId, {
+      dryRun: Boolean(body?.dryRun),
+      limit: Number(body?.limit) || 120,
     });
   }
 

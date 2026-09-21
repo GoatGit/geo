@@ -2,9 +2,10 @@
 import { engineLabel } from '@geo/shared';
 
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { MetricCardView } from '@/components/metric-card';
 import { EmptyState, PageHeader, Skeleton, pct } from '@/components/ui';
-import { useRankings } from '@/lib/queries';
+import { api, useBrandId, useRankings } from '@/lib/queries';
 import { EvidenceModal } from '@/components/evidence-modal';
 import { LayerSankey } from '@/components/layer-sankey';
 
@@ -22,6 +23,9 @@ export default function RankingsPage() {
   const [engineFilter, setEngineFilter] = useState<string>('all');
   const [questionFilter, setQuestionFilter] = useState<string>('all');
   const [evidenceRun, setEvidenceRun] = useState<number | null>(null);
+  const [backfilling, setBackfilling] = useState(false);
+  const brandId = useBrandId();
+  const qc = useQueryClient();
   const { data, isLoading, error } = useRankings(days);
 
   if (isLoading) return <Skeleton />;
@@ -151,6 +155,28 @@ export default function RankingsPage() {
             </option>
           ))}
         </select>
+        <button
+          onClick={async () => {
+            if (!window.confirm('用「首位评述」新口径重判历史数据:问题点名本品且回答主体为本品的回答将记为第 1 名(仅升级 null 位次,不降级)。先执行?此操作可能耗时 1-3 分钟。')) return;
+            setBackfilling(true);
+            try {
+              const r = await api<{ scanned: number; changedRuns: number; changedFacts: number; dryRun: boolean }>(
+                `/monitor/rankings/backfill`,
+                { method: 'POST', json: { brandId, dryRun: false, limit: 300 } },
+              );
+              window.alert(`重判完成:扫描 ${r.scanned} 条,修正 ${r.changedRuns} 轮 / ${r.changedFacts} 条位次${r.dryRun ? '(试跑未写库)' : ''}`);
+              void qc.invalidateQueries();
+            } catch (e) {
+              window.alert((e as Error).message);
+            } finally {
+              setBackfilling(false);
+            }
+          }}
+          disabled={backfilling}
+          className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:border-brand-300 disabled:opacity-40"
+        >
+          {backfilling ? '重判中…' : '重判历史排名'}
+        </button>
         <button
           onClick={() => exportMatrix(data.matrix, data.engineStats.map((e) => e.engine))}
           className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:border-brand-300"
