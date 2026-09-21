@@ -255,7 +255,7 @@ export default function RankingsPage() {
                   );
                 })}
                 <td className="metric-num border-l-2 border-slate-200 border-t border-t-slate-100 px-3 py-2 text-center font-semibold">
-                  {row.compositeRank != null ? `第${row.compositeRank}名` : '未上榜'}
+                  {row.compositeRank != null ? `第${row.compositeRank}名` : '未提及'}
                 </td>
                 <td className="metric-num border-t border-slate-100 px-3 py-2 text-center">{pct(row.mentionRate)}</td>
                 <td className="metric-num border-t border-slate-100 px-3 py-2 text-center">{pct(row.top3Rate)}</td>
