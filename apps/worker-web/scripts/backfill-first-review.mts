@@ -13,8 +13,9 @@ import pg from 'pg';
 import { createStorageFromEnv, type EvidenceStorage } from '@geo/evidence';
 import { InsightAgent } from '@geo/insight-agent';
 
-// ── env 引导(repo 根 .env)──
-for (const line of readFileSync('/Users/yanghuaiyuan/AI/geo/.env', 'utf8').split('\n')) {
+// ── env 引导(ENV_FILE 指定环境文件,默认 repo 根 .env)──
+const envFile = process.env.ENV_FILE ?? '/Users/yanghuaiyuan/AI/geo/.env';
+for (const line of readFileSync(envFile, 'utf8').split('\n')) {
   const m = /^([A-Z_0-9]+)=(.*)$/.exec(line);
   if (m && !(m[1] in process.env)) process.env[m[1]!] = m[2]!.replace(/^["']|["']$/g, '');
 }
@@ -24,7 +25,7 @@ const LIMIT = Number(process.env.LIMIT ?? 0);
 // ── 平台设置(InsightAgent 配置在库里)──
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const q = async (text: string, params: unknown[] = []) => (await pool.query(text, params)).rows;
-const settingsRow = (await q(`select value from platform_settings where key = 'insight_agent' limit 1`))[0];
+const settingsRow = (await q(`select value from platform_settings where key = 'insightAgent' limit 1`))[0];
 if (!settingsRow) throw new Error('platform_settings.insight_agent 缺失');
 const insightCfg = typeof settingsRow.value === 'string' ? JSON.parse(settingsRow.value) : settingsRow.value;
 if (!insightCfg.enabled) throw new Error('Insight Agent 未启用');
