@@ -8,6 +8,9 @@ export interface HealthInput {
   sentimentScore?: number | null;
   ownedCitationShare?: number | null;
   ownedCitationCount?: number | null;
+  /** 权威信源引用率(docs/02 §3):门户/官媒/权威机构/官网类引用占总引用比 */
+  authoritativeCitationShare?: number | null;
+  authoritativeCitationCount?: number | null;
 }
 
 export interface HealthItem {
@@ -80,6 +83,15 @@ export function evaluateHealth(
   push('ownedCitationShare', pct(input.ownedCitationShare), ownedPass,
     `≥ ${Math.round(thresholds.ownedCitationShare * 100)}% 且 ≥${thresholds.ownedCitationMinCount} 条`,
     '话语权薄弱');
+
+  const authPass =
+    input.authoritativeCitationShare == null || input.authoritativeCitationCount == null
+      ? null
+      : input.authoritativeCitationShare >= thresholds.authoritativeCitationShare &&
+        input.authoritativeCitationCount >= thresholds.authoritativeCitationMinCount;
+  push('authoritativeCitationShare', pct(input.authoritativeCitationShare), authPass,
+    `≥ ${Math.round(thresholds.authoritativeCitationShare * 100)}% 且 ≥${thresholds.authoritativeCitationMinCount} 条`,
+    '信源权威性不足');
 
   const judged = items.filter((i) => i.pass !== null);
   const passed = judged.filter((i) => i.pass).length;

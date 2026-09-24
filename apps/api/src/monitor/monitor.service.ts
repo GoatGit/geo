@@ -21,7 +21,7 @@ import {
   type MetricCard,
   type MetricSource,
 } from '@geo/shared';
-import { classifyDomain, evaluateHealth, generateActionList, sentimentScore as sentimentScoreOf } from '@geo/metrics';
+import { classifyDomain, evaluateHealth, generateActionList, isAuthoritativeCategory, sentimentScore as sentimentScoreOf } from '@geo/metrics';
 import Redis from 'ioredis';
 import { chatCompletion, InsightAgent } from '@geo/insight-agent';
 import { createStorageFromEnv } from '@geo/evidence';
@@ -141,23 +141,32 @@ export class MonitorService {
     const benchmark = await this.benchmark(input.brandId, since, { mentioned, top3, top1, valid, ranked });
 
     const calibrating = await this.inCalibrationWindow(input.brandId);
-    // 情绪/自有信源实时口径:体检卡两项此前未传恒为"暂无数据"(docs/02 §3 六项体检)
+    // 情绪/信源类体检实时口径:按引用类别聚合一次,自有占比与权威信源引用率同源计算(docs/02 §3)
     const rep = await this.reputation(input.brandId, input.days);
-    const citeAgg = (
-      await this.db
-        .select({
-          total: sql<number>`count(*)::int`,
-          owned: sql<number>`count(*) filter (where ${citationFacts.isOwned})::int`,
-        })
-        .from(citationFacts)
-        .where(
-          and(
-            eq(citationFacts.brandId, input.brandId),
-            gte(citationFacts.extractedAt, since),
-          ),
-        )
-    )[0];
-    const ownedShare = citeAgg && citeAgg.total > 0 ? citeAgg.owned / citeAgg.total : null;
+    const citeRows = await this.db
+      .select({
+        category: citationFacts.platformCategory,
+        n: sql<number>`count(*)::int`,
+        owned: sql<number>`count(*) filter (where ${citationFacts.isOwned})::int`,
+      })
+      .from(citationFacts)
+      .where(
+        and(
+          eq(citationFacts.brandId, input.brandId),
+          gte(citationFacts.extractedAt, since),
+        ),
+      )
+      .groupBy(citationFacts.platformCategory);
+    let citeTotal = 0;
+    let citeOwned = 0;
+    let citeAuthoritative = 0;
+    for (const r of citeRows) {
+      citeTotal += r.n;
+      citeOwned += r.owned;
+      if (isAuthoritativeCategory(r.category)) citeAuthoritative += r.n;
+    }
+    const ownedShare = citeTotal > 0 ? citeOwned / citeTotal : null;
+    const authoritativeShare = citeTotal > 0 ? citeAuthoritative / citeTotal : null;
     const health = evaluateHealth(
       {
         mentionRate: cards[0]!.value,
@@ -166,7 +175,9 @@ export class MonitorService {
         avgRank: cards[3]!.value,
         sentimentScore: rep.totals.hasData ? rep.totals.sentimentScore : null,
         ownedCitationShare: ownedShare,
-        ownedCitationCount: citeAgg?.owned ?? null,
+        ownedCitationCount: citeOwned,
+        authoritativeCitationShare: authoritativeShare,
+        authoritativeCitationCount: citeAuthoritative,
       },
       DEFAULT_HEALTH_THRESHOLDS,
       calibrating,
@@ -665,15 +676,62 @@ export class MonitorService {
       .orderBy(desc(citationFacts.extractedAt))
       .offset((page - 1) * pageSize)
       .limit(pageSize);
-    const totalRow = await this.db
+
+    // 引擎×类别 与 引擎×域名 两次聚合同源:总量/自有/权威占比与分引擎偏好一起算出
+    const byEngineCategory = await this.db
       .select({
+        engine: citationFacts.engine,
+        category: citationFacts.platformCategory,
         n: sql<number>`count(*)::int`,
-        ownedN: sql<number>`count(*) filter (where is_owned)::int`,
+        owned: sql<number>`count(*) filter (where ${citationFacts.isOwned})::int`,
       })
       .from(citationFacts)
-      .where(where);
-    const total = totalRow[0]?.n ?? 0;
-    const ownedTotal = totalRow[0]?.ownedN ?? 0;
+      .where(where)
+      .groupBy(citationFacts.engine, citationFacts.platformCategory);
+    const byEngineDomain = await this.db
+      .select({
+        engine: citationFacts.engine,
+        domain: citationFacts.domain,
+        n: sql<number>`count(*)::int`,
+      })
+      .from(citationFacts)
+      .where(where)
+      .groupBy(citationFacts.engine, citationFacts.domain);
+
+    let total = 0;
+    let ownedTotal = 0;
+    let authoritativeTotal = 0;
+    interface EngineAgg {
+      engine: string;
+      total: number;
+      authoritative: number;
+      categories: Array<{ category: string; hits: number }>;
+      domains: Map<string, number>;
+    }
+    const engines = new Map<string, EngineAgg>();
+    const ensureEngine = (engine: string): EngineAgg => {
+      let e = engines.get(engine);
+      if (!e) {
+        e = { engine, total: 0, authoritative: 0, categories: [], domains: new Map() };
+        engines.set(engine, e);
+      }
+      return e;
+    };
+    for (const r of byEngineCategory) {
+      total += r.n;
+      ownedTotal += r.owned;
+      const e = ensureEngine(r.engine);
+      if (isAuthoritativeCategory(r.category)) {
+        authoritativeTotal += r.n;
+        e.authoritative += r.n;
+      }
+      e.total += r.n;
+      e.categories.push({ category: r.category, hits: r.n });
+    }
+    for (const r of byEngineDomain) {
+      const e = engines.get(r.engine);
+      if (e) e.domains.set(r.domain, r.n);
+    }
 
     const pref = await this.db.execute(sql`
       select domain, platform_category, count(*) as hits,
@@ -697,6 +755,19 @@ export class MonitorService {
       byPlatform.set(platform, cur);
     }
 
+    const perEngine = [...engines.values()]
+      .map((e) => ({
+        engine: e.engine,
+        total: e.total,
+        authoritativeShare: e.total > 0 ? Math.round((e.authoritative / e.total) * 1000) / 1000 : null,
+        categories: e.categories.sort((a, b) => b.hits - a.hits).slice(0, 6),
+        topDomains: [...e.domains.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .map(([domain, hits]) => ({ domain, platform: classifyDomain(domain).platform, hits })),
+      }))
+      .sort((a, b) => b.total - a.total);
+
     return {
       items: rows.map((r) => ({
         url: r.rawUrl,
@@ -717,7 +788,12 @@ export class MonitorService {
         citations: total,
         owned: ownedTotal,
         ownedShare: total > 0 ? Math.round((ownedTotal / total) * 1000) / 1000 : null,
+        /** 权威信源引用率(docs/02 §3):门户/官媒/权威机构/官网类引用占总引用比 */
+        authoritative: authoritativeTotal,
+        authoritativeShare: total > 0 ? Math.round((authoritativeTotal / total) * 1000) / 1000 : null,
       },
+      /** 分引擎信源偏好:每引擎类别构成(Top6)+ 高频域名(Top5),实测口径 */
+      perEngine,
       page,
       pageSize,
       total,

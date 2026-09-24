@@ -46,4 +46,28 @@ describe('evaluateHealth(docs/02 §3)', () => {
     );
     expect(r.items.find((i) => i.metric === 'ownedCitationShare')!.pass).toBe(false);
   });
+
+  it('权威信源引用率:占比与样本量双门槛(360智见对标项)', () => {
+    const pass = evaluateHealth(
+      { authoritativeCitationShare: 0.4, authoritativeCitationCount: 30 },
+      DEFAULT_HEALTH_THRESHOLDS,
+      false,
+    );
+    expect(pass.items.find((i) => i.metric === 'authoritativeCitationShare')!.pass).toBe(true);
+    // 占比达标但样本 <10 条 → 不判达标
+    const small = evaluateHealth(
+      { authoritativeCitationShare: 0.4, authoritativeCitationCount: 4 },
+      DEFAULT_HEALTH_THRESHOLDS,
+      false,
+    );
+    expect(small.items.find((i) => i.metric === 'authoritativeCitationShare')!.pass).toBe(false);
+    // 占比不足
+    const low = evaluateHealth(
+      { authoritativeCitationShare: 0.1, authoritativeCitationCount: 50 },
+      DEFAULT_HEALTH_THRESHOLDS,
+      false,
+    );
+    expect(low.items.find((i) => i.metric === 'authoritativeCitationShare')!.pass).toBe(false);
+    expect(low.items.find((i) => i.metric === 'authoritativeCitationShare')!.label).toBe('信源权威性不足');
+  });
 });

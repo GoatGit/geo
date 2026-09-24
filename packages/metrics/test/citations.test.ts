@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyDomain, isOwnedDomain, normalizeUrl } from '../src/citations';
+import { classifyDomain, isAuthoritativeCategory, isOwnedDomain, normalizeUrl } from '../src/citations';
 import { matchSubject } from '../src/match';
 
 describe('citations(docs/05 §3.1)', () => {
@@ -80,5 +80,22 @@ describe('matchSubject(docs/02 §1.2 识别口径)', () => {
 
   it('不相关文本返回 null', () => {
     expect(matchSubject('极氪 001', subjects)).toBeNull();
+  });
+});
+
+describe('权威信源类别判定(docs/02 §3 权威信源引用率)', () => {
+  it('门户/权威机构/官网计权威;垂媒/UGC/百科/unknown 不计', () => {
+    expect(isAuthoritativeCategory('门户/资讯')).toBe(true);
+    expect(isAuthoritativeCategory('门户/财经')).toBe(true);
+    expect(isAuthoritativeCategory('权威机构')).toBe(true);
+    expect(isAuthoritativeCategory('官网')).toBe(true);
+    // 字典扩展同族类别(如后续 LLM 入典「权威媒体」)也命中
+    expect(isAuthoritativeCategory('权威媒体')).toBe(true);
+    expect(isAuthoritativeCategory('垂媒')).toBe(false);
+    expect(isAuthoritativeCategory('UGC/问答')).toBe(false);
+    expect(isAuthoritativeCategory('UGC/社交')).toBe(false);
+    expect(isAuthoritativeCategory('榜单/评测')).toBe(false);
+    expect(isAuthoritativeCategory('百科')).toBe(false);
+    expect(isAuthoritativeCategory('unknown')).toBe(false);
   });
 });

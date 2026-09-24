@@ -142,3 +142,13 @@ export function isOwnedDomain(domain: string, ownedDomains: string[]): boolean {
     return host === oo || host.endsWith(`.${oo}`);
   });
 }
+
+/**
+ * 权威信源判定(docs/02 §3 权威信源引用率口径):
+ * 门户/官媒(新浪、人民网、新华网等)、权威机构、官网(含厂商/自有)计为权威;
+ * 垂媒/榜单/百科为专业信源、UGC/社交/问答为民间信源,均不计入权威分子。
+ * 前缀+关键词匹配兼容字典扩展出的同族类别(如后续 LLM 入典的「权威媒体」)。
+ */
+export function isAuthoritativeCategory(category: string): boolean {
+  return category.startsWith('门户') || category === '官网' || category.includes('权威');
+}

@@ -9,6 +9,9 @@ export interface HealthThresholds {
   sentimentScore: number; // 0-100
   ownedCitationShare: number; // 自有信源引用占比 ≥ 8% 且 ≥ minCount 条
   ownedCitationMinCount: number;
+  /** 权威信源引用率(门户/官媒/权威机构/官网)≥ 25% 且 ≥ minCount 条 */
+  authoritativeCitationShare: number;
+  authoritativeCitationMinCount: number;
 }
 
 export const DEFAULT_HEALTH_THRESHOLDS: HealthThresholds = {
@@ -19,6 +22,8 @@ export const DEFAULT_HEALTH_THRESHOLDS: HealthThresholds = {
   sentimentScore: 60,
   ownedCitationShare: 0.08,
   ownedCitationMinCount: 10,
+  authoritativeCitationShare: 0.25,
+  authoritativeCitationMinCount: 10,
 };
 
 /** 行动清单规则集版本(docs/02 §6):版本号入库,报告可复现。 */

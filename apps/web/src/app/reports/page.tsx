@@ -55,6 +55,20 @@ export default function ReportsPage() {
     },
     onError: (e) => toast((e as Error).message, 'err'),
   });
+  const [shareBusy, setShareBusy] = useState<number | null>(null);
+  const share = async (id: number) => {
+    setShareBusy(id);
+    try {
+      const r = await api<{ shareUrl: string; expiresAt: string }>(`/reports/${id}/share`, { method: 'POST', json: {} });
+      const url = `${window.location.origin}${r.shareUrl}`;
+      await navigator.clipboard.writeText(url);
+      toast(`分享链接已复制(免登录只读,${new Date(r.expiresAt).toLocaleDateString('zh-CN')} 前有效)`);
+    } catch (e) {
+      toast((e as Error).message, 'err');
+    } finally {
+      setShareBusy(null);
+    }
+  };
 
   const [preview, setPreview] = useState<{ id: number | null; title: string; html: string } | null>(null);
   const [previewBusy, setPreviewBusy] = useState<string | null>(null);
@@ -199,6 +213,15 @@ export default function ReportsPage() {
                       {canUse && (
                         <button className="rounded border border-slate-200 px-2.5 py-1 transition-colors hover:border-brand-300 hover:text-brand-700" onClick={() => download(r.id)}>
                           HTML
+                        </button>
+                      )}
+                      {canUse && (
+                        <button
+                          className="rounded border border-slate-200 px-2.5 py-1 transition-colors hover:border-brand-300 hover:text-brand-700"
+                          disabled={shareBusy === r.id}
+                          onClick={() => void share(r.id)}
+                        >
+                          {shareBusy === r.id ? '生成中…' : '分享'}
                         </button>
                       )}
                       {!canUse && r.status !== 'generating' && (

@@ -17,6 +17,7 @@ const HEALTH_LABELS: Record<string, string> = {
   avgRank: '平均名次',
   sentimentScore: '情绪得分',
   ownedCitationShare: '自有信源占比',
+  authoritativeCitationShare: '权威信源引用率',
 };
 
 const PRIORITY_TONE: Record<string, string> = {

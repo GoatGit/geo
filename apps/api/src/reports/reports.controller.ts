@@ -10,6 +10,7 @@ import {
   Param,
   ParseIntPipe,
   Post,
+  Query,
   Req,
   Res,
 } from '@nestjs/common';
@@ -23,12 +24,13 @@ import type { Redis } from 'ioredis';
 import { REPORT_TYPES, PLAN_LIMITS, PLAN_LABELS, type ReportType } from '@geo/shared';
 import { brands, reports } from '@geo/db';
 import { createStorageFromEnv, type EvidenceStorage } from '@geo/evidence';
-import { currentAccount } from '../common/auth';
+import { currentAccount, Public } from '../common/auth';
 import { DB, REDIS } from '../common/infra.module';
 import { BrandsService } from '../brands/brands.service';
 import { BillingService } from '../billing/billing.service';
 import { ReportRenderService, REPORT_TEMPLATES, type ReportPayload } from './render.service';
 import { renderReportPdf } from './report-pdf';
+import { SHARE_TTL_DAYS, signShareToken, verifyShareToken } from './share-token';
 import { loadEnv } from '../config/env';
 
 class GenerateReportDto {
@@ -162,6 +164,47 @@ export class ReportsController implements OnModuleDestroy {
     const { row, payload } = await this.loadPayload(req, id);
     const html = this.renderer.render(payload, row.type as ReportType);
     return { id, type: row.type, period: row.period, html };
+  }
+
+  /**
+   * 生成分享链接(docs/01 §3.8):签名 token 免登录只读,售后验收/汇报用。
+   * 链接只暴露单个报告的 HTML,180 天自然过期;不落库,重生成即换链接语义(token 含过期时间)。
+   */
+  @Post(':id/share')
+  async share(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
+    const row = await this.ownedRow(req, id);
+    if (row.status !== 'done' || !row.payloadRef) {
+      throw new HttpException('报告尚未生成完成,无法分享', HttpStatus.CONFLICT);
+    }
+    const expMs = Date.now() + SHARE_TTL_DAYS * 24 * 3600 * 1000;
+    const token = signShareToken(id, expMs, loadEnv().jwtAccessSecret);
+    return {
+      shareUrl: `/api/reports/${id}/shared?t=${token}`,
+      expiresAt: new Date(expMs).toISOString(),
+    };
+  }
+
+  /** 公开只读入口(@Public 免鉴权):token 校验通过即返回自包含 HTML 报告。 */
+  @Public()
+  @Get(':id/shared')
+  async shared(@Param('id', ParseIntPipe) id: number, @Query('t') token: string, @Res() res: Response) {
+    if (!token || !verifyShareToken(id, token, loadEnv().jwtAccessSecret)) {
+      throw new HttpException('分享链接无效或已过期', HttpStatus.UNAUTHORIZED);
+    }
+    const row = (await this.db.select().from(reports).where(eq(reports.id, id)).limit(1))[0];
+    if (!row || row.status !== 'done' || !row.payloadRef) {
+      throw new HttpException('报告不存在或尚未生成完成', HttpStatus.NOT_FOUND);
+    }
+    let payload: Record<string, unknown>;
+    try {
+      const raw = await this.storage.get(row.payloadRef);
+      payload = JSON.parse(raw.toString('utf8'));
+    } catch {
+      throw new HttpException('报告产物缺失,请重新生成后再分享', HttpStatus.CONFLICT);
+    }
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('X-Robots-Tag', 'noindex');
+    res.end(this.renderer.render(payload as never, row.type as ReportType));
   }
 
   /** 下载:同模板 HTML 作为附件(浏览器打印即可得 PDF,docs/01 §3.8)。 */
