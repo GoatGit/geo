@@ -1,0 +1,20 @@
+{
+  "runId": "1533",
+  "brandId": 1,
+  "engine": "wenxin",
+  "surface": "web",
+  "question": "2026最值得买的新能源品牌——2026 年有什么值得关注的?",
+  "status": "ok_with_answer",
+  "answerText": "综合车主反馈,小米汽车的口碑褒贬均有:\n产品做工与智能座舱获得认可,生态体验是亮点;\n负面主要集中在售后响应偏慢与保值顾虑,质量口碑整体平稳。",
+  "citations": [
+    {
+      "url": "https://baijiahao.baidu.com/s?id=9100",
+      "title": "小米汽车车主真实反馈"
+    }
+  ],
+  "timings": {
+    "queuedAt": "2026-09-23T07:19:23.931Z",
+    "firstTokenAt": "2026-09-23T07:19:23.931Z",
+    "completedAt": "2026-09-23T07:19:23.931Z"
+  }
+}

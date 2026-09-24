@@ -1,0 +1,20 @@
+{
+  "runId": "1554",
+  "brandId": 1,
+  "engine": "yuanbao",
+  "surface": "web",
+  "question": "2026最值得买的新能源品牌——2026 年有什么值得关注的?",
+  "status": "ok_with_answer",
+  "answerText": "腾讯元宝综合微信生态讨论:小米汽车口碑热度高,\n生态互联互通被广泛认为领先,做工出色,车主推荐意愿强;\n少数用户提及售后响应慢与价格偏贵的问题,整体口碑偏好。",
+  "citations": [
+    {
+      "url": "https://new.qq.com/rain/a/9300",
+      "title": "微信生态热议:小米汽车口碑"
+    }
+  ],
+  "timings": {
+    "queuedAt": "2026-09-24T07:31:26.180Z",
+    "firstTokenAt": "2026-09-24T07:31:26.180Z",
+    "completedAt": "2026-09-24T07:31:26.180Z"
+  }
+}

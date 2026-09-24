@@ -1,3 +1,4 @@
+import { validateSurveyQuestions, validateSurveySegments } from '@geo/shared';
 /**
  * LLM 输出校验(docs/09 §5):手写零依赖校验器(仓库惯例,不引 zod)。
  * 原则:宁缺毋滥——非法条目丢弃并报告,不让幻觉数据进口径。
@@ -165,4 +166,116 @@ export function validateLayerOutput(
   }
   if (items.length === 0) return { ok: false, errors: ['no valid items'] };
   return { ok: true, value: { items } };
+}
+
+/** 超级问卷:生成的问卷题目与 AI 建议人群(docs/11 §4);选项越权/题目越界在生成入口即拒。 */
+export interface SurveyGenOutput {
+  questions: Array<{ id: string; type: 'single' | 'multi' | 'scale' | 'open'; text: string; options?: string[] }>;
+  segments: Array<{
+    ageBand: string;
+    cityTier: string;
+    incomeBand: string;
+    gender: string;
+    occupationGroup: string;
+    count: number;
+  }>;
+}
+
+export function validateSurveyGenOutput(v: unknown): ValidateResult<SurveyGenOutput> {
+  if (!isRecord(v)) return { ok: false, errors: ['root is not an object'] };
+  const questions = validateSurveyQuestions(v.questions);
+  const segments = validateSurveySegments(v.segments);
+  const errors = [...(!questions.ok ? questions.errors : []), ...(!segments.ok ? segments.errors : [])];
+  if (!Array.isArray(v.questions) || v.questions.length < 5 || v.questions.length > 10) errors.push('questions count out of 5..10');
+  if (errors.length || !questions.ok || !segments.ok) return { ok: false, errors };
+  return { ok: true, value: { questions: questions.value, segments: segments.value } };
+}
+
+/** 超级问卷:单个 persona 的作答结果;逐题校验 answer 与题型匹配。 */
+export interface PersonaAnswerOutput {
+  answers: Array<{ questionId: string; answer: string | number | string[] }>;
+}
+
+export function validatePersonaAnswerOutput(
+  v: unknown,
+  ctx: { questions: Array<{ id: string; type: string; options?: string[] }> },
+): ValidateResult<PersonaAnswerOutput> {
+  if (!isRecord(v)) return { ok: false, errors: ['root is not an object'] };
+  const defs = new Map(ctx.questions.map((q) => [q.id, q]));
+  const errors: string[] = [];
+  const answers: PersonaAnswerOutput['answers'] = [];
+  const seen = new Set<string>();
+  const raw = Array.isArray(v.answers) ? v.answers : [];
+  for (const [i, a] of raw.entries()) {
+    if (!isRecord(a)) {
+      errors.push(`answers[${i}] not an object`);
+      continue;
+    }
+    const qid = typeof a.questionId === 'string' ? a.questionId : '';
+    const def = defs.get(qid);
+    if (!def || seen.has(qid)) { errors.push(`answers[${i}] unknown or duplicated question`); continue; }
+    const answer = a.answer;
+    if (def.type === 'scale') {
+      if (typeof answer !== 'number' || !Number.isInteger(answer) || answer < 1 || answer > 10) {
+        errors.push(`answers[${i}] ${qid} scale out of 1..10`);
+        continue;
+      }
+    } else if (def.type === 'multi') {
+      const opts = new Set(def.options ?? []);
+      if (!Array.isArray(answer) || answer.length === 0 || new Set(answer).size !== answer.length || !answer.every((o) => typeof o === 'string' && opts.has(o))) {
+        errors.push(`answers[${i}] ${qid} multi invalid`);
+        continue;
+      }
+    } else if (def.type === 'single') {
+      const opts = new Set(def.options ?? []);
+      if (typeof answer !== 'string' || !opts.has(answer)) {
+        errors.push(`answers[${i}] ${qid} single not in options`);
+        continue;
+      }
+    } else {
+      if (typeof answer !== 'string' || !answer.trim() || answer.length > 1000) {
+        errors.push(`answers[${i}] ${qid} open invalid`);
+        continue;
+      }
+    }
+    seen.add(qid);
+    answers.push({ questionId: qid, answer: answer as string | number | string[] });
+  }
+  if (answers.length < ctx.questions.length) {
+    errors.push(`answered ${answers.length}/${ctx.questions.length}`);
+  }
+  if (errors.length > 0) return { ok: false, errors };
+  return { ok: true, value: { answers } };
+}
+
+/** 人群库流水线(docs/12 §1):Persona Hub 描述的结构化结果;宽松验收,null 字段合法。 */
+export interface PersonaEnrichOutput {
+  occupation: string | null;
+  occupationGroup: string | null;
+  ageBand: string | null;
+  cityTier: string | null;
+  incomeBand: string | null;
+  gender: string | null;
+  traits: string[];
+  confidence: number;
+}
+
+export function validatePersonaEnrichOutput(v: unknown): ValidateResult<PersonaEnrichOutput> {
+  if (!isRecord(v)) return { ok: false, errors: ['root is not an object'] };
+  const nullable = (k: string): string | null =>
+    typeof v[k] === 'string' && (v[k] as string).trim() ? (v[k] as string).trim() : null;
+  const confidence = typeof v.confidence === 'number' && v.confidence >= 0 && v.confidence <= 1 ? v.confidence : 0;
+  return {
+    ok: true,
+    value: {
+      occupation: nullable('occupation'),
+      occupationGroup: nullable('occupationGroup'),
+      ageBand: nullable('ageBand'),
+      cityTier: nullable('cityTier'),
+      incomeBand: nullable('incomeBand'),
+      gender: nullable('gender'),
+      traits: Array.isArray(v.traits) ? v.traits.filter((t): t is string => typeof t === 'string' && t.trim().length > 0).slice(0, 8) : [],
+      confidence,
+    },
+  };
 }

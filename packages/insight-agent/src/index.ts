@@ -13,16 +13,26 @@ import {
   buildClassifyPrompt,
   buildExpandPrompt,
   buildMentionPrompt,
+  buildPersonaAnswerPrompt,
+  buildPersonaEnrichPrompt,
   buildReputationPrompt,
+  buildSurveyGenPrompt,
   buildWebsitePrompt,
   INSIGHT_PROMPT_VERSION,
+  SURVEY_PROMPT_VERSION,
   type MentionSubjectInput,
 } from './prompts';
 import {
   validateClassifyOutput,
   validateExpandOutput,
   validateMentionOutput,
+  validatePersonaAnswerOutput,
+  type PersonaAnswerOutput,
+  type PersonaEnrichOutput,
+  validatePersonaEnrichOutput,
   validateReputationOutput,
+  type SurveyGenOutput,
+  validateSurveyGenOutput,
   validateWebsiteOutput,
 } from './schema';
 
@@ -52,12 +62,14 @@ export function resolveInsightSettings(
   }
   if (env.INSIGHT_AGENT_MODE === 'shadow' || env.INSIGHT_AGENT_MODE === 'llm') merged.mode = env.INSIGHT_AGENT_MODE;
   if (env.INSIGHT_AGENT_ENABLED === 'true') merged.enabled = true;
+  const timeout = Number(env.INSIGHT_AGENT_TIMEOUT_MS);
+  if (Number.isFinite(timeout) && timeout >= 1000 && timeout <= 60000) merged.timeoutMs = timeout;
   return merged;
 }
 
 export interface InsightEvent {
   kind: 'call' | 'fallback' | 'invalid_partial';
-  task: 'mention' | 'reputation' | 'classify' | 'expand' | 'website';
+  task: 'mention' | 'reputation' | 'classify' | 'expand' | 'website' | 'survey_gen' | 'persona_answer' | 'persona_enrich';
   ok: boolean;
   latencyMs?: number;
   error?: string;
@@ -125,11 +137,11 @@ export class InsightAgent {
     };
   }
 
-  private async chatWithRetry(cfg: ChatEndpoint, system: string, user: string, task: InsightEvent['task']): Promise<string> {
+  private async chatWithRetry(cfg: ChatEndpoint, system: string, user: string, task: InsightEvent['task'], maxTokens?: number): Promise<string> {
     let lastErr: unknown;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const res = await chatCompletion(cfg, { system, user }, this.fetchImpl);
+        const res = await chatCompletion(cfg, { system, user, maxTokens }, this.fetchImpl);
         this.onEvent({ kind: 'call', task, ok: true, latencyMs: res.latencyMs });
         return res.text;
       } catch (err) {
@@ -314,6 +326,77 @@ export class InsightAgent {
       const validated = validateExpandOutput(this.parseJson(raw));
       if (!validated.ok) return null;
       return { ...validated.value, parserVersion: insightParserVersion(this.settings.protocol, this.settings.model) };
+    } catch {
+      return null;
+    }
+  }
+
+  /** 超级问卷 S1:生成问卷 + AI 建议人群;题目/人群均需用户确认后才运行,失败返回 null。 */
+  async generateSurvey(input: {
+    objective: string;
+    brandName?: string;
+  }): Promise<{ questions: SurveyGenOutput['questions']; segments: SurveyGenOutput['segments']; parserVersion: string } | null> {
+    if (!this.usable) return null;
+    const { system, user } = buildSurveyGenPrompt(input);
+    let raw: string;
+    try {
+      raw = await this.chatWithRetry(this.endpointCfg(), system, user, 'survey_gen', 4096);
+    } catch {
+      return null;
+    }
+    try {
+      const validated = validateSurveyGenOutput(this.parseJson(raw));
+      if (!validated.ok) {
+        this.onEvent({ kind: 'fallback', task: 'survey_gen', ok: false, error: validated.errors.join('; ').slice(0, 300) });
+        return null;
+      }
+      return { ...validated.value, parserVersion: `${insightParserVersion(this.settings.protocol, this.settings.model)}+survey-${SURVEY_PROMPT_VERSION}` };
+    } catch (err) {
+      this.onEvent({ kind: 'fallback', task: 'survey_gen', ok: false, error: `bad json: ${(err as Error).message}` });
+      return null;
+    }
+  }
+
+  /** 超级问卷 S3:单个 persona 独立作答全卷;任一题不合法即整体拒收,失败返回 null。 */
+  async personaAnswer(input: {
+    profile: Record<string, unknown>;
+    questions: Array<{ id: string; type: string; text: string; options?: string[] }>;
+  }): Promise<{ answers: PersonaAnswerOutput['answers']; parserVersion: string } | null> {
+    if (!this.usable) return null;
+    const { system, user } = buildPersonaAnswerPrompt(input);
+    let raw: string;
+    try {
+      raw = await this.chatWithRetry(this.endpointCfg(), system, user, 'persona_answer', Math.min(8192, Math.max(2048, input.questions.length * 384)));
+    } catch {
+      return null;
+    }
+    try {
+      const validated = validatePersonaAnswerOutput(this.parseJson(raw), { questions: input.questions });
+      if (!validated.ok) {
+        this.onEvent({ kind: 'fallback', task: 'persona_answer', ok: false, error: validated.errors.join('; ').slice(0, 300) });
+        return null;
+      }
+      return { ...validated.value, parserVersion: `${insightParserVersion(this.settings.protocol, this.settings.model)}+survey-${SURVEY_PROMPT_VERSION}` };
+    } catch (err) {
+      this.onEvent({ kind: 'fallback', task: 'persona_answer', ok: false, error: `bad json: ${(err as Error).message}` });
+      return null;
+    }
+  }
+
+  /** 人群库流水线(docs/12 §1):Persona Hub 描述 → 结构化档案;宽松验收,null 字段合法;失败返回 null。 */
+  async enrichPersona(input: { description: string }): Promise<{ profile: PersonaEnrichOutput; parserVersion: string } | null> {
+    if (!this.usable) return null;
+    const { system, user } = buildPersonaEnrichPrompt(input);
+    let raw: string;
+    try {
+      raw = await this.chatWithRetry(this.endpointCfg(30_000), system, user, 'persona_enrich');
+    } catch {
+      return null;
+    }
+    try {
+      const validated = validatePersonaEnrichOutput(this.parseJson(raw));
+      if (!validated.ok) return null;
+      return { profile: validated.value, parserVersion: insightParserVersion(this.settings.protocol, this.settings.model) };
     } catch {
       return null;
     }

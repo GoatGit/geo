@@ -56,6 +56,16 @@ const NAV: NavGroup[] = [
     ],
   },
   { kind: 'item', item: { href: '/industry-insights', label: '行业洞察', icon: <IconSpark /> } },
+  {
+    kind: 'group',
+    label: '超级问卷',
+    icon: <IconList />,
+    items: [
+      { href: '/surveys', label: '问卷', icon: <IconList />, exact: true },
+      { href: '/surveys/pools', label: '人群库', icon: <IconPulse /> },
+      { href: '/surveys/reports', label: '调研报告', icon: <IconReport /> },
+    ],
+  },
   { kind: 'item', item: { href: '/reports', label: '报告中心', icon: <IconReport /> } },
   {
     kind: 'group',
@@ -98,6 +108,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
 /** 路由标题:浏览器标签页可区分页面(历史/收藏/多标签场景)。 */
 const ROUTE_TITLES: Array<[RegExp, string]> = [
+  [/^\/surveys\/new/, '新建调研'],
+  [/^\/surveys\/pools/, '人群库'],
+  [/^\/surveys\/reports/, '调研报告'],
+  [/^\/surveys/, '超级问卷'],
   [/^\/monitor\/rankings/, '排名透视'],
   [/^\/monitor\/citations/, '引用源分析'],
   [/^\/monitor\/competitors/, '竞品透视'],
@@ -126,7 +140,7 @@ function ConsoleShell({ pathname, children }: { pathname: string; children: Reac
   const brandless = brandsQuery.isSuccess && brandsQuery.data!.length === 0;
   // 账户级页面不依赖品牌:套餐账单 / 新建品牌 / 平台后台
   const brandlessFriendly =
-    pathname.startsWith('/billing') || pathname.startsWith('/brands/new') || pathname.startsWith('/admin');
+    pathname.startsWith('/billing') || pathname.startsWith('/brands/new') || pathname.startsWith('/admin') || pathname.startsWith('/surveys');
   // 路由变化时收起移动端抽屉(点击链接后自动关闭)
   useEffect(() => setNavOpen(false), [pathname]);
   useEffect(() => {

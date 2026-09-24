@@ -431,3 +431,134 @@ export const accountIndustrySubs = pgTable(
   },
   (t) => ({ pk: primaryKey({ columns: [t.accountId, t.industryId] }) }),
 );
+
+/** 超级问卷(0015):一道问卷题。 */
+export interface SurveyQuestion {
+  id: string;
+  type: 'single' | 'multi' | 'scale' | 'open';
+  text: string;
+  options?: string[];
+}
+
+/** 超级问卷(0015):人群池配额骨架;确定性别名属性由骨架给定,行为属性由 LLM 填充(docs/12 §2)。 */
+export interface PoolSpecSegment {
+  ageBand: string;
+  cityTier: string;
+  incomeBand: string;
+  gender: string;
+  occupationGroup: string;
+  count: number;
+}
+
+export interface PoolSpec {
+  segments: PoolSpecSegment[];
+}
+
+/** 超级问卷(0015):一次合成样本调研;questions 为用户可编辑的问卷 JSON。 */
+export const surveys = pgTable(
+  'surveys',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    accountId: bigint('account_id', { mode: 'number' }).notNull(),
+    brandId: bigint('brand_id', { mode: 'number' }),
+    title: text('title').notNull(),
+    objective: text('objective').notNull(),
+    /** draft/generating/ready_selecting/running/completed/failed */
+    status: text('status').notNull().default('draft'),
+    questions: jsonb('questions').$type<SurveyQuestion[]>().notNull().default([]),
+    suggestedSegments: jsonb('suggested_segments').$type<PoolSpecSegment[]>().notNull().default([]),
+    activePoolId: bigint('active_pool_id', { mode: 'number' }),
+    taskToken: text('task_token'),
+    heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }),
+    lastError: text('last_error'),
+    generationVersion: text('generation_version'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ accountIdx: index('surveys_account_idx').on(t.accountId, t.status) }),
+);
+
+/** 超级问卷(0015):虚拟人群池;approved=false(未确认)禁止运行作答(docs/11 §8 决策闸门)。 */
+export const personaPools = pgTable('persona_pools', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  surveyId: bigint('survey_id', { mode: 'number' })
+    .notNull()
+    .references(() => surveys.id, { onDelete: 'cascade' }),
+  spec: jsonb('spec').$type<PoolSpec>().notNull(),
+  size: integer('size').notNull().default(0),
+  approved: boolean('approved').notNull().default(false),
+  /** uncalibrated/running/passed */
+  calibrationStatus: text('calibration_status').notNull().default('uncalibrated'),
+  sourceMode: text('source_mode').notNull().default('generated'),
+  sourceStats: jsonb('source_stats').$type<Record<string, number>>().notNull().default({}),
+  activeCalibrationId: bigint('active_calibration_id', { mode: 'number' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** 超级问卷(0015):persona 档案;source=persona_hub(增强后)或 generated(定向生成)。 */
+export const personas = pgTable(
+  'personas',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    poolId: bigint('pool_id', { mode: 'number' })
+      .notNull()
+      .references(() => personaPools.id, { onDelete: 'cascade' }),
+    profile: jsonb('profile').$type<Record<string, unknown>>().notNull(),
+    source: text('source').notNull().default('generated'),
+    libraryId: bigint('library_id', { mode: 'number' }),
+    weight: real('weight').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ poolIdx: index('personas_pool_idx').on(t.poolId) }),
+);
+
+/** 超级问卷(0015):逐 persona 逐问卷回答;(survey,persona) 唯一。 */
+export const surveyResponses = pgTable(
+  'survey_responses',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    surveyId: bigint('survey_id', { mode: 'number' })
+      .notNull()
+      .references(() => surveys.id, { onDelete: 'cascade' }),
+    personaId: bigint('persona_id', { mode: 'number' })
+      .notNull()
+      .references(() => personas.id, { onDelete: 'cascade' }),
+    answers: jsonb('answers')
+      .$type<Array<{ questionId: string; answer: string | number | string[]; comment?: string }>>()
+      .notNull(),
+    model: text('model').notNull(),
+    status: text('status').notNull().default('completed'),
+    parserVersion: text('parser_version').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ surveyIdx: index('survey_responses_survey_idx').on(t.surveyId) }),
+);
+
+/** Shared Persona Hub assets, distinct from per-survey persona snapshots. */
+export const personaLibrary = pgTable('persona_library', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  sourceKey: text('source_key').notNull().unique(), description: text('description').notNull(),
+  sourceUrl: text('source_url').notNull(), sourceRevision: text('source_revision').notNull(), license: text('license').notNull(),
+  profile: jsonb('profile').$type<Record<string, unknown>>(), status: text('status').notNull().default('imported'),
+  parserVersion: text('parser_version'), model: text('model'), lastError: text('last_error'), taskToken: text('task_token'),
+  heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+export const personaImportJobs = pgTable('persona_import_jobs', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(), requestedBy: bigint('requested_by', { mode: 'number' }).notNull(),
+  status: text('status').notNull().default('queued'), requestedCount: integer('requested_count').notNull(),
+  processed: integer('processed').notNull().default(0), imported: integer('imported').notNull().default(0),
+  sourceUrl: text('source_url').notNull(), sourceRevision: text('source_revision').notNull(), license: text('license').notNull(),
+  taskToken: text('task_token'), heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }), lastError: text('last_error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+export const surveyCalibrations = pgTable('survey_calibrations', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(), surveyId: bigint('survey_id', { mode: 'number' }).notNull().references(() => surveys.id),
+  poolId: bigint('pool_id', { mode: 'number' }).notNull().references(() => personaPools.id), accountId: bigint('account_id', { mode: 'number' }).notNull(),
+  benchmark: jsonb('benchmark').$type<import('@geo/shared').CalibrationInput>().notNull(),
+  result: jsonb('result').$type<import('@geo/shared').CalibrationResult>().notNull(),
+  applied: boolean('applied').notNull().default(false), responseCount: integer('response_count').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});

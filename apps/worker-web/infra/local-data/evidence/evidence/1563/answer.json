@@ -1,0 +1,24 @@
+{
+  "runId": "1563",
+  "brandId": 2,
+  "engine": "wenxin",
+  "surface": "web",
+  "question": "dfsdfsdf——2026 年有什么值得关注的?",
+  "status": "ok_with_answer",
+  "answerText": "在 20 万左右的预算内,以下纯电轿车值得考虑:\n\n1. 特斯拉 Model 3\n2. 比亚迪汉 EV\n3. 小米 SU7\n4. 小鹏 P7\n5. 极氪 001\n\n以上信息综合自公开资料,建议到店试驾后再做决定。",
+  "citations": [
+    {
+      "url": "https://baijiahao.baidu.com/s?id=9003",
+      "title": "纯电轿车推荐榜单"
+    },
+    {
+      "url": "https://www.yiche.com/xinche/9004",
+      "title": "Model 3 与国产新势力"
+    }
+  ],
+  "timings": {
+    "queuedAt": "2026-09-24T07:47:26.137Z",
+    "firstTokenAt": "2026-09-24T07:47:26.137Z",
+    "completedAt": "2026-09-24T07:47:26.137Z"
+  }
+}

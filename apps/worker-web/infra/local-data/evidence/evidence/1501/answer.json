@@ -1,0 +1,24 @@
+{
+  "runId": "1501",
+  "brandId": 1,
+  "engine": "yuanbao",
+  "surface": "web",
+  "question": "小米SU7和特斯拉Model 3哪个好?",
+  "status": "ok_with_answer",
+  "answerText": "在 20 万左右的预算内,以下纯电轿车值得考虑:\n\n1. 比亚迪海豹\n2. 极氪 001\n3. 特斯拉 Model 3\n4. 小鹏 P7+\n5. 小米SU7 Ultra\n\n以上信息综合自公开资料,建议到店试驾后再做决定。",
+  "citations": [
+    {
+      "url": "https://new.qq.com/rain/a/9006",
+      "title": "微信生态热议车型"
+    },
+    {
+      "url": "https://www.xiaomiev.com/su7-ultra",
+      "title": "小米SU7 Ultra 官网"
+    }
+  ],
+  "timings": {
+    "queuedAt": "2026-09-22T05:27:21.421Z",
+    "firstTokenAt": "2026-09-22T05:27:21.421Z",
+    "completedAt": "2026-09-22T05:27:21.421Z"
+  }
+}

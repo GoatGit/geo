@@ -1,0 +1,101 @@
+{
+  "accountId": 7,
+  "surveyId": 21,
+  "poolId": 3,
+  "library": {
+    "total": 100,
+    "ready": 12,
+    "pending": 0,
+    "failed": 8
+  },
+  "status": "completed",
+  "sampleSize": 24,
+  "calibrationId": 1,
+  "calibrationStatus": "passed",
+  "ess": 8.947328430157302,
+  "before": [
+    {
+      "options": [
+        {
+          "value": "Yes",
+          "actual": 0.9166666666666666,
+          "target": 0.7752808988764045,
+          "deviation": 0.14138576779026213
+        },
+        {
+          "value": "No",
+          "actual": 0.08333333333333333,
+          "target": 0.2247191011235955,
+          "deviation": -0.14138576779026218
+        }
+      ],
+      "questionId": "q1",
+      "maxDeviation": 0.14138576779026218
+    },
+    {
+      "options": [
+        {
+          "value": "Yes",
+          "actual": 0.08333333333333333,
+          "target": 0.399812734082397,
+          "deviation": -0.31647940074906367
+        },
+        {
+          "value": "No",
+          "actual": 0.9166666666666666,
+          "target": 0.600187265917603,
+          "deviation": 0.31647940074906367
+        }
+      ],
+      "questionId": "q2",
+      "maxDeviation": 0.31647940074906367
+    }
+  ],
+  "after": [
+    {
+      "options": [
+        {
+          "value": "Yes",
+          "actual": 0.7777460199215529,
+          "target": 0.7752808988764045,
+          "deviation": 0.0024651210451483996
+        },
+        {
+          "value": "No",
+          "actual": 0.22225398007844724,
+          "target": 0.2247191011235955,
+          "deviation": -0.002465121045148261
+        }
+      ],
+      "questionId": "q1",
+      "maxDeviation": 0.0024651210451483996
+    },
+    {
+      "options": [
+        {
+          "value": "Yes",
+          "actual": 0.39981273408239715,
+          "target": 0.399812734082397,
+          "deviation": 1.6653345369377348e-16
+        },
+        {
+          "value": "No",
+          "actual": 0.6001872659176031,
+          "target": 0.600187265917603,
+          "deviation": 1.1102230246251565e-16
+        }
+      ],
+      "questionId": "q2",
+      "maxDeviation": 1.6653345369377348e-16
+    }
+  ],
+  "warnings": [],
+  "model": "glm-5.3-flash",
+  "realRespondents": 1068,
+  "libraryAtEnd": {
+    "total": 200000,
+    "ready": 12,
+    "pending": 0,
+    "failed": 8
+  }
+}

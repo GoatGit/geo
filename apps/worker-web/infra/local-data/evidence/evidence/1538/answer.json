@@ -1,0 +1,20 @@
+{
+  "runId": "1538",
+  "brandId": 1,
+  "engine": "qwen",
+  "surface": "web",
+  "question": "小米汽车的口碑和质量到底怎么样?有什么优缺点?",
+  "status": "ok_with_answer",
+  "answerText": "小米汽车的口碑目前存在一定争议:\n车机生态与做工是公认的亮点,但近期投诉集中在售后服务响应慢、门店体验参差,保值顾虑较多;\n建议到店试驾对比后再做决定。",
+  "citations": [
+    {
+      "url": "https://www.toutiao.com/article/9200",
+      "title": "小米汽车服务体验讨论"
+    }
+  ],
+  "timings": {
+    "queuedAt": "2026-09-23T07:19:24.014Z",
+    "firstTokenAt": "2026-09-23T07:19:24.014Z",
+    "completedAt": "2026-09-23T07:19:24.014Z"
+  }
+}

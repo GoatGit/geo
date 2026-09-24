@@ -13,6 +13,8 @@ import { ProxyPoolManager } from './qg-proxy';
 import { startReportsWorker, startReputationWorker, scheduleWeeklyReports } from './report-worker';
 import { startInsightsWorker, scheduleWeeklyInsights } from './insights-worker';
 import { createBrokerFromEnv } from '@geo/browser-session';
+import { PersonaLibraryWorker } from './persona-library-worker';
+import { SurveyWorker } from './survey-worker';
 
 /**
  * Worker 启动(docs/07 §3):
@@ -59,6 +61,8 @@ async function bootstrap() {
   );
   const reportsWorker = startReportsWorker(db);
   const insightsWorker = startInsightsWorker(db);
+  const surveyWorker = new SurveyWorker(db).start();
+  const personaLibraryWorker = new PersonaLibraryWorker(db).start();
   await scheduleWeeklyReports();
   await scheduleWeeklyInsights(); // 行业洞察每周一 09:00 自动生成(docs/01 §3.10 市场化)
 
@@ -119,6 +123,8 @@ async function bootstrap() {
       reputationWorker.close(),
       reportsWorker.close(),
       insightsWorker.close(),
+      surveyWorker.stop(),
+      personaLibraryWorker.stop(),
       cronConsumer.close(),
       cronQueue.close(),
       collect.shutdown(),

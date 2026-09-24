@@ -1,0 +1,47 @@
+{
+  "sourceLicense": "CC-BY-4.0",
+  "questions": [
+    {
+      "id": "q1",
+      "type": "single",
+      "text": "Have you seen any of the 6 films in the Star Wars franchise (Episodes I–VI)?",
+      "options": [
+        "Yes",
+        "No"
+      ]
+    },
+    {
+      "id": "q2",
+      "type": "single",
+      "text": "Do you consider yourself to be a fan of the Star Trek franchise?",
+      "options": [
+        "Yes",
+        "No"
+      ]
+    }
+  ],
+  "benchmark": {
+    "title": "FiveThirtyEight Star Wars Survey (2014), complete cases",
+    "source": "https://github.com/fivethirtyeight/data/tree/master/star-wars-survey",
+    "population": "2014 SurveyMonkey respondents with complete Star Wars viewing and Star Trek fandom answers; demo benchmark only, not a Chinese population benchmark",
+    "collectedAt": "2014-07-22",
+    "sampleSize": 1068,
+    "targets": [
+      {
+        "questionId": "q1",
+        "shares": {
+          "Yes": 0.7752808988764045,
+          "No": 0.2247191011235955
+        }
+      },
+      {
+        "questionId": "q2",
+        "shares": {
+          "Yes": 0.399812734082397,
+          "No": 0.600187265917603
+        }
+      }
+    ]
+  },
+  "dateNote": "collectedAt records the source publication date (2014-07-22), not an independently verified interview field date."
+}

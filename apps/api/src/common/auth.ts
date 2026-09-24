@@ -5,7 +5,6 @@ import {
   UnauthorizedException,
   SetMetadata,
 } from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import jwt from 'jsonwebtoken';
 import { loadEnv, type AppEnv } from '../config/env';
@@ -59,13 +58,14 @@ export function verifyRefreshToken(env: AppEnv, token: string): AccountPrincipal
   }
 }
 
-/** 全局 Bearer JWT 守卫;@Public() 放行(auth/health)。 */
+/** 全局 Bearer JWT 守卫;@Public() 放行(auth/health)。
+ *  注:不走 Reflector 构造注入——tsx(esbuild)不生成装饰器参数类型元数据,
+ *  类型注入会得到 undefined(旧 dist 构建由 tsc 生成故未暴露);直接读 reflect-metadata。 */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
-
   canActivate(ctx: ExecutionContext): boolean {
-    if (this.reflector.get<boolean>(IS_PUBLIC_KEY, ctx.getHandler())) return true;
+    const isPublic = Reflect.getMetadata(IS_PUBLIC_KEY, ctx.getHandler());
+    if (isPublic) return true;
 
     const req = ctx.switchToHttp().getRequest<Request>();
     const header = req.headers.authorization ?? '';

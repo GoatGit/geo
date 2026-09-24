@@ -1,0 +1,19 @@
+{
+  "engine": "wenxin",
+  "surface": "web",
+  "adapterVersion": "mock-1",
+  "questionHash": "70ecdba28a0ed037a447222c2b013f96abd482fe3394f14ecb72f46a14205257",
+  "accountFingerprint": "c5a79920200e33f1",
+  "egressIp": null,
+  "timing": {
+    "queuedAt": "2026-09-24T07:31:26.238Z",
+    "firstTokenAt": "2026-09-24T07:31:26.238Z",
+    "completedAt": "2026-09-24T07:31:26.238Z"
+  },
+  "engineMeta": {
+    "mode": "mock-replay",
+    "fixtureStatus": "ok_with_answer",
+    "profileKey": "profile:48"
+  },
+  "frameCount": 0
+}

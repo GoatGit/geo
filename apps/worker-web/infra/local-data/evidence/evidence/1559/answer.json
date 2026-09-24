@@ -1,0 +1,20 @@
+{
+  "runId": "1559",
+  "brandId": 1,
+  "engine": "deepseek",
+  "surface": "web",
+  "question": "小米汽车的口碑和质量到底怎么样?有什么优缺点?",
+  "status": "ok_with_answer",
+  "answerText": "小米汽车口碑分析(基于公开舆情):\n优势——做工扎实、生态联动领先,性价比口碑好;\n争议——售后网络覆盖不足,部分用户反馈交付与响应较慢。\n舆情以正面为主,服务体验是主要槽点。",
+  "citations": [
+    {
+      "url": "https://www.zhihu.com/question/5100",
+      "title": "小米汽车口碑怎么样"
+    }
+  ],
+  "timings": {
+    "queuedAt": "2026-09-24T07:31:26.238Z",
+    "firstTokenAt": "2026-09-24T07:31:26.238Z",
+    "completedAt": "2026-09-24T07:31:26.238Z"
+  }
+}

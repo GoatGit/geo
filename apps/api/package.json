@@ -7,7 +7,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "dev": "tsx watch src/main.ts"
+    "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput & node --env-file=../../.env --enable-source-maps --watch dist/main.js"
   },
   "dependencies": {
     "@geo/db": "workspace:*",

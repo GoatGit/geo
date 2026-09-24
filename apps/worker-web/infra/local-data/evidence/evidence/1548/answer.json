@@ -1,0 +1,15 @@
+{
+  "runId": "1548",
+  "brandId": 1,
+  "engine": "doubao",
+  "surface": "web",
+  "question": "2026最值得买的新能源品牌——2026 年有什么值得关注的?",
+  "status": "ok_empty",
+  "answerText": "",
+  "citations": [],
+  "timings": {
+    "queuedAt": "2026-09-24T07:31:26.154Z",
+    "firstTokenAt": "2026-09-24T07:31:26.154Z",
+    "completedAt": "2026-09-24T07:31:26.154Z"
+  }
+}

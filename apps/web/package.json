@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start -p 3001",
     "typecheck": "tsc --noEmit",
-    "test": "echo 'web: no unit tests' && exit 0"
+    "test": "vitest run"
   },
   "dependencies": {
     "@geo/shared": "workspace:*",

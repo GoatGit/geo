@@ -1,0 +1,88 @@
+{
+  "version": "v137-survey-20260922-r3",
+  "commit": "a89002bf95f076b8a1b5c97a7fff36d85d3c0e22",
+  "image": "crpi-fgbi72bokijrd5cd.cn-hangzhou.personal.cr.aliyuncs.com/gemux/geo:v137-survey-20260922-r3",
+  "digest": "sha256:83120122ab9404f68dbdb620aeffd3d2659e51b3773d0e3ce29f4f60d4a9764a",
+  "origin": "https://geo.gemux.cn",
+  "apps": [
+    {
+      "app": "api",
+      "image": "crpi-fgbi72bokijrd5cd.cn-hangzhou.personal.cr.aliyuncs.com/gemux/geo:v137-survey-20260922-r3",
+      "status": "RUNNING",
+      "substatus": "NORMAL",
+      "instances": 1,
+      "environmentPreserved": true
+    },
+    {
+      "app": "worker",
+      "image": "crpi-fgbi72bokijrd5cd.cn-hangzhou.personal.cr.aliyuncs.com/gemux/geo:v137-survey-20260922-r3",
+      "status": "RUNNING",
+      "substatus": "NORMAL",
+      "instances": 1,
+      "environmentPreserved": true
+    },
+    {
+      "app": "web",
+      "image": "crpi-fgbi72bokijrd5cd.cn-hangzhou.personal.cr.aliyuncs.com/gemux/geo:v137-survey-20260922-r3",
+      "status": "RUNNING",
+      "substatus": "NORMAL",
+      "instances": 1,
+      "environmentPreserved": true
+    }
+  ],
+  "migrations": [
+    "0015_super_survey.sql",
+    "0016_survey_jobs.sql",
+    "0017_persona_library_calibration.sql"
+  ],
+  "apiSmoke": {
+    "passed": true,
+    "surveyId": 1,
+    "accountId": 8,
+    "generatedQuestions": true,
+    "sampleSize": 6,
+    "status": "completed",
+    "calibration": {
+      "applied": true,
+      "status": "passed",
+      "ess": 6
+    },
+    "checks": [
+      "authentication",
+      "tenant isolation",
+      "real model generation",
+      "saved question editing",
+      "pool approval",
+      "durable worker completion",
+      "report aggregation",
+      "calibration persistence",
+      "production license gate: import/enrich/sampling"
+    ],
+    "personaHubAllowed": false,
+    "finalVersion": "v137-survey-20260922-r3"
+  },
+  "browserSmoke": {
+    "passed": true,
+    "origin": "https://geo.gemux.cn",
+    "menus": [
+      "问卷",
+      "人群库",
+      "调研报告"
+    ],
+    "checks": [
+      "authenticated brandless navigation",
+      "public pages",
+      "report CSV download",
+      "mobile overflow",
+      "browser errors"
+    ],
+    "errors": [],
+    "failures": []
+  },
+  "note": "Production calibration smoke uses explicitly labeled synthetic test margins. Real-human public benchmark validation is recorded separately in live-result.json.",
+  "cleanup": {
+    "testAccountRemoved": true,
+    "testSurveysRemoved": 1,
+    "temporaryJobsDeleted": true
+  }
+}

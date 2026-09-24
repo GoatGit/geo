@@ -1,0 +1,19 @@
+{
+  "engine": "qwen",
+  "surface": "web",
+  "adapterVersion": "mock-1",
+  "questionHash": "d1df480959cf7d23c820eb15d7a708a438671a6a36965d2bd0c82912a73ecc29",
+  "accountFingerprint": "015894b68f738116",
+  "egressIp": null,
+  "timing": {
+    "queuedAt": "2026-09-22T05:27:21.423Z",
+    "firstTokenAt": "2026-09-22T05:27:21.423Z",
+    "completedAt": "2026-09-22T05:27:21.423Z"
+  },
+  "engineMeta": {
+    "mode": "mock-replay",
+    "fixtureStatus": "ok_with_answer",
+    "profileKey": "profile:50"
+  },
+  "frameCount": 0
+}

@@ -148,6 +148,10 @@ describe('reputation / classify / expand', () => {
 });
 
 describe('resolveInsightSettings(env 引导语义)', () => {
+  it('supports a bounded local survey timeout while rejecting invalid values', () => {
+    expect(resolveInsightSettings({ ...DEFAULT_INSIGHT_AGENT_SETTINGS }, { INSIGHT_AGENT_TIMEOUT_MS: '60000' }).timeoutMs).toBe(60000);
+    expect(resolveInsightSettings({ ...DEFAULT_INSIGHT_AGENT_SETTINGS }, { INSIGHT_AGENT_TIMEOUT_MS: '999999' }).timeoutMs).toBe(DEFAULT_INSIGHT_AGENT_SETTINGS.timeoutMs);
+  });
   it('库内从未保存(=默认值)时 env 生效', () => {
     const s = resolveInsightSettings({ ...DEFAULT_INSIGHT_AGENT_SETTINGS }, {
       INSIGHT_AGENT_ENABLED: 'true',

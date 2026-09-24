@@ -172,6 +172,7 @@ export default function AdminAccountsPage() {
     refetchInterval: 15_000,
   });
 
+  const [engineTab, setEngineTab] = useState<string>('all');
   const [newEngine, setNewEngine] = useState<string>('doubao');
   const [newCount, setNewCount] = useState<number>(1);
   const [message, setMessage] = useState('');
@@ -304,6 +305,9 @@ export default function AdminAccountsPage() {
     };
   });
 
+  const engineTabRows =
+    engineTab === 'all' ? accounts : accounts.filter((a) => a.engine === engineTab);
+
   const viewerEntries = Object.entries(loginStates).filter(
     ([, st]) => st.viewer && st.sessionId && (st.state === 'running' || st.state === 'queued'),
   );
@@ -361,6 +365,28 @@ export default function AdminAccountsPage() {
       ))}
 
       <section className="card rise-1 overflow-hidden">
+        {/* 引擎 Tab:每页一个引擎,Tab 上带 可用/总数 徽标 */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-5 py-3">
+          <button
+            onClick={() => setEngineTab('all')}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+              engineTab === 'all' ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            全部({accounts.length})
+          </button>
+          {engineSummary.map((s) => (
+            <button
+              key={s.engine}
+              onClick={() => setEngineTab(s.engine)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+                engineTab === s.engine ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              {engineLabel(s.engine)}({s.available}/{s.total})
+            </button>
+          ))}
+        </div>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50/60 text-left text-xs text-slate-500">
@@ -372,14 +398,14 @@ export default function AdminAccountsPage() {
             </tr>
           </thead>
           <tbody>
-            {accounts.length === 0 && (
+            {engineTabRows.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-5 py-8 text-center text-xs text-slate-400">
-                  账号池为空:先登记档案,再人工登录注入账号态
+                  该引擎暂无账号:上方「添加账号」登记档案后,人工登录注入账号态
                 </td>
               </tr>
             )}
-            {accounts.map((a) => {
+            {engineTabRows.map((a) => {
               const meta = STATUS_META[a.status] ?? { label: a.status, tone: 'slate' as const };
               const st = loginStates[a.id];
               const busy = st?.state === 'queued' || st?.state === 'running';

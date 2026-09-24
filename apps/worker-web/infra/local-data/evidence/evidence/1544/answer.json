@@ -1,0 +1,15 @@
+{
+  "runId": "1544",
+  "brandId": 1,
+  "engine": "deepseek",
+  "surface": "web",
+  "question": "小米SU7和特斯拉Model 3哪个好?",
+  "status": "ok_empty",
+  "answerText": "",
+  "citations": [],
+  "timings": {
+    "queuedAt": "2026-09-24T07:31:26.144Z",
+    "firstTokenAt": "2026-09-24T07:31:26.145Z",
+    "completedAt": "2026-09-24T07:31:26.145Z"
+  }
+}

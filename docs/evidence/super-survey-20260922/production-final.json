@@ -1,0 +1,92 @@
+{
+  "version": "v137-survey-20260922-r4",
+  "commit": "e33a7ce31a2141a3c8804dba936551f45267dee3",
+  "image": "crpi-fgbi72bokijrd5cd.cn-hangzhou.personal.cr.aliyuncs.com/gemux/geo:v137-survey-20260922-r4",
+  "base": "v137-survey-20260922-r3",
+  "digest": "sha256:2d50155290ee72c5907f89e7b16f776202d69e6eb3ffc1f1f43ae6377fb3117e",
+  "apps": [
+    {
+      "app": "api",
+      "image": "crpi-fgbi72bokijrd5cd.cn-hangzhou.personal.cr.aliyuncs.com/gemux/geo:v137-survey-20260922-r4",
+      "status": "RUNNING",
+      "substatus": "NORMAL",
+      "instances": 1,
+      "environmentPreserved": true
+    },
+    {
+      "app": "worker",
+      "image": "crpi-fgbi72bokijrd5cd.cn-hangzhou.personal.cr.aliyuncs.com/gemux/geo:v137-survey-20260922-r4",
+      "status": "RUNNING",
+      "substatus": "NORMAL",
+      "instances": 1,
+      "environmentPreserved": true
+    },
+    {
+      "app": "web",
+      "image": "crpi-fgbi72bokijrd5cd.cn-hangzhou.personal.cr.aliyuncs.com/gemux/geo:v137-survey-20260922-r4",
+      "status": "RUNNING",
+      "substatus": "NORMAL",
+      "instances": 1,
+      "environmentPreserved": true
+    }
+  ],
+  "browser": {
+    "passed": true,
+    "version": "v137-survey-20260922-r4",
+    "checks": [
+      "three menus",
+      "cached survey switch clears calibration",
+      "invalid CSV clears old targets and disables submit",
+      "valid CSV recovery and calibration persistence",
+      "CSV export",
+      "mobile overflow",
+      "browser errors"
+    ],
+    "testData": "explicitly synthetic deployment fixture",
+    "errors": []
+  },
+  "localRegression": {
+    "passed": true,
+    "http": "real Nest API",
+    "database": "isolated PostgreSQL schema",
+    "worker": "actual SurveyWorker",
+    "llm": "deterministic local HTTP fixture",
+    "checks": [
+      "route matching",
+      "DTO validation",
+      "tenant boundaries",
+      "brandless entry",
+      "generation failure and retry",
+      "edit-save-reload",
+      "pool confirmation",
+      "background progress",
+      "partial-only retry",
+      "cancel fencing",
+      "report default selection",
+      "multi-select aggregation",
+      "dimension comparison",
+      "CSV download",
+      "mobile overflow",
+      "browser errors",
+      "Persona Hub sampling",
+      "CSV benchmark calibration",
+      "invalid CSV clears stale targets",
+      "calibration state isolated between cached reports",
+      "calibration tenant boundaries",
+      "library admin authorization"
+    ],
+    "screenshots": 6
+  },
+  "checks": {
+    "sharedTests": 12,
+    "apiIntegrationTests": 9,
+    "productionBuild": true,
+    "changedScopeLint": true,
+    "nonRootRuntimeFiles": true
+  },
+  "cleanup": {
+    "testAccountRemoved": true,
+    "testSurveysRemoved": 2
+  },
+  "rolloutObservation": "One temporary API connection refusal recorded during replacement; subsequent full browser regression and public requests passed."
+}

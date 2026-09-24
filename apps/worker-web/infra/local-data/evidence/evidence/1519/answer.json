@@ -1,0 +1,24 @@
+{
+  "runId": "1519",
+  "brandId": 1,
+  "engine": "deepseek",
+  "surface": "web",
+  "question": "在可承受的预算内,20万预算纯电轿车推荐,有什么值得推荐的吗?",
+  "status": "ok_with_answer",
+  "answerText": "在 20 万左右的预算内,以下纯电轿车值得考虑:\n\n1. 比亚迪海豹\n2. 小米 SU7\n3. 特斯拉 Model 3\n4. 极氪 001\n5. 智界 S7\n\n以上信息综合自公开资料,建议到店试驾后再做决定。",
+  "citations": [
+    {
+      "url": "https://www.zhihu.com/question/5001",
+      "title": "20 万预算买什么纯电轿车"
+    },
+    {
+      "url": "https://www.autohome.com.cn/news/9002",
+      "title": "海豹 vs SU7 对比"
+    }
+  ],
+  "timings": {
+    "queuedAt": "2026-09-23T07:19:23.890Z",
+    "firstTokenAt": "2026-09-23T07:19:23.892Z",
+    "completedAt": "2026-09-23T07:19:23.892Z"
+  }
+}

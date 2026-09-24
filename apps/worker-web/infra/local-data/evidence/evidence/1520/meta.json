@@ -1,0 +1,19 @@
+{
+  "engine": "yuanbao",
+  "surface": "web",
+  "adapterVersion": "mock-1",
+  "questionHash": "d1df480959cf7d23c820eb15d7a708a438671a6a36965d2bd0c82912a73ecc29",
+  "accountFingerprint": "e397b64f89e71078",
+  "egressIp": null,
+  "timing": {
+    "queuedAt": "2026-09-23T07:19:23.894Z",
+    "firstTokenAt": "2026-09-23T07:19:23.895Z",
+    "completedAt": "2026-09-23T07:19:23.895Z"
+  },
+  "engineMeta": {
+    "mode": "mock-replay",
+    "fixtureStatus": "ok_empty",
+    "profileKey": "profile:51"
+  },
+  "frameCount": 0
+}

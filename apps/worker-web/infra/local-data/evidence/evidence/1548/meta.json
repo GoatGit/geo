@@ -1,0 +1,19 @@
+{
+  "engine": "doubao",
+  "surface": "web",
+  "adapterVersion": "mock-1",
+  "questionHash": "605de99c120432f638a218e56455f038b4b82a35f088f7ce154ee9bd331bd70b",
+  "accountFingerprint": "ee0d5c54e1e58daa",
+  "egressIp": null,
+  "timing": {
+    "queuedAt": "2026-09-24T07:31:26.154Z",
+    "firstTokenAt": "2026-09-24T07:31:26.154Z",
+    "completedAt": "2026-09-24T07:31:26.154Z"
+  },
+  "engineMeta": {
+    "mode": "mock-replay",
+    "fixtureStatus": "ok_empty",
+    "profileKey": "profile:44"
+  },
+  "frameCount": 0
+}

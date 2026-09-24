@@ -1,0 +1,20 @@
+{
+  "runId": "1524",
+  "brandId": 1,
+  "engine": "doubao",
+  "surface": "web",
+  "question": "小米SU7和特斯拉Model 3哪个好?",
+  "status": "ok_with_answer",
+  "answerText": "综合公开讨论,小米汽车的口碑整体偏正面:\n做工与质感被普遍认为有竞争力,车机生态联动是一大亮点,智能化体验领先;\n主要槽点是部分门店售后服务响应慢,以及价格波动带来的保值顾虑。\n总体而言值得推荐。",
+  "citations": [
+    {
+      "url": "https://www.douyin.com/video/7301",
+      "title": "车主口碑实测视频"
+    }
+  ],
+  "timings": {
+    "queuedAt": "2026-09-23T07:19:23.897Z",
+    "firstTokenAt": "2026-09-23T07:19:23.897Z",
+    "completedAt": "2026-09-23T07:19:23.897Z"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "engine": "deepseek",
+  "surface": "web",
+  "adapterVersion": "mock-1",
+  "questionHash": "d1df480959cf7d23c820eb15d7a708a438671a6a36965d2bd0c82912a73ecc29",
+  "accountFingerprint": "2d0380fdba135ec0",
+  "egressIp": null,
+  "timing": {
+    "queuedAt": "2026-09-22T05:27:21.421Z",
+    "firstTokenAt": "2026-09-22T05:27:21.421Z",
+    "completedAt": "2026-09-22T05:27:21.421Z"
+  },
+  "engineMeta": {
+    "mode": "mock-replay",
+    "fixtureStatus": "ok_with_answer",
+    "profileKey": "profile:46"
+  },
+  "frameCount": 0
+}
