@@ -23,21 +23,32 @@ const CP1252_HIGH: Record<number, number> = {
   0x0153: 0x9c, 0x017e: 0x9e, 0x0178: 0x9f,
 };
 
-/** cp1252 mojibake → 原始 UTF-8 文本;含不可逆字符或解码失败返回 null。 */
-function mojibakeToUtf8(s: string): string | null {
-  const bytes: number[] = [];
-  for (const ch of s) {
-    const cp = ch.codePointAt(0) ?? 0;
-    if (cp <= 0xff) bytes.push(cp);
-    else if (CP1252_HIGH[cp] !== undefined) bytes.push(CP1252_HIGH[cp]);
-    else return null; // 混有正常区文字,不是纯 mojibake,不修
-  }
+function tryUtf8(bytes: number[]): string | null {
   try {
     const out = new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(bytes));
     return out.includes('\uFFFD') ? null : out;
   } catch {
     return null;
   }
+}
+
+/** cp1252 mojibake → 原始 UTF-8 文本;含不可逆字符或解码失败返回 null。
+ *  抢救分支:上游空白归一会把字节 0xA0(不间断空格,UTF-8 序列的合法续字节)
+ *  错改成 0x20——全部空格换回 A0 再解一次,解码通过即采用。 */
+function mojibakeToUtf8(s: string): string | null {
+  const bytes: number[] = [];
+  let hasSpace = false;
+  for (const ch of s) {
+    const cp = ch.codePointAt(0) ?? 0;
+    if (cp <= 0xff) bytes.push(cp);
+    else if (CP1252_HIGH[cp] !== undefined) bytes.push(CP1252_HIGH[cp]);
+    else return null; // 混有正常区文字,不是纯 mojibake,不修
+    if (cp === 0x20) hasSpace = true;
+  }
+  const direct = tryUtf8(bytes);
+  if (direct) return direct;
+  if (hasSpace) return tryUtf8(bytes.map((b) => (b === 0x20 ? 0xa0 : b)));
+  return null;
 }
 
 /**
@@ -63,7 +74,9 @@ function looksMojibake(t: string): boolean {
 /** 净化一条引用标题;不可修复/样板/URL 形态一律返回 null。展示截断 60 字。 */
 export function sanitizeCitationTitle(raw: string | null | undefined): string | null {
   if (!raw) return null;
-  let t = raw.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+  // 仅去控制字符;\s+ 归一必须放在 mojibake 修复之后——NBSP(U+00A0)是乱码字节流的
+  // 合法成员,提前归一会破坏字节序列导致修复永远失败
+  let t = raw.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
   if (!t) return null;
   if (looksMojibake(t)) {
     // 循环还原覆盖双重编码
