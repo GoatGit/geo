@@ -39,6 +39,10 @@ export interface EngineSiteConfig {
   minAskTimeoutMs?: number;
   /** 回答文本的站点噪声行(整行匹配移除,如工具调用状态行);正则字符串 */
   answerNoisePatterns: string[];
+  /** 登录成功 Cookie 判定要求全部 hint 齐全(默认任一即可);用于部分凭证先落的站点(元宝) */
+  requireAllCookieHints?: boolean;
+  /** 登录阻断器:这些定位器可见时(图形验证/滑块),视为登录未完成——不判定成功、不强制导航 */
+  loginBlockerHints?: string[];
   /** 引导块剥离(可选):从回答开头连续剥离匹配行(如文心的「搜索N个关键词+引用源列表」前置块),
    *  直到首个不匹配行——避免整篇剥离正文中合法的编号榜单。 */
   leadingNoiseLineRe?: string;
@@ -154,8 +158,12 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     loginHints: ['button:has-text("登录")', 'a:has-text("登录")'],
     loginUrlPatterns: [],
     inputSelectors: ['[contenteditable="true"]', 'textarea'],
-    // 游客模式无可见"登录"元素且输入框可用:人工登录成功必须以腾讯登录态 Cookie 为准
+    // 游客模式无可见"登录"元素且输入框可用:人工登录成功必须以腾讯登录态 Cookie 为准。
+    // 实测(2026-09-25):手机验证码通过后、图形验证完成前就会先落 hy_user(部分凭证),
+    // 只认任一 Cookie 会误判成功并提前关窗 → 要求双凭证齐全 + 图形验证可见时视为未完成
     loggedInCookieHints: ['hy_user', 'hy_token'],
+    requireAllCookieHints: true,
+    loginBlockerHints: ['text=拖动', 'text=滑块', 'text=安全验证', 'text=图形验证'],
     // 引用来源在会话详情接口与 chat SSE 流里(正文/抽屉 DOM 均无 <a> 链接,实测 2026-09)
     netCitationAllow: ['conversation/v1/detail', '/api/chat/'],
     minAnswerChars: 120,

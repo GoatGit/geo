@@ -18,7 +18,7 @@ import {
   type LoginRequest,
   type LoginStatus,
 } from '@geo/shared';
-import { checkLogin, hasVisibleInput, siteConfigOf } from '@geo/engine-adapters';
+import { checkLogin, hasVisibleInput, loginBlockerVisible, siteConfigOf } from '@geo/engine-adapters';
 import { browserModeFromEnv, viewerLoginFromEnv, type SessionBroker } from '@geo/browser-session';
 import { ProxyPoolManager } from './qg-proxy';
 import { envInt } from './config';
@@ -248,13 +248,16 @@ export class LoginManager {
               await expired.click({ timeout: 1_000 }).catch(() => undefined);
             }
           } catch { /* 无过期态 */ }
-          if (loggedIn === true && !usable && Date.now() - lastNavAt > 15_000) {
+          // 图形验证/滑块可见时不强制导航——把操作者从验证页拽走正是元宝登录事故的根因
+          const blocked = await loginBlockerVisible(page, site);
+          if (loggedIn === true && !usable && !blocked && Date.now() - lastNavAt > 15_000) {
             // 登录成功但落在非会话页(如站点首页):带回提问页
             await page.goto(site.chatUrl, { waitUntil: 'domcontentloaded', timeout: site.navigationTimeoutMs }).catch(() => undefined);
             lastNavAt = Date.now();
             const recheck = await checkLogin(page, site);
             usable = recheck.loggedIn === true && (await hasVisibleInput(page, site));
           }
+          if (blocked) confirmStreak = 0;
           confirmStreak = usable ? confirmStreak + 1 : 0;
           if (confirmStreak >= 2) {
             // 成功前硬校验:扫码后手机端确认未完成时,桌面端登录弹窗会先关闭,

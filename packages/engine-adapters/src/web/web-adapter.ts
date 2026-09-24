@@ -60,9 +60,16 @@ export async function checkLogin(
   if (site.loggedInCookieHints?.length) {
     try {
       const cookies = await page.context().cookies(page.url());
-      const hit = cookies.find((c) =>
-        c.value.trim().length > 0 && site.loggedInCookieHints!.some((h) => c.name.toLowerCase() === h.toLowerCase()),
-      );
+      const hints = site.loggedInCookieHints;
+      // requireAllCookieHints(元宝):部分凭证(如仅 hy_user)在图形验证前就会落下,
+      // 任一命中会误判成功;要求全部 hint 均有非空值
+      const hit = site.requireAllCookieHints
+        ? hints.every((h) => cookies.some((c) => c.name.toLowerCase() === h.toLowerCase() && c.value.trim().length > 0))
+          ? { name: hints.join('+') }
+          : null
+        : cookies.find((c) =>
+            c.value.trim().length > 0 && hints.some((h) => c.name.toLowerCase() === h.toLowerCase()),
+          );
       if (hit) return { loggedIn: true, hint: `cookie:${hit.name}` };
     } catch {
       // Cookie 读取失败:继续负向判定
@@ -96,8 +103,22 @@ export async function checkLogin(
   return { loggedIn: null, hint: null };
 }
 
-/** 提问输入框可用性:未登录指示消失 + 输入框可见,才认定登录成功(人工登录编排的成功判据)。 */
+/** 登录阻断器(图形验证/滑块)可见性:可见 = 登录流程尚未完成。 */
+export async function loginBlockerVisible(page: Page, site: EngineSiteConfig): Promise<boolean> {
+  for (const hint of site.loginBlockerHints ?? []) {
+    try {
+      if (await page.locator(hint).first().isVisible({ timeout: 300 })) return true;
+    } catch {
+      // 选择器不适用:继续
+    }
+  }
+  return false;
+}
+
+/** 提问输入框可用性:未登录指示消失 + 输入框可见,才认定登录成功(人工登录编排的成功判据)。
+ *  登录阻断器(图形验证/滑块)可见时判定为不可用——部分凭证已落但风控未过。 */
 export async function hasVisibleInput(page: Page, site: EngineSiteConfig): Promise<boolean> {
+  if (await loginBlockerVisible(page, site)) return false;
   for (const sel of site.inputSelectors) {
     try {
       if (await page.locator(sel).first().isVisible({ timeout: 500 })) return true;
