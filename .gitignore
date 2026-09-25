@@ -5,7 +5,7 @@ coverage/
 *.tsbuildinfo
 .env
 .env.local
-infra/local-data/
+**/infra/local-data/
 .DS_Store
 .env.debug
 uploads/
