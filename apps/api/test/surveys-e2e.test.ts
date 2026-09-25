@@ -155,6 +155,10 @@ describe('超级问卷 e2e(隔离 schema,docs/11 全生命周期)', () => {
     expect(first.profile.occupation).toBeTruthy();
     expect(first.profile.channels).toBeTruthy();
     expect(first.profile.ageBand).toBe(SEGMENTS[0]!.ageBand);
+    // 同段位内人物彼此错开(职业不撞车,姓名大体不同),贴近真实人群多样性
+    const seg1 = list.items.slice(0, SEGMENTS[0]!.count).map(p => String(p.profile.occupation));
+    expect(new Set(seg1).size).toBe(seg1.length);
+    expect(new Set(list.items.map(p => String(p.profile.name))).size).toBeGreaterThan(1);
     // 分页边界
     const page2 = await service.personaList({ accountId, surveyId, poolId, page: 2, pageSize: 3 });
     expect(page2.items).toHaveLength(2);

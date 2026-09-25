@@ -54,15 +54,15 @@ const CONSUMPTION: Record<string, Record<string, string>> = {
 const pick = <T,>(pool: T[], b: number): T => pool[b % pool.length];
 
 /** 生成人物的生活化档案:配额维度由用户指定,其余字段按 hash 组合但保持年龄×职业×渠道的生活逻辑。 */
-function buildGeneratedProfile(seg: PoolSpec['segments'][number], hash: Buffer, sampleKey: string) {
+function buildGeneratedProfile(seg: PoolSpec['segments'][number], hash: Buffer, sampleKey: string, index: number) {
   const gender = seg.gender === '不限' ? ['男', '女'][hash[3]! % 2] : seg.gender;
-  const name = pick(SURNAME, hash[4]!) + pick(gender === '男' ? GIVEN_M : GIVEN_F, hash[5]!);
+  const name = pick(SURNAME, hash[4]! + index) + pick(gender === '男' ? GIVEN_M : GIVEN_F, hash[5]! + index);
   const city = pick(CITIES[seg.cityTier] ?? CITIES['二线']!, hash[6]!);
-  const occupation = pick(JOBS[seg.occupationGroup] ?? JOBS['办事人员']!, hash[7]!);
-  const family = pick(FAMILY[seg.ageBand] ?? FAMILY['25-34']!, hash[8]!);
+  const occupation = pick(JOBS[seg.occupationGroup] ?? JOBS['办事人员']!, hash[7]! + index);
+  const family = pick(FAMILY[seg.ageBand] ?? FAMILY['25-34']!, hash[8]! + index);
   const ageNum = Number.parseInt(seg.ageBand, 10);
   const base = ageNum >= 55 ? CHANNELS_SENIOR : ageNum >= 35 ? CHANNELS_MID : CHANNELS_YOUNG;
-  const channels = [...new Set([pick(base, hash[9]!), pick(base, hash[10]!), pick(base, hash[11]!)])];
+  const channels = [...new Set([pick(base, hash[9]! + index), pick(base, hash[10]! + index * 2), pick(base, hash[11]! + index * 3)])];
   const priceSensitivity = ['低', '中', '高'][hash[0]! % 3];
   const style = ['理性对比型', '重视口碑型', '参数研究型', '体验直觉型'][hash[1]! % 4];
   return {
@@ -158,7 +158,7 @@ export class SurveysService {
           const hub = candidates.length ? candidates[i % candidates.length] : undefined;
           if (hub) { hubCount++; usedLibrary.add(hub.id); }
           rows.push({ poolId: pool.id, libraryId: hub?.id ?? null, source: hub ? 'persona_hub' : 'generated', profile: {
-            ...attributes, ...buildGeneratedProfile(seg, hash, `${segmentIndex + 1}-${i + 1}`),
+            ...attributes, ...buildGeneratedProfile(seg, hash, `${segmentIndex + 1}-${i + 1}`, i),
             ...(hub ? { ...Object.fromEntries(Object.entries(hub.profile ?? {}).filter(([,v]) => v != null)), description: hub.description, provenance: { libraryId: hub.id, sourceUrl: hub.sourceUrl, revision: hub.sourceRevision, license: hub.license, assignedDimensions: Object.keys(attributes).filter(key => hub.profile?.[key] == null), assignment: '用户研究配额，非人口分布估计' } } : {}),
           } });
         }
