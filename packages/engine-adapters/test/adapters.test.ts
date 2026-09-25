@@ -116,7 +116,6 @@ describe('stripAnswerNoise(wenxin 引导块定界剥离)', async () => {
     ],
     leadingNoiseLineRe: '^(搜索|使用工具|全球搜|\\d{1,2}\\.\\s)',
   };
-  const NUM = (n: number, title: string) => (title ? `${n}.\n${title}` : `${n}.`);
 
   it('换行渲染形态:头部声明+序号行/标题行交替,整块剥离,正文保留', () => {
     const sample = [

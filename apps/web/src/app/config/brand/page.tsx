@@ -275,6 +275,84 @@ export default function BrandAssetPage() {
     url: (materials.data ?? []).filter((m) => m.kind === 'url').length,
   };
 
+  // ===== 品牌资产完整度(产品逻辑主线:每项资产都对应一个监测能力,缺失=对应能力失真) =====
+  const checklist = [
+    {
+      key: 'website',
+      weight: 20,
+      done: Boolean(brand?.website),
+      label: '官网',
+      why: '决定「自有信源引用」判定——没有官网,引用源分析里自有占比恒为 0',
+      action: () => {
+        setEditing(true);
+        setTimeout(() => document.getElementById('field-website')?.focus(), 80);
+      },
+      cta: '填写官网',
+    },
+    {
+      key: 'industry',
+      weight: 15,
+      done: Boolean(brand?.industry),
+      label: '行业',
+      why: '决定行业洞察匹配与 AI 竞品建议的准确度',
+      action: () => {
+        setEditing(true);
+        setTimeout(() => document.getElementById('field-industry')?.focus(), 80);
+      },
+      cta: '填写行业',
+    },
+    {
+      key: 'intro',
+      weight: 20,
+      done: (brand?.intro ?? '').length >= 50,
+      label: '品牌描述',
+      why: 'AI 写稿、报告与洞察分析的品牌语料基础',
+      action: () => {
+        setDigging(true);
+        dig.mutate();
+      },
+      cta: 'AI 生成画像',
+    },
+    {
+      key: 'materials',
+      weight: 15,
+      done: counts.all > 0,
+      label: '参考资料 ≥1',
+      why: '写稿/问答/洞察时 AI 自动调用的资料库',
+      action: () => {
+        setMatAdding(true);
+        document.getElementById('materials-section')?.scrollIntoView({ behavior: 'smooth' });
+      },
+      cta: '添加资料',
+    },
+    {
+      key: 'competitors',
+      weight: 20,
+      done: competitors.filter((c) => c.confirmed).length >= 3,
+      label: '已确认竞品 ≥3',
+      why: '识别口径与竞争格局的完整性——缺失会让竞品透视失真',
+      action: () => {
+        document.getElementById('competitor-section')?.scrollIntoView({ behavior: 'smooth' });
+        if (competitors.length === 0) setAdding(true);
+      },
+      cta: '完善竞品',
+    },
+    {
+      key: 'aliases',
+      weight: 10,
+      done: (selfEntry?.aliases.length ?? 0) > 0,
+      label: '本品别名',
+      why: '提升提及识别召回(如「理想」也能识别为理想汽车)',
+      action: () => {
+        setEditing(true);
+        setTimeout(() => document.getElementById('field-aliases')?.focus(), 80);
+      },
+      cta: '添加别名',
+    },
+  ];
+  const completeness = checklist.reduce((acc, c) => acc + (c.done ? c.weight : 0), 0);
+  const missing = checklist.filter((c) => !c.done);
+
   return (
     <>
       {/* ===== 品牌档案 Hero 卡 ===== */}
@@ -282,6 +360,21 @@ export default function BrandAssetPage() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
           <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-brand to-[#b8a9ff] text-2xl font-extrabold text-white shadow-lg">
             {form.name.slice(0, 1)}
+          </div>
+          <div
+            className="relative hidden h-16 w-16 shrink-0 items-center justify-center sm:flex"
+            title={`品牌资产完整度 ${completeness}%:官网/行业/描述/资料/竞品/别名共同决定监测质量`}
+          >
+            <svg width="64" height="64" viewBox="0 0 64 64" className="-rotate-90">
+              <circle cx="32" cy="32" r="27" fill="none" stroke="#e8e4f5" strokeWidth="6" />
+              <circle
+                cx="32" cy="32" r="27" fill="none"
+                stroke={completeness >= 80 ? '#3f9c6b' : completeness >= 50 ? '#c2a26b' : '#c2570b'}
+                strokeWidth="6" strokeLinecap="round"
+                strokeDasharray={`${(completeness / 100) * 169.6} 169.6`}
+              />
+            </svg>
+            <span className="metric-num absolute text-[13px] font-bold text-slate-700">{completeness}%</span>
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2 text-xl font-extrabold tracking-wide text-slate-900">
@@ -303,12 +396,19 @@ export default function BrandAssetPage() {
                   {form.website.replace(/^https?:\/\//, '')}
                 </span>
               )}
-              <span className="rounded-full border border-brand/15 bg-white/80 px-2.5 py-0.5 text-[11px] text-slate-700">
+              <button
+                onClick={() => document.getElementById('competitor-section')?.scrollIntoView({ behavior: 'smooth' })}
+                className="rounded-full border border-brand/15 bg-white/80 px-2.5 py-0.5 text-[11px] text-slate-700 transition-colors hover:border-brand/40 hover:text-brand-700"
+              >
                 竞品 {competitors.length}
-              </span>
-              <span className="rounded-full border border-brand/15 bg-white/80 px-2.5 py-0.5 text-[11px] text-slate-700">
+                {pending > 0 && <span className="ml-1 text-warn">({pending} 待确认)</span>}
+              </button>
+              <button
+                onClick={() => document.getElementById('materials-section')?.scrollIntoView({ behavior: 'smooth' })}
+                className="rounded-full border border-brand/15 bg-white/80 px-2.5 py-0.5 text-[11px] text-slate-700 transition-colors hover:border-brand/40 hover:text-brand-700"
+              >
                 资料 {counts.all}
-              </span>
+              </button>
             </div>
             {!editing && (
               <p className="max-w-[660px] whitespace-pre-wrap text-[12.5px] leading-6 text-slate-600">
@@ -337,6 +437,27 @@ export default function BrandAssetPage() {
           <p className="mt-3 rounded bg-white/70 px-3 py-1.5 text-xs text-slate-500">
             正在基于品牌名/行业/官网/现有描述生成结构化画像与竞品建议……
           </p>
+        )}
+        {missing.length > 0 && (
+          <div className="mt-4 rounded-xl border border-white/70 bg-white/60 p-3.5">
+            <p className="text-xs font-semibold text-slate-700">
+              资产完整度 {completeness}% · 补全 {missing.length} 项可提升监测质量
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {missing.map((m) => (
+                <button
+                  key={m.key}
+                  onClick={m.action}
+                  title={m.why}
+                  className="group flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] text-slate-600 transition-colors hover:border-brand/40 hover:text-brand-700"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-warn" />
+                  {m.label}
+                  <span className="text-slate-300 transition-colors group-hover:text-brand-500">去补全 →</span>
+                </button>
+              ))}
+            </div>
+          </div>
         )}
       </section>
 
@@ -371,6 +492,7 @@ export default function BrandAssetPage() {
           <label className="block text-xs font-medium text-slate-600">
             官网
             <input
+              id="field-website"
               value={form.website}
               onChange={(e) => setForm({ ...form, website: e.target.value })}
               maxLength={200}
@@ -381,6 +503,7 @@ export default function BrandAssetPage() {
           <label className="block text-xs font-medium text-slate-600">
             本品别名(识别口径)
             <input
+              id="field-aliases"
               value={form.selfAliases}
               onChange={(e) => setForm({ ...form, selfAliases: e.target.value })}
               placeholder="逗号分隔,如:理想, LiXiang, 理想汽车"
@@ -412,7 +535,7 @@ export default function BrandAssetPage() {
       )}
 
       {/* ===== 资料库 ===== */}
-      <section className="card mt-4 p-6">
+      <section id="materials-section" className="card mt-4 p-6">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-sm font-medium text-slate-900">品牌资料库</h2>
@@ -509,8 +632,12 @@ export default function BrandAssetPage() {
               >
                 <span className={`text-[10px] text-slate-400 ${expanded[m.id] ? 'rotate-90' : ''} transition-transform`}>▶</span>
                 <span className="font-medium text-slate-800">{m.title}</span>
-                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">
-                  {m.source === 'dig' ? '品牌挖掘' : '手动'}
+                <span
+                  className={`rounded px-1.5 py-0.5 text-[10px] ${
+                    m.source === 'dig' ? 'bg-[#efe9ff] text-[#7c5cbf]' : 'bg-slate-100 text-slate-500'
+                  }`}
+                >
+                  {m.source === 'dig' ? '✦ AI 挖掘' : '手动'}
                 </span>
                 <span className="text-xs text-slate-400">{KIND_LABEL[m.kind]}</span>
                 <span className="ml-auto metric-num text-xs text-slate-400">
@@ -635,32 +762,60 @@ export default function BrandAssetPage() {
                 </button>
               </li>
             ) : (
-              <li key={c.id} className="flex items-center gap-2">
-                <b>{c.name}</b>
-                <span className="text-slate-500">{c.aliases.length > 0 ? `别名:${c.aliases.join('、')}` : ''}</span>
-                {!c.confirmed && <span className="rounded bg-warn-50 px-1.5 text-xs text-warn">待确认</span>}
-                <span className="ml-auto flex items-center gap-2">
+              <li
+                key={c.id}
+                className={`flex flex-wrap items-center gap-2 rounded-xl border px-3.5 py-2.5 transition-colors ${
+                  c.confirmed ? 'border-slate-100 bg-white' : 'border-warn/25 bg-warn-50/40'
+                }`}
+              >
+                <b className="text-[13.5px] text-slate-900">{c.name}</b>
+                {!c.confirmed && (
+                  <span className="rounded-full bg-warn-100 px-2 py-0.5 text-[10px] font-medium text-warn">AI 建议待确认</span>
+                )}
+                {c.aliases.length > 0 && (
+                  <span className="flex flex-wrap gap-1">
+                    {c.aliases.map((a) => (
+                      <span key={a} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">
+                        {a}
+                      </span>
+                    ))}
+                  </span>
+                )}
+                <span className="ml-auto flex items-center gap-1.5">
                   {!c.confirmed && (
-                    <button
-                      className="h-7 rounded bg-brand px-2.5 text-xs text-white disabled:opacity-50"
-                      disabled={setConfirmed.isPending}
-                      onClick={() => setConfirmed.mutate({ entryId: c.id, confirmed: true })}
-                    >
-                      确认
-                    </button>
+                    <>
+                      <button
+                        className="h-7 rounded-lg bg-brand px-2.5 text-xs font-medium text-white disabled:opacity-50"
+                        disabled={setConfirmed.isPending}
+                        onClick={() => setConfirmed.mutate({ entryId: c.id, confirmed: true })}
+                      >
+                        确认采纳
+                      </button>
+                      <button
+                        className="h-7 px-2 text-xs text-slate-400 hover:text-bad"
+                        title="不采纳这条 AI 建议(删除)"
+                        onClick={() => removeEntry.mutate(c.id)}
+                      >
+                        忽略
+                      </button>
+                    </>
                   )}
-                  <button
-                    className="h-7 px-2 text-xs text-slate-500 hover:text-slate-800"
-                    onClick={() => startEdit(c)}
-                  >
-                    编辑
-                  </button>
-                  <button
-                    className="h-7 px-2 text-xs text-slate-500 hover:text-slate-800"
-                    onClick={() => removeEntry.mutate(c.id)}
-                  >
-                    删除
-                  </button>
+                  {c.confirmed && (
+                    <>
+                      <button
+                        className="h-7 px-2 text-xs text-slate-500 hover:text-slate-800"
+                        onClick={() => startEdit(c)}
+                      >
+                        编辑
+                      </button>
+                      <button
+                        className="h-7 px-2 text-xs text-slate-400 hover:text-bad"
+                        onClick={() => removeEntry.mutate(c.id)}
+                      >
+                        删除
+                      </button>
+                    </>
+                  )}
                 </span>
               </li>
             ),
