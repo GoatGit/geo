@@ -96,8 +96,8 @@ export function sanitizeCitationTitle(raw: string | null | undefined): string | 
   }
   if (t.length < 2 || t.length > 120) return null;
   if (URL_LIKE.test(t)) return null;
-  // 内联引用角标碎片(DeepSeek 刮成「- 12」「- 7」):是序号不是标题
-  if (/^-?\s*\d{1,3}$/.test(t)) return null;
+  // 内联引用角标碎片(DeepSeek 刮成「- 12」「- 知乎」):短横线+单一短 token 是序号不是标题
+  if (/^-\s?\S{1,16}$/.test(t)) return null;
   if (BOILERPLATE.some((re) => re.test(t))) return null;
   const chars = Array.from(t);
   return chars.length > 60 ? chars.slice(0, 60).join('') + '…' : t;
