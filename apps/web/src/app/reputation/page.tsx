@@ -33,10 +33,13 @@ const SENTIMENT_LABEL: Record<string, { label: string; cls: string }> = {
   neg: { label: '负面', cls: 'text-bad' },
 };
 
+const EVIDENCE_PAGE_SIZE = 10;
+
 /** 口碑分析(docs/01 §3.6):优势印象 vs 待攻印象 + 原文证据;空态显示引导而非结论(A5 对策)。 */
 export default function ReputationPage() {
   const brandId = useBrandId();
   const [evidenceRun, setEvidenceRun] = useState<number | null>(null);
+  const [evidencePageState, setEvidencePage] = useState(0);
   const evidence = useQuery({
     queryKey: ['run-evidence', evidenceRun],
     queryFn: () => api<RunEvidence>(`/runs/${evidenceRun}/answer`),
@@ -47,6 +50,9 @@ export default function ReputationPage() {
     queryFn: () => api<ReputationDto>(`/monitor/reputation?brand=${brandId}&days=7`),
     enabled: !!brandId,
   });
+
+  const evidenceTotalPages = Math.max(1, Math.ceil((data?.samples.length ?? 0) / EVIDENCE_PAGE_SIZE));
+  const evidencePage = Math.min(evidencePageState, evidenceTotalPages - 1);
 
   if (isLoading) return <Skeleton />;
   if (error) {
@@ -118,10 +124,13 @@ export default function ReputationPage() {
       </section>
 
       <section className="card rise-2 p-6">
-        <h2 className="mb-3 font-semibold text-slate-900">原文证据</h2>
+        <div className="mb-3 flex items-baseline justify-between">
+          <h2 className="font-semibold text-slate-900">原文证据</h2>
+          <span className="metric-num text-[11px] text-slate-400">共 {data.samples.length} 条</span>
+        </div>
         <p className="mb-3 text-[11px] text-slate-400">点击任意一条可回溯原始回答与引用存证。</p>
         <ul className="space-y-2">
-          {data.samples.map((s, i) => {
+          {data.samples.slice(evidencePage * EVIDENCE_PAGE_SIZE, (evidencePage + 1) * EVIDENCE_PAGE_SIZE).map((s, i) => {
             const st = SENTIMENT_LABEL[s.sentiment] ?? { label: s.sentiment, cls: 'text-slate-500' };
             return (
               <li key={i}>
@@ -142,6 +151,29 @@ export default function ReputationPage() {
             );
           })}
         </ul>
+        {data.samples.length > EVIDENCE_PAGE_SIZE && (
+          <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+            <span className="metric-num text-[11px] text-slate-400">
+              第 {evidencePage + 1} / {Math.ceil(data.samples.length / EVIDENCE_PAGE_SIZE)} 页 · 共 {data.samples.length} 条
+            </span>
+            <div className="flex gap-2">
+              <button
+                className="btn-ghost h-8 px-3 text-xs disabled:opacity-40"
+                disabled={evidencePage === 0}
+                onClick={() => setEvidencePage((p) => Math.max(p - 1, 0))}
+              >
+                上一页
+              </button>
+              <button
+                className="btn-ghost h-8 px-3 text-xs disabled:opacity-40"
+                disabled={(evidencePage + 1) * EVIDENCE_PAGE_SIZE >= data.samples.length}
+                onClick={() => setEvidencePage((p) => p + 1)}
+              >
+                下一页
+              </button>
+            </div>
+          </div>
+        )}
         <p className="mt-2 text-[10px] text-slate-400">
           情感判定带置信度,低置信样本自动进入人工抽检池校准(docs/05 §3.2)。
         </p>
