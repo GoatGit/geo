@@ -678,16 +678,19 @@ export class MonitorService {
       .limit(pageSize);
 
     // 引擎×类别 与 引擎×域名 两次聚合同源:总量/自有/权威占比与分引擎偏好一起算出
+    // 按 (engine, domain, 存储类别) 分组后,JS 侧对 unknown 域名实时归类合并——
+    // 字典补条目后,历史 unknown 行无需迁移即可正确归桶
     const byEngineCategory = await this.db
       .select({
         engine: citationFacts.engine,
+        domain: citationFacts.domain,
         category: citationFacts.platformCategory,
         n: sql<number>`count(*)::int`,
         owned: sql<number>`count(*) filter (where ${citationFacts.isOwned})::int`,
       })
       .from(citationFacts)
       .where(where)
-      .groupBy(citationFacts.engine, citationFacts.platformCategory);
+      .groupBy(citationFacts.engine, citationFacts.domain, citationFacts.platformCategory);
     const byEngineDomain = await this.db
       .select({
         engine: citationFacts.engine,
@@ -718,15 +721,17 @@ export class MonitorService {
       return e;
     };
     for (const r of byEngineCategory) {
+      const category =
+        r.category === 'unknown' ? classifyDomain(r.domain).category : r.category;
       total += r.n;
       ownedTotal += r.owned;
       const e = ensureEngine(r.engine);
-      if (isAuthoritativeCategory(r.category)) {
+      if (isAuthoritativeCategory(category)) {
         authoritativeTotal += r.n;
         e.authoritative += r.n;
       }
       e.total += r.n;
-      e.categories.push({ category: r.category, hits: r.n });
+      e.categories.push({ category, hits: r.n });
     }
     for (const r of byEngineDomain) {
       const e = engines.get(r.engine);
@@ -773,7 +778,10 @@ export class MonitorService {
         url: r.rawUrl,
         domain: r.domain,
         platform: classifyDomain(r.domain).platform,
-        category: r.platformCategory,
+        category:
+          r.platformCategory === 'unknown'
+            ? classifyDomain(r.domain).category
+            : r.platformCategory,
         // 读出侧净化:存量脏标题(样板句/裸 URL/mojibake)在此归 null,展示层回退兜底
         title: sanitizeCitationTitle(r.title),
         isOwned: r.isOwned,
