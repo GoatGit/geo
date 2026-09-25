@@ -5,6 +5,7 @@ export default tseslint.config(
   {
     ignores: [
       'scripts-dev/**',
+      '**/*.cjs',
       '**/dist/**',
       '**/.next/**',
       '**/node_modules/**',
