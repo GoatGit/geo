@@ -193,7 +193,7 @@ export function validateSurveyGenOutput(v: unknown): ValidateResult<SurveyGenOut
 
 /** 超级问卷:单个 persona 的作答结果;逐题校验 answer 与题型匹配。 */
 export interface PersonaAnswerOutput {
-  answers: Array<{ questionId: string; answer: string | number | string[] }>;
+  answers: Array<{ questionId: string; answer: string | number | string[]; comment?: string }>;
 }
 
 export function validatePersonaAnswerOutput(
@@ -239,7 +239,8 @@ export function validatePersonaAnswerOutput(
       }
     }
     seen.add(qid);
-    answers.push({ questionId: qid, answer: answer as string | number | string[] });
+    const comment = typeof a.comment === 'string' ? a.comment.trim().slice(0, 200) : '';
+    answers.push(comment ? { questionId: qid, answer: answer as string | number | string[], comment } : { questionId: qid, answer: answer as string | number | string[] });
   }
   if (answers.length < ctx.questions.length) {
     errors.push(`answered ${answers.length}/${ctx.questions.length}`);

@@ -117,6 +117,36 @@ export class SurveysController {
     return this.surveysService.detail(currentAccount(req).accountId, surveyId);
   }
 
+  // 逐条查看(docs/11 §8 人群决策闸门):确认人群前可逐条点名审阅档案
+  @Get('surveys/:id/pools/:poolId/personas')
+  personaList(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) surveyId: number,
+    @Param('poolId', ParseIntPipe) poolId: number,
+    @Query('page') page = '1',
+    @Query('pageSize') pageSize = '20',
+  ) {
+    return this.surveysService.personaList({
+      accountId: currentAccount(req).accountId, surveyId, poolId,
+      page: Math.max(1, Number(page) || 1), pageSize: Math.min(100, Math.max(1, Number(pageSize) || 20)),
+    });
+  }
+
+  // 问卷逐条查看:每份答卷 = 一位人物对整卷的完整回答
+  @Get('surveys/:id/responses')
+  responseList(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) surveyId: number,
+    @Query('page') page = '1',
+    @Query('pageSize') pageSize = '20',
+    @Query('status') status?: string,
+  ) {
+    return this.surveysService.responseList({
+      accountId: currentAccount(req).accountId, surveyId,
+      page: Math.max(1, Number(page) || 1), pageSize: Math.min(100, Math.max(1, Number(pageSize) || 20)), status,
+    });
+  }
+
   @Post('surveys/:id/cancel')
   cancel(@Req() req: Request, @Param('id', ParseIntPipe) surveyId: number) {
     return this.surveysService.cancel(currentAccount(req).accountId, surveyId);

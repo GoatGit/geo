@@ -141,10 +141,25 @@ describe('超级问卷 e2e(隔离 schema,docs/11 全生命周期)', () => {
     expect(s!.questions[0]!.text).toBe('你最看重什么?');
   });
 
-  it('4. 建池:按配额生成 persona,未确认前禁止运行', async () => {
+  it('4. 建池:按配额生成 persona,未确认前禁止运行;人群可逐条查看', async () => {
     const r = await service.createPool({ accountId, surveyId, spec: { segments: SEGMENTS } });
     poolId = r!.poolId;
     expect(r!.size).toBe(5);
+    // 逐条查看:档案带生活化字段(姓名/城市/具体职业),且配额维度与方案一致
+    const list = await service.personaList({ accountId, surveyId, poolId, page: 1, pageSize: 20 });
+    expect(list.total).toBe(5);
+    expect(list.items).toHaveLength(5);
+    const first = list.items[0]!;
+    expect(String(first.profile.name)).toMatch(/^[李王张刘陈杨黄赵周吴徐孙马朱胡郭何林罗宋]/);
+    expect(first.profile.city).toBeTruthy();
+    expect(first.profile.occupation).toBeTruthy();
+    expect(first.profile.channels).toBeTruthy();
+    expect(first.profile.ageBand).toBe(SEGMENTS[0]!.ageBand);
+    // 分页边界
+    const page2 = await service.personaList({ accountId, surveyId, poolId, page: 2, pageSize: 3 });
+    expect(page2.items).toHaveLength(2);
+    // 他人账号不可见
+    await expect(service.personaList({ accountId: 999, surveyId, poolId, page: 1, pageSize: 20 })).rejects.toMatchObject({ status: 404 });
     // 未确认 → 409
     await expect(service.run({ accountId, surveyId })).rejects.toMatchObject({ status: 409 });
   });
@@ -165,6 +180,14 @@ describe('超级问卷 e2e(隔离 schema,docs/11 全生命周期)', () => {
     expect(r.progress.failed).toBe(0);
     expect(r.status).toBe('completed');
     expect(agentState.calls.personaAnswer).toBe(5);
+    // 问卷逐条查看:每份答卷 = 档案 + 全卷回答
+    const resp = await service.responseList({ accountId, surveyId, page: 1, pageSize: 20 });
+    expect(resp.total).toBe(5);
+    expect(resp.items).toHaveLength(5);
+    expect(resp.items[0]!.answers).toHaveLength(QUESTIONS.length);
+    expect(resp.items[0]!.profile.occupationGroup).toBeTruthy();
+    expect(resp.questions.map(q => q.id)).toEqual(['q1', 'q2', 'q3']);
+    await expect(service.responseList({ accountId: 999, surveyId, page: 1, pageSize: 20 })).rejects.toMatchObject({ status: 404 });
     // 重复运行被拒
     await expect(service.run({ accountId, surveyId })).rejects.toMatchObject({ status: 409 });
   });

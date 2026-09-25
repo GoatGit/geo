@@ -14,6 +14,65 @@ const conflict = (message: string): never => { throw new HttpException(message, 
 const badRequest = (message: string): never => { throw new HttpException(message, HttpStatus.BAD_REQUEST); };
 const publicSurvey = ({ taskToken: _token, heartbeatAt: _beat, ...row }: Survey) => row;
 
+/* ===== 生成人物的生活化档案(确定式,无额外 LLM 成本):字段之间保持生活逻辑自洽 ===== */
+const SURNAME = ['李', '王', '张', '刘', '陈', '杨', '黄', '赵', '周', '吴', '徐', '孙', '马', '朱', '胡', '郭', '何', '林', '罗', '宋'];
+const GIVEN_M = ['浩然', '子轩', '俊杰', '志强', '文博', '明辉', '一鸣', '海涛'];
+const GIVEN_F = ['诗涵', '雨婷', '梦琪', '静怡', '丽娟', '雪梅', '欣怡', '倩云'];
+const CITIES: Record<string, string[]> = {
+  一线: ['北京', '上海', '广州', '深圳'],
+  新一线: ['杭州', '成都', '武汉', '西安', '苏州', '南京', '长沙', '重庆'],
+  二线: ['合肥', '济南', '温州', '中山', '哈尔滨', '石家庄'],
+  三线及以下: ['洛阳', '汕头', '绵阳', '菏泽', '赣州', '岳阳'],
+};
+const JOBS: Record<string, string[]> = {
+  专业技术人员: ['软件工程师', '会计师', '中学教师', '平面设计师', '护士', '机械工程师'],
+  企业管理: ['部门经理', '运营总监', '创业公司合伙人', '区域经理'],
+  办事人员: ['行政专员', '人事助理', '出纳', '文员'],
+  商业服务业: ['门店店长', '销售顾问', '电商客服', '婚礼策划师'],
+  农林牧渔: ['种植大户', '养殖户', '农资经销'],
+  生产运输: ['工厂技术员', '货车司机', '仓储管理员'],
+  自由职业: ['自媒体博主', '自由摄影师', '家教老师', '网店店主'],
+  学生: ['在校大学生', '研究生', '职校学生'],
+  退休: ['退休教师', '退休工人', '退休公务员'],
+};
+const FAMILY: Record<string, string[]> = {
+  '18-24': ['和父母同住', '住学校宿舍', '与朋友合租'],
+  '25-34': ['单身独居', '与伴侣同居', '已婚暂无孩子', '已婚有一个孩子'],
+  '35-44': ['已婚有两个孩子', '已婚有一个孩子', '三代同堂'],
+  '45-54': ['已婚,孩子在上中学', '孩子在外地上大学', '单身独居'],
+  '55+': ['与子女同住', '老两口生活', '独居'],
+};
+const CHANNELS_YOUNG = ['小红书', '抖音', 'B站', '微博', '知乎', '播客', '朋友推荐'];
+const CHANNELS_MID = ['微信公众号', '抖音', '什么值得买', '知乎', '新闻客户端', '朋友推荐'];
+const CHANNELS_SENIOR = ['电视', '微信群', '子女推荐', '新闻客户端'];
+const CONSUMPTION: Record<string, Record<string, string>> = {
+  理性对比型: { 低: '认准品牌直接下单,更看重省时省心', 中: '看参数也看促销,大促时才囤货', 高: '全网比价、等打折,不为品牌溢价买单' },
+  重视口碑型: { 低: '朋友推荐优先,价格不太敏感', 中: '先看评论区差评再决定', 高: '只买口碑爆款,拒绝试错' },
+  参数研究型: { 低: '追新款,首发就入手', 中: '看评测视频做决策', 高: '配置拆解到细节才掏钱' },
+  体验直觉型: { 低: '喜欢就买,不纠结', 中: '先试过再买,体验优先', 高: '只为刚需买单,拒绝冲动消费' },
+};
+const pick = <T,>(pool: T[], b: number): T => pool[b % pool.length];
+
+/** 生成人物的生活化档案:配额维度由用户指定,其余字段按 hash 组合但保持年龄×职业×渠道的生活逻辑。 */
+function buildGeneratedProfile(seg: PoolSpec['segments'][number], hash: Buffer, sampleKey: string) {
+  const gender = seg.gender === '不限' ? ['男', '女'][hash[3]! % 2] : seg.gender;
+  const name = pick(SURNAME, hash[4]!) + pick(gender === '男' ? GIVEN_M : GIVEN_F, hash[5]!);
+  const city = pick(CITIES[seg.cityTier] ?? CITIES['二线']!, hash[6]!);
+  const occupation = pick(JOBS[seg.occupationGroup] ?? JOBS['办事人员']!, hash[7]!);
+  const family = pick(FAMILY[seg.ageBand] ?? FAMILY['25-34']!, hash[8]!);
+  const ageNum = Number.parseInt(seg.ageBand, 10);
+  const base = ageNum >= 55 ? CHANNELS_SENIOR : ageNum >= 35 ? CHANNELS_MID : CHANNELS_YOUNG;
+  const channels = [...new Set([pick(base, hash[9]!), pick(base, hash[10]!), pick(base, hash[11]!)])];
+  const priceSensitivity = ['低', '中', '高'][hash[0]! % 3];
+  const style = ['理性对比型', '重视口碑型', '参数研究型', '体验直觉型'][hash[1]! % 4];
+  return {
+    sampleKey, name, gender, city, occupation, familyStage: family, channels,
+    priceSensitivity, style,
+    consumptionNote: CONSUMPTION[style]![priceSensitivity]!,
+    headline: `${seg.ageBand}岁 · ${city} · ${occupation}`,
+  };
+}
+
 @Injectable()
 export class SurveysService {
   constructor(@Inject(DB) private readonly db: NodePgDatabase) {}
@@ -99,12 +158,7 @@ export class SurveysService {
           const hub = candidates.length ? candidates[i % candidates.length] : undefined;
           if (hub) { hubCount++; usedLibrary.add(hub.id); }
           rows.push({ poolId: pool.id, libraryId: hub?.id ?? null, source: hub ? 'persona_hub' : 'generated', profile: {
-            ...attributes, sampleKey: `${segmentIndex + 1}-${i + 1}`,
-            gender: seg.gender === '不限' ? ['男', '女'][i % 2] : seg.gender,
-            // Synthetic scenario diversity, not demographic estimates or calibrated population statistics.
-            priceSensitivity: ['低', '中', '高'][hash[0]! % 3],
-            style: ['理性对比型', '重视口碑型', '参数研究型', '体验直觉型'][hash[1]! % 4],
-            decisionPace: ['谨慎观望', '愿意尝试', '需求驱动'][hash[2]! % 3],
+            ...attributes, ...buildGeneratedProfile(seg, hash, `${segmentIndex + 1}-${i + 1}`),
             ...(hub ? { ...Object.fromEntries(Object.entries(hub.profile ?? {}).filter(([,v]) => v != null)), description: hub.description, provenance: { libraryId: hub.id, sourceUrl: hub.sourceUrl, revision: hub.sourceRevision, license: hub.license, assignedDimensions: Object.keys(attributes).filter(key => hub.profile?.[key] == null), assignment: '用户研究配额，非人口分布估计' } } : {}),
           } });
         }
@@ -199,5 +253,44 @@ export class SurveysService {
     return this.db.select({ id: personaPools.id, surveyId: surveys.id, surveyTitle: surveys.title, size: personaPools.size, approved: personaPools.approved, calibrationStatus: personaPools.calibrationStatus, activeCalibrationId: personaPools.activeCalibrationId, sourceMode: personaPools.sourceMode, sourceStats: personaPools.sourceStats, spec: personaPools.spec, active: sql<boolean>`${surveys.activePoolId} = ${personaPools.id}` }).from(personaPools)
       .innerJoin(surveys, eq(surveys.id, personaPools.surveyId))
       .where(and(eq(surveys.accountId, accountId), surveyId == null ? undefined : eq(surveys.id, surveyId))).orderBy(desc(personaPools.id)).limit(200);
+  }
+
+  /** 人群逐条查看:分页返回池内 persona 档案(确认人群前可先点名审阅)。 */
+  async personaList(input: { accountId: number; surveyId: number; poolId: number; page: number; pageSize: number }) {
+    const survey = await this.ownedSurvey(input.accountId, input.surveyId);
+    const pool = (await this.db.select().from(personaPools).where(and(eq(personaPools.id, input.poolId), eq(personaPools.surveyId, survey.id))).limit(1))[0];
+    if (!pool) throw new HttpException('人群池不存在', HttpStatus.NOT_FOUND);
+    const total = (await this.db.select({ n: sql<number>`count(*)::int` }).from(personas).where(eq(personas.poolId, pool.id)))[0]!.n;
+    const items = (await this.db
+      .select({ id: personas.id, profile: personas.profile, source: personas.source, weight: personas.weight, libraryId: personas.libraryId })
+      .from(personas)
+      .where(eq(personas.poolId, pool.id))
+      .orderBy(asc(personas.id))
+      .limit(input.pageSize)
+      .offset((input.page - 1) * input.pageSize));
+    return { items, total, page: input.page, pageSize: input.pageSize };
+  }
+
+  /** 问卷逐条查看:分页返回每份答卷(profile + 逐题回答),供逐条阅读原文。 */
+  async responseList(input: { accountId: number; surveyId: number; page: number; pageSize: number; status?: string }) {
+    const survey = await this.ownedSurvey(input.accountId, input.surveyId);
+    const poolId = survey.activePoolId ?? -1;
+    const where = and(eq(surveyResponses.surveyId, survey.id), eq(personas.poolId, poolId),
+      input.status === 'completed' || input.status === 'failed' ? eq(surveyResponses.status, input.status) : undefined);
+    const total = (await this.db.select({ n: sql<number>`count(*)::int` }).from(surveyResponses)
+      .innerJoin(personas, eq(personas.id, surveyResponses.personaId)).where(where))[0]!.n;
+    const items = (await this.db
+      .select({
+        id: surveyResponses.id, personaId: surveyResponses.personaId, answers: surveyResponses.answers,
+        status: surveyResponses.status, createdAt: surveyResponses.createdAt,
+        profile: personas.profile, source: personas.source,
+      })
+      .from(surveyResponses)
+      .innerJoin(personas, eq(personas.id, surveyResponses.personaId))
+      .where(where)
+      .orderBy(asc(personas.id))
+      .limit(input.pageSize)
+      .offset((input.page - 1) * input.pageSize));
+    return { items, total, page: input.page, pageSize: input.pageSize, questions: survey.questions };
   }
 }
