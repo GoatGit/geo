@@ -53,18 +53,18 @@ const CONSUMPTION: Record<string, Record<string, string>> = {
 };
 const pick = <T,>(pool: T[], b: number): T => pool[b % pool.length];
 
-/** 生成人物的生活化档案:配额维度由用户指定,其余字段按 hash 组合但保持年龄×职业×渠道的生活逻辑。 */
-function buildGeneratedProfile(seg: PoolSpec['segments'][number], hash: Buffer, sampleKey: string, index: number) {
-  const gender = seg.gender === '不限' ? ['男', '女'][hash[3]! % 2] : seg.gender;
-  const name = pick(SURNAME, hash[4]! + index) + pick(gender === '男' ? GIVEN_M : GIVEN_F, hash[5]! + index);
-  const city = pick(CITIES[seg.cityTier] ?? CITIES['二线']!, hash[6]!);
-  const occupation = pick(JOBS[seg.occupationGroup] ?? JOBS['办事人员']!, hash[7]! + index);
-  const family = pick(FAMILY[seg.ageBand] ?? FAMILY['25-34']!, hash[8]! + index);
+/** 生成人物的生活化档案:配额维度由用户指定;段级种子 + 序号偏移,保证同组人物职业/姓名/城市严格错开。 */
+function buildGeneratedProfile(seg: PoolSpec['segments'][number], segHash: Buffer, index: number, sampleKey: string) {
+  const gender = seg.gender === '不限' ? ['男', '女'][index % 2] : seg.gender;
+  const name = pick(SURNAME, segHash[4]! + index) + pick(gender === '男' ? GIVEN_M : GIVEN_F, segHash[5]! + index);
+  const city = pick(CITIES[seg.cityTier] ?? CITIES['二线']!, segHash[6]! + index);
+  const occupation = pick(JOBS[seg.occupationGroup] ?? JOBS['办事人员']!, segHash[7]! + index);
+  const family = pick(FAMILY[seg.ageBand] ?? FAMILY['25-34']!, segHash[8]! + index * 2);
   const ageNum = Number.parseInt(seg.ageBand, 10);
   const base = ageNum >= 55 ? CHANNELS_SENIOR : ageNum >= 35 ? CHANNELS_MID : CHANNELS_YOUNG;
-  const channels = [...new Set([pick(base, hash[9]! + index), pick(base, hash[10]! + index * 2), pick(base, hash[11]! + index * 3)])];
-  const priceSensitivity = ['低', '中', '高'][hash[0]! % 3];
-  const style = ['理性对比型', '重视口碑型', '参数研究型', '体验直觉型'][hash[1]! % 4];
+  const channels = [...new Set([pick(base, segHash[9]! + index), pick(base, segHash[10]! + index * 2), pick(base, segHash[11]! + index * 3)])];
+  const priceSensitivity = ['低', '中', '高'][segHash[0]! % 3];
+  const style = ['理性对比型', '重视口碑型', '参数研究型', '体验直觉型'][segHash[1]! % 4];
   return {
     sampleKey, name, gender, city, occupation, familyStage: family, channels,
     priceSensitivity, style,
@@ -147,18 +147,19 @@ export class SurveysService {
       const rows: Array<typeof personas.$inferInsert> = [];
       let hubCount = 0; const usedLibrary = new Set<number>();
       for (const [segmentIndex, seg] of checked.value.entries()) {
+        // 段级种子:同一配额组内按序号错开人物属性,跨组仍不同
+        const segHash = createHash('sha256').update(`${pool.id}/${segmentIndex}`).digest();
         const candidates = sourceMode === 'generated' ? [] : await tx.select().from(personaLibrary).where(and(
           eq(personaLibrary.status, 'ready'),
           ...(['occupationGroup', 'gender', 'ageBand', 'cityTier', 'incomeBand'] as const).filter(key => seg[key] !== '不限').map(key => sql`(${personaLibrary.profile}->>${key} is null or ${personaLibrary.profile}->>${key} = ${seg[key]})`),
         )).orderBy(sql`md5(${personaLibrary.sourceKey} || ${String(pool.id)})`).limit(Math.min(2000, seg.count));
         if (sourceMode === 'persona_hub' && !candidates.length) conflict(`第 ${segmentIndex + 1} 组没有兼容档案，请先增强更多人物或选择混合来源`);
         for (let i = 0; i < seg.count; i++) {
-          const hash = createHash('sha256').update(`${pool.id}/${segmentIndex}/${i}`).digest();
           const attributes = { ageBand: seg.ageBand, cityTier: seg.cityTier, incomeBand: seg.incomeBand, gender: seg.gender, occupationGroup: seg.occupationGroup };
           const hub = candidates.length ? candidates[i % candidates.length] : undefined;
           if (hub) { hubCount++; usedLibrary.add(hub.id); }
           rows.push({ poolId: pool.id, libraryId: hub?.id ?? null, source: hub ? 'persona_hub' : 'generated', profile: {
-            ...attributes, ...buildGeneratedProfile(seg, hash, `${segmentIndex + 1}-${i + 1}`, i),
+            ...attributes, ...buildGeneratedProfile(seg, segHash, i, `${segmentIndex + 1}-${i + 1}`),
             ...(hub ? { ...Object.fromEntries(Object.entries(hub.profile ?? {}).filter(([,v]) => v != null)), description: hub.description, provenance: { libraryId: hub.id, sourceUrl: hub.sourceUrl, revision: hub.sourceRevision, license: hub.license, assignedDimensions: Object.keys(attributes).filter(key => hub.profile?.[key] == null), assignment: '用户研究配额，非人口分布估计' } } : {}),
           } });
         }
