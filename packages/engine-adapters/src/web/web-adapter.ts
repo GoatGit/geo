@@ -561,12 +561,17 @@ export class DomWebAdapter implements EngineAdapter {
           const text = ((await link.innerText({ timeout: 300 }).catch(() => '')) || '').trim();
           // 噪声:站务/导航/超长文本链接不是引用源
           if (/协议|隐私|关于|帮助|反馈|下载|首页|登录|注册/.test(text) || text.length > 60) continue;
+          // 标题回退链:DeepSeek 等引擎的引用锚点是纯角标(innerText 空/数字),
+          // title 属性与 aria-label 常带完整标题(实测教训:"未取到标题"2092 条)
           const host = safeHost(url);
           if (!host || isEngineHost(host)) continue;
           if (seen.has(url)) continue;
           seen.add(url);
           // 锚文本常是样板句("引用 22 篇资料作为参考")或裸 URL,净化不过就宁缺毋滥
-          out.push({ url, title: sanitizeCitationTitle(text) ?? undefined });
+          const attrTitle = (await link.getAttribute('title').catch(() => null)) ?? '';
+          const ariaLabel = (await link.getAttribute('aria-label').catch(() => null)) ?? '';
+          const title = text || attrTitle.trim() || ariaLabel.trim();
+          out.push({ url, title: title ? title.slice(0, 80) : undefined });
           if (out.length >= 10) return out;
         } catch {
           // 单个链接失败不影响整体抽取

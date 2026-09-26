@@ -9,6 +9,7 @@ import { CollectProcessor } from './processor';
 import { LoginManager } from './login-manager';
 import { RoundScheduler } from './scheduler';
 import { Alerter } from './alerts';
+import { backfillCitationTitles } from './citation-titles';
 import { AccountPoolService } from './profiles';
 import { ProxyPoolManager } from './qg-proxy';
 import { startReportsWorker, startReputationWorker, scheduleWeeklyReports } from './report-worker';
@@ -75,6 +76,14 @@ async function bootstrap() {
   const personaLibraryWorker = new PersonaLibraryWorker(db).start();
   await scheduleWeeklyReports();
   await scheduleWeeklyInsights();
+
+  // 引用标题回填(docs/14 §33):每 10 分钟补 40 条缺标题引用,启动即跑一轮
+  const runTitleBackfill = () =>
+    void backfillCitationTitles(db, 40)
+      .then((n) => n > 0 && console.log(`[citations] 标题回填 +${n}`))
+      .catch(() => undefined);
+  runTitleBackfill();
+  setInterval(runTitleBackfill, 10 * 60_000);
 
   // 运营巡检(docs/14 §94):队列积压告警,10 分钟一次
   setInterval(() => {
