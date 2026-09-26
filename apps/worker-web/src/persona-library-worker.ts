@@ -11,13 +11,17 @@ import { personaHubUseAllowed } from '@geo/shared';
 export class PersonaLibraryWorker {
   private stopped = false;
   private task?: Promise<void>;
-  constructor(private readonly db: Db, private readonly fetchImpl: typeof fetch = fetch, private readonly makeAgent?: () => Promise<InsightAgent>) {}
+  /** 增强为独立逐条调用,段内并发安全(SKIP LOCKED 认领);6 路约 2-4s/条 → 20 万条约 2-4 天跑完 */
+  constructor(private readonly db: Db, private readonly fetchImpl: typeof fetch = fetch, private readonly makeAgent?: () => Promise<InsightAgent>, private readonly enrichConcurrency = 6) {}
   start() { this.task ??= this.loop(); return this; }
   async stop() { this.stopped = true; await this.task; }
   private async loop() {
     while (!this.stopped) {
-      try { if (await this.processImport()) continue; if (await this.processEnrichment()) continue; }
-      catch { console.warn('[persona-library] task failed; retrying'); }
+      try {
+        if (await this.processImport()) continue;
+        const enriched = await Promise.all(Array.from({ length: this.enrichConcurrency }, () => this.processEnrichment()));
+        if (enriched.some(Boolean)) continue;
+      } catch { console.warn('[persona-library] task failed; retrying'); }
       await new Promise(r => setTimeout(r, 2000));
     }
   }
