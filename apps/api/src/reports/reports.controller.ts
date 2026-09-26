@@ -228,6 +228,7 @@ export class ReportsController implements OnModuleDestroy {
     const utf8Name = encodeURIComponent(`格尺GEO-${REPORT_TEMPLATES[row.type as ReportType]?.name ?? row.type}-${row.period}-${id}.pdf`);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="geo-report-${id}.pdf"; filename*=UTF-8''${utf8Name}`);
+    res.setHeader('cache-control', 'no-store');
     res.end(buf);
   }
 

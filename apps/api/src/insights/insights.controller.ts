@@ -35,6 +35,8 @@ async function sendPdf(res: Response, detail: PdfInsight) {
   const name = `格尺GEO-行业洞察-${detail.industry}-${detail.issue || detail.id}.pdf`;
   res.setHeader('content-type', 'application/pdf');
   res.setHeader('content-disposition', `attachment; filename="insight-${detail.id}.pdf"; filename*=UTF-8''${encodeURIComponent(name)}`);
+  // 禁缓存:字体/口径升级后,浏览器缓存的旧 PDF 会让人误以为修复没生效
+  res.setHeader('cache-control', 'no-store');
   res.setHeader('content-length', String(buffer.length));
   res.end(buffer);
 }
