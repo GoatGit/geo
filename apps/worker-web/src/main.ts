@@ -10,6 +10,7 @@ import { LoginManager } from './login-manager';
 import { RoundScheduler } from './scheduler';
 import { Alerter } from './alerts';
 import { backfillCitationTitles } from './citation-titles';
+import { classifyUnknownDomains, refreshDomainDict } from './domain-classifier';
 import { AccountPoolService } from './profiles';
 import { ProxyPoolManager } from './qg-proxy';
 import { startReportsWorker, startReputationWorker, scheduleWeeklyReports } from './report-worker';
@@ -76,6 +77,13 @@ async function bootstrap() {
   const personaLibraryWorker = new PersonaLibraryWorker(db).start();
   await scheduleWeeklyReports();
   await scheduleWeeklyInsights();
+
+  // 域名字典(docs/14 §32):启动加载;unknown 域名 LLM 识别一次入库,每 30 分钟一轮
+  await refreshDomainDict(db);
+  const runDomainClassifier = () =>
+    void classifyUnknownDomains(db, 8).catch(() => undefined);
+  setTimeout(runDomainClassifier, 60_000); // 启动 1 分钟后先清一轮存量
+  setInterval(runDomainClassifier, 30 * 60_000);
 
   // 引用标题回填(docs/14 §33):每 10 分钟补 40 条缺标题引用,启动即跑一轮
   const runTitleBackfill = () =>

@@ -13,6 +13,7 @@ import {
 import { citationFacts, competitorCandidates, loadPlatformSettings, mentionFacts, type Db } from '@geo/db';
 import { toMentionDrafts } from '@geo/insight-agent';
 import { createInsightAgent, incrInsightStat } from './insight';
+import { mergedDomainDict } from './domain-classifier';
 export type { SubjectDef } from '@geo/metrics';
 
 export interface SubjectRow {
@@ -132,7 +133,7 @@ export async function runInstantExtraction(input: {
   // 引用即时抽取(教训 A6 对策:引用卡同步通路,只把"正文散落链接"留给异步管道)
   for (const c of citations) {
     const { url, domain } = normalizeUrl(c.url);
-    const cls = classifyDomain(domain);
+    const cls = classifyDomain(domain, mergedDomainDict());
     await db.insert(citationFacts).values({
       runId,
       brandId,
