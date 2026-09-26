@@ -20,8 +20,11 @@ import {
 
 export const accounts = pgTable('accounts', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
-  phone: text('phone').notNull().unique(),
+  /** 微信登录的账号 phone 为空,以 wechat_openid 为身份;绑定手机号后回填 */
+  phone: text('phone').unique(),
   passwordHash: text('password_hash'),
+  wechatOpenid: text('wechat_openid'),
+  wechatUnionid: text('wechat_unionid'),
   /** 平台角色:'user' 租户 / 'admin' 平台运营(ADMIN_PHONES 登录时自动授予) */
   role: text('role').notNull().default('user'),
   status: text('status').notNull().default('active'),

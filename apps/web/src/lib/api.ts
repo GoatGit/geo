@@ -8,7 +8,8 @@ const ACCOUNT_KEY = 'geo.account';
 
 export interface SessionAccount {
   accountId: number;
-  phone: string;
+  /** 可空:微信扫码登录的账号以 openid 为身份,手机号可后绑 */
+  phone: string | null;
   role?: string;
 }
 

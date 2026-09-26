@@ -20,7 +20,8 @@ declare global {
 
 export interface AccountPrincipal {
   accountId: number;
-  phone: string;
+  /** 可空:微信扫码登录的账号以 openid 为身份,手机号可后绑 */
+  phone: string | null;
   /** 平台角色:'user' 租户 / 'admin' 平台运营;缺省按 user 处理(兼容旧 token) */
   role?: string;
 }
@@ -39,8 +40,9 @@ export function signRefreshToken(env: AppEnv, p: AccountPrincipal): string {
 export function verifyAccessToken(env: AppEnv, token: string): AccountPrincipal {
   try {
     const payload = jwt.verify(token, env.jwtAccessSecret) as AccountPrincipal & { exp: number };
-    if (!payload.accountId || !payload.phone) throw new UnauthorizedException('invalid token payload');
-    return { accountId: Number(payload.accountId), phone: payload.phone, role: payload.role };
+    // phone 可空:微信扫码登录的账号以 wechat_openid 为身份,手机号可后绑
+    if (!payload.accountId) throw new UnauthorizedException('invalid token payload');
+    return { accountId: Number(payload.accountId), phone: payload.phone ?? null, role: payload.role };
   } catch (err) {
     // 过期/非法 token 统一 401(前端据此清会话跳登录),不落 500
     if (err instanceof UnauthorizedException) throw err;
@@ -51,8 +53,8 @@ export function verifyAccessToken(env: AppEnv, token: string): AccountPrincipal 
 export function verifyRefreshToken(env: AppEnv, token: string): AccountPrincipal {
   try {
     const payload = jwt.verify(token, env.jwtRefreshSecret) as AccountPrincipal & { exp: number };
-    if (!payload.accountId || !payload.phone) throw new UnauthorizedException('invalid token payload');
-    return { accountId: Number(payload.accountId), phone: payload.phone, role: payload.role };
+    if (!payload.accountId) throw new UnauthorizedException('invalid token payload');
+    return { accountId: Number(payload.accountId), phone: payload.phone ?? null, role: payload.role };
   } catch {
     throw new UnauthorizedException('invalid or expired refresh token');
   }

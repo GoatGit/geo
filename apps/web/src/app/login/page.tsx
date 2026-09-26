@@ -54,6 +54,20 @@ export default function LoginPage() {
     }
   };
 
+  // 微信扫码登录:先从后端取带 state 的 qrconnect 地址,跳过去;授权后回跳 /auth/wechat/callback
+  const wechatLogin = async () => {
+    setError('');
+    try {
+      const nextPath = safeNext(next);
+      const r = await api<{ url: string; state: string }>('/auth/wechat/url');
+      sessionStorage.setItem('wx_state', r.state);
+      sessionStorage.setItem('wx_next', nextPath);
+      window.location.href = r.url;
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
   const verify = async () => {
     setError('');
     setBusy(true);
@@ -203,6 +217,21 @@ export default function LoginPage() {
             >
               登录 / 注册
               <IconArrowRight width={15} height={15} />
+            </button>
+
+            <div className="flex items-center gap-3">
+              <div className="h-px flex-1 bg-slate-200" />
+              <span className="text-xs text-slate-400">或</span>
+              <div className="h-px flex-1 bg-slate-200" />
+            </div>
+            <button
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-[#07c160] text-[15px] font-medium text-white hover:opacity-90"
+              onClick={() => void wechatLogin()}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M8.69 3.5C4.98 3.5 2 6.05 2 9.2c0 1.77.94 3.35 2.4 4.4l-.6 1.87 2.11-1.06c.72.19 1.5.3 2.28.32a5.23 5.23 0 0 1-.13-1.14c0-3 2.94-5.42 6.56-5.42.23 0 .46.01.68.03C16.63 5.47 12.95 3.5 8.69 3.5zM6.5 7.5a.85.85 0 1 1 0 1.7.85.85 0 0 1 0-1.7zm4.9 0a.85.85 0 1 1 0 1.7.85.85 0 0 1 0-1.7zM15.72 9.7c-3.13 0-5.72 2.06-5.72 4.65 0 2.6 2.59 4.66 5.72 4.66.67 0 1.31-.1 1.91-.28l1.75.88-.47-1.53a4.65 4.65 0 0 0 2.25-3.73c0-2.58-2.57-4.65-5.72-4.65h.28zm-2.1 2.3a.72.72 0 1 1 0 1.44.72.72 0 0 1 0-1.44zm3.75 0a.72.72 0 1 1 0 1.44.72.72 0 0 1 0-1.44z" />
+              </svg>
+              微信扫码登录
             </button>
 
             <p className="text-center text-[11px] leading-5 text-slate-400">

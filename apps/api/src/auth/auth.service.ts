@@ -144,7 +144,7 @@ export class AuthService {
     return false;
   }
 
-  async upsertAccountByPhone(phone: string): Promise<{ id: number; phone: string; role: string }> {
+  async upsertAccountByPhone(phone: string): Promise<{ id: number; phone: string | null; role: string }> {
     const env = loadEnv();
     const role = env.adminPhones.includes(phone) ? 'admin' : 'user';
     const existing = (await this.db.select().from(accounts).where(eq(accounts.phone, phone)).limit(1))[0];
@@ -163,6 +163,85 @@ export class AuthService {
       await this.db.insert(accounts).values({ phone, role }).returning({ id: accounts.id, phone: accounts.phone, role: accounts.role })
     )[0]!;
     return inserted;
+  }
+
+  /**
+   * 微信扫码登录(docs/01 登录方式扩展):
+   * ① 生成扫码登录跳转 URL(open.weixin.qq.com/connect/qrconnect,scope=snsapi_login)
+   * ② code 换 access_token + openid → 按 wechat_openid 找/建账号 → 签发本站 JWT。
+   * AppID/Secret 来自开放平台「网站应用」(授权回调域须含本站域名)。
+   */
+  wechatQrUrl(redirectUri: string, state: string): string {
+    const env = loadEnv();
+    const q = new URLSearchParams({
+      appid: env.wechatOpenAppId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'snsapi_login',
+      state,
+    });
+    return `https://open.weixin.qq.com/connect/qrconnect?${q.toString()}#wechat_redirect`;
+  }
+
+  async wechatExchange(
+    code: string,
+  ): Promise<{ id: number; phone: string | null; role: string; wechatNick?: string }> {
+    const env = loadEnv();
+    const q = new URLSearchParams({
+      appid: env.wechatOpenAppId,
+      secret: env.wechatOpenAppSecret,
+      code,
+      grant_type: 'authorization_code',
+    });
+    const tokenRes = await fetch(`https://api.weixin.qq.com/sns/oauth2/access_token?${q.toString()}`);
+    const tokenData = (await tokenRes.json()) as {
+      access_token?: string; openid?: string; unionid?: string; errcode?: number; errmsg?: string;
+    };
+    if (!tokenData.openid) {
+      throw new HttpException(`微信授权失败:${tokenData.errmsg ?? 'unknown'}`, HttpStatus.UNAUTHORIZED);
+    }
+    // 拉取昵称/头像(失败不影响登录,仅展示信息)
+    let wechatNick: string | undefined;
+    try {
+      const uiRes = await fetch(
+        `https://api.weixin.qq.com/sns/userinfo?access_token=${tokenData.access_token}&openid=${tokenData.openid}`,
+      );
+      const ui = (await uiRes.json()) as { nickname?: string };
+      if (ui.nickname) wechatNick = ui.nickname;
+    } catch { /* 用户信息可选 */ }
+
+    const existing = (
+      await this.db.select().from(accounts).where(eq(accounts.wechatOpenid, tokenData.openid)).limit(1)
+    )[0];
+    if (existing) {
+      if (existing.status && existing.status !== 'active') {
+        throw new HttpException('账号已被停用,请联系客服', HttpStatus.FORBIDDEN);
+      }
+      return { id: existing.id, phone: existing.phone, role: existing.role, wechatNick };
+    }
+    const inserted = (
+      await this.db
+        .insert(accounts)
+        .values({ phone: null, wechatOpenid: tokenData.openid, wechatUnionid: tokenData.unionid ?? null })
+        .returning({ id: accounts.id, phone: accounts.phone, role: accounts.role })
+    )[0]!;
+    return { id: inserted.id, phone: inserted.phone, role: inserted.role, wechatNick };
+  }
+
+
+  /** 微信 OAuth 的防 CSRF state:HMAC(jwtRefreshSecret, ts),10 分钟有效,免存储。 */
+  wechatState(): string {
+    const env = loadEnv();
+    const ts = Date.now().toString();
+    const sig = createHmac('sha256', env.jwtRefreshSecret).update(ts).digest('hex').slice(0, 32);
+    return `${ts}.${sig}`;
+  }
+
+  validateWechatState(state: string): boolean {
+    const [ts, sig] = state.split('.');
+    if (!ts || !sig) return false;
+    const expect = createHmac('sha256', loadEnv().jwtRefreshSecret).update(ts).digest('hex').slice(0, 32);
+    return sig === expect && Date.now() - Number(ts) < 600_000;
   }
 
   /** 刷新令牌时从库重读角色:被移出管理名单的账号不再靠旧 JWT 声明续权。 */

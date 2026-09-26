@@ -25,6 +25,14 @@ class RefreshDto {
   refreshToken!: string;
 }
 
+class WechatExchangeDto {
+  @IsString()
+  code!: string;
+
+  @IsString()
+  state!: string;
+}
+
 @Controller('auth')
 export class AuthController {
   constructor(
@@ -53,6 +61,26 @@ export class AuthController {
   }
 
   @Public()
+  @Get('wechat/url')
+  async wechatUrl() {
+    const state = this.authService.wechatState();
+    const redirectUri = 'https://geo.gemux.cn/auth/wechat/callback';
+    return { url: this.authService.wechatQrUrl(redirectUri, state), state };
+  }
+
+  @Public()
+  @UseGuards(RateLimitGuard)
+  @RateLimit(10, 60, 'wechat-exchange')
+  @Post('wechat/exchange')
+  async wechatExchange(@Body() dto: WechatExchangeDto) {
+    if (!this.authService.validateWechatState(dto.state)) {
+      throw new HttpException('state 无效或已过期', HttpStatus.UNAUTHORIZED);
+    }
+    const account = await this.authService.wechatExchange(dto.code);
+    return this.tokens(account);
+  }
+
+  @Public()
   @UseGuards(RateLimitGuard)
   @RateLimit(30, 60, 'token-refresh')
   @Post('token:refresh')
@@ -71,9 +99,9 @@ export class AuthController {
 
   private tokens(account: {
     id: number;
-    phone: string;
+    phone: string | null;
     role?: string;
-  } | { accountId: number; phone: string; role?: string }) {
+  } | { accountId: number; phone: string | null; role?: string }) {
     const env = loadEnv();
     const principal = {
       accountId: 'accountId' in account ? account.accountId : account.id,

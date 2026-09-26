@@ -23,6 +23,8 @@ export interface AppEnv {
   jwtAccessTtl: string;
   jwtRefreshTtl: string;
   smsProvider: 'console' | 'aliyun';
+  wechatOpenAppId: string;
+  wechatOpenAppSecret: string;
   evidenceStorage: 'local' | 's3';
   /** 平台管理员手机号(逗号分隔):登录注册时自动授予 admin 角色 */
   adminPhones: string[];
@@ -74,6 +76,8 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): AppEnv {
     jwtAccessTtl: env.JWT_ACCESS_TTL ?? '2h',
     jwtRefreshTtl: env.JWT_REFRESH_TTL ?? '30d',
     smsProvider: (env.SMS_PROVIDER as AppEnv['smsProvider']) ?? 'console',
+    wechatOpenAppId: env.WECHAT_OPEN_APPID ?? '',
+    wechatOpenAppSecret: env.WECHAT_OPEN_APP_SECRET ?? '',
     evidenceStorage: (env.EVIDENCE_STORAGE as AppEnv['evidenceStorage']) ?? 'local',
     adminPhones: (env.ADMIN_PHONES ?? '')
       .split(',')
