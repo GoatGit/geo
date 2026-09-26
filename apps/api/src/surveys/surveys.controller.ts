@@ -9,7 +9,8 @@ import { SurveysService } from './surveys.service';
 
 class CreateSurveyDto {
   @IsOptional() @IsInt() brandId?: number;
-  @IsString() @MaxLength(120) title!: string;
+  /** 可选:缺省时由目标文本自动提炼(规则引擎,docs/01 §3.9 单输入框) */
+  @IsOptional() @IsString() @MaxLength(120) title?: string;
   @IsString() @MaxLength(2000) objective!: string;
 }
 
@@ -45,7 +46,7 @@ export class SurveysController {
   @Post('surveys')
   create(@Req() req: Request, @Body() dto: CreateSurveyDto) {
     const { accountId } = currentAccount(req);
-    return this.surveysService.create({ accountId, brandId: dto.brandId, title: dto.title, objective: dto.objective });
+    return this.surveysService.create({ accountId, brandId: dto.brandId, title: dto.title ?? titleFromObjective(dto.objective), objective: dto.objective });
   }
 
   // Resource paths avoid Express interpreting action names as route parameters.
@@ -156,4 +157,18 @@ export class SurveysController {
   @Post('surveys/:id/calibrations')
   calibrate(@Req() req: Request, @Param('id', ParseIntPipe) id: number, @Body() body: Record<string, unknown>) { return this.calibration.calibrate(currentAccount(req).accountId, id, body); }
 
+}
+
+/** 从调研目标提炼标题(规则式,与 brand-intelligence 同思路,零 LLM 成本):
+ *  目标动词短语 > 目标核心名词截断;兜底前 20 字。 */
+function titleFromObjective(objective: string): string {
+  const t = objective.trim();
+  // 常见研究意图动词开头:取动词后的核心短语(「399 元便携咖啡机的价格接受度」)
+  const intent = t.match(/^(探索|了解|测试|评估|验证|调研|研究)\s*([^,，。;；、\n]{4,20})/);
+  const core = intent?.[2] ?? t.split(/[,，。;；\n]/)[0] ?? t;
+  // 超长时在词边界(空格)截断,避免切在词中间
+  if (core.length <= 20) return core || '未命名调研';
+  const cut = core.slice(0, 20);
+  const lastSpace = cut.lastIndexOf(' ');
+  return (lastSpace > 8 ? cut.slice(0, lastSpace) : cut) || '未命名调研';
 }

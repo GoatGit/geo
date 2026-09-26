@@ -29,7 +29,9 @@ export function extractHtmlTitle(html: string): string | null {
   return t.length >= 4 && t.length <= 120 ? t : null;
 }
 
-/** 抓单条 URL 的页面标题(8s 超时,最多读 96KB);失败 null。 */
+/** 抓单条 URL 的页面标题(8s 超时,最多读 96KB);失败 null。
+ *  编码:国内站点常见 GBK/GB2312(红网实测),按 content-type 头或 meta 声明
+ *  选择解码器,否则 UTF-8 解出乱码入库。 */
 async function fetchTitle(url: string): Promise<string | null> {
   try {
     const res = await fetch(url, {
@@ -41,7 +43,18 @@ async function fetchTitle(url: string): Promise<string | null> {
     const ct = res.headers.get('content-type') ?? '';
     if (!/text\/html|application\/xhtml/i.test(ct)) return null;
     const buf = await res.arrayBuffer().then((b) => b.slice(0, 96 * 1024));
-    return extractHtmlTitle(new TextDecoder('utf-8', { fatal: false }).decode(buf));
+    const bytes = new Uint8Array(buf);
+    // 编码判定:header charset → meta charset(ascii 预读)→ 默认 utf-8
+    let charset = /charset=([\w-]+)/i.exec(ct)?.[1]?.toLowerCase() ?? '';
+    if (!charset) {
+      const head = new TextDecoder('ascii', { fatal: false }).decode(bytes.slice(0, 2048));
+      charset = /charset=["']?([\w-]+)/i.exec(head)?.[1]?.toLowerCase() ?? '';
+    }
+    const decoder =
+      charset.startsWith('gb') || charset === 'gb2312' || charset === 'gbk'
+        ? new TextDecoder('gbk', { fatal: false })
+        : new TextDecoder('utf-8', { fatal: false });
+    return extractHtmlTitle(decoder.decode(bytes));
   } catch {
     return null;
   }
