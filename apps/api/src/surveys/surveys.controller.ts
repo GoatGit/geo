@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, ParseIntPipe, Post, Query, Req, HttpCode } from '@nestjs/common';
+import { Body, Controller, Get, HttpException, Inject, Param, ParseIntPipe, Post, Query, Req, HttpCode } from '@nestjs/common';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsInt, IsOptional, IsIn, IsString, MaxLength, Max, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import type { Request } from 'express';
@@ -83,8 +83,17 @@ export class SurveysController {
   // Resource paths avoid Express interpreting action names as route parameters.
   @Post('surveys/:id/generate')
   @HttpCode(202)
-  generate(@Req() req: Request, @Param('id', ParseIntPipe) surveyId: number) {
-    return this.surveysService.generateSurvey({ accountId: currentAccount(req).accountId, surveyId });
+  async generate(@Req() req: Request, @Param('id', ParseIntPipe) surveyId: number) {
+    const accountId = currentAccount(req).accountId;
+    // 偶发 500 重试一次:状态翻转事务与 worker 心跳更新同行,FOR UPDATE 偶发锁等待超时
+    try {
+      return await this.surveysService.generateSurvey({ accountId, surveyId });
+    } catch (err) {
+      const retriable = !(err instanceof HttpException);
+      if (!retriable) throw err;
+      console.warn(`[surveys] generate 首次失败重试 survey=${surveyId}:`, (err as Error).message);
+      return this.surveysService.generateSurvey({ accountId, surveyId });
+    }
   }
 
   @Post('surveys/:id/questions')

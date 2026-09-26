@@ -35,6 +35,12 @@ export class SurveyWorker {
       update surveys s set task_token = ${token}, heartbeat_at = now(), updated_at = now(),
         status = case when s.status = 'generating' then 'generating' else 'running' end
       from picked where s.id = picked.id returning s.id`);
+    // 生成任务硬超时:心跳可能仍在(LLM 卡死但进程活着),generating 超 10 分钟
+    // 未出结果视为僵死,回 draft 允许用户重试(docs/14:LLM 偶发无响应实测)
+    await this.db.execute(sql`
+      update surveys set status = 'draft', task_token = null, heartbeat_at = null,
+        last_error = 'AI 生成超时（10 分钟无结果），已退回草稿，可重试', updated_at = now()
+      where status = 'generating' and updated_at < now() - interval '10 minutes'`);
     const id = Number(claimed.rows[0]?.id);
     if (!id) return false;
     const match = () => and(eq(surveys.id, id), eq(surveys.taskToken, token));
