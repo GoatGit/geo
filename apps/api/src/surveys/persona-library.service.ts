@@ -1,5 +1,5 @@
 import { HttpException, Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, ilike, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { loadPlatformSettings, personaImportJobs, personaLibrary } from '@geo/db';
 import { InsightAgent } from '@geo/insight-agent';
@@ -15,10 +15,12 @@ export class PersonaLibraryService {
     if (!Number.isSafeInteger(offset) || offset < 0) throw new HttpException('分页参数不正确', 400);
     const filter = query?.trim().slice(0, 100);
     if (status && !['imported', 'queued', 'enriching', 'ready', 'failed'].includes(status)) throw new HttpException('不支持的筛选状态', 400);
+    // 检索覆盖结构化字段(职业/性格/年龄段等)与原文,后者兜底未增强条目
+    const like = filter ? `%${filter.replace(/[%_\\]/g, '\\$&')}%` : null;
     const rows = await this.db.select({ id: personaLibrary.id, description: personaLibrary.description, profile: personaLibrary.profile, status: personaLibrary.status, sourceUrl: personaLibrary.sourceUrl, sourceRevision: personaLibrary.sourceRevision, license: personaLibrary.license, parserVersion: personaLibrary.parserVersion, lastError: personaLibrary.lastError }).from(personaLibrary)
       .where(and(
         status ? eq(personaLibrary.status, status) : undefined,
-        filter ? ilike(personaLibrary.description, `%${filter.replace(/[%_\\]/g, '\\$&')}%`) : undefined,
+        like ? sql`(${personaLibrary.description} ilike ${like} or ${personaLibrary.profile}::text ilike ${like})` : undefined,
       )).orderBy(desc(personaLibrary.id)).limit(30).offset(offset);
     const counts = (await this.db.select({ total: sql<number>`count(*)::int`, ready: sql<number>`count(*) filter (where status = 'ready')::int`, pending: sql<number>`count(*) filter (where status in ('queued','enriching'))::int`, failed: sql<number>`count(*) filter (where status = 'failed')::int`, imported: sql<number>`count(*) filter (where status = 'imported')::int` }).from(personaLibrary))[0];
     const jobs = await this.db.select({ id: personaImportJobs.id, status: personaImportJobs.status, requestedCount: personaImportJobs.requestedCount, processed: personaImportJobs.processed, imported: personaImportJobs.imported, lastError: personaImportJobs.lastError }).from(personaImportJobs).orderBy(desc(personaImportJobs.id)).limit(5);
