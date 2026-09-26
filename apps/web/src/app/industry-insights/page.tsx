@@ -68,6 +68,8 @@ const BUILD_META: Record<string, { label: string; tone: 'brand' | 'warn' | 'slat
   failed: { label: '生成失败', tone: 'slate' },
 };
 
+const LIBRARY_PAGE_SIZE = 3;
+
 /**
  * 行业洞察(一等公民产品页):我的行业洞察(生成/分享/审核态)+ 官方洞察流。
  * 用户对自己品牌所属行业可触发生成,分享后进入平台审核,通过即发布到官网首页。
@@ -77,6 +79,10 @@ export default function IndustryInsightsPage() {
   const toast = useToast();
   const hub = useQuery({ queryKey: ['insights-hub'], queryFn: () => api<HubDto>('/insights/hub'), refetchInterval: 20_000 });
   const [busy, setBusy] = useState<string | null>(null);
+  const [libraryPage, setLibraryPage] = useState(0);
+  const libraryTotal = (hub.data?.library ?? []).length;
+  const libraryTotalPages = Math.max(1, Math.ceil(libraryTotal / LIBRARY_PAGE_SIZE));
+  const libraryPageSafe = Math.min(libraryPage, libraryTotalPages - 1);
   const [shareTarget, setShareTarget] = useState<number | null>(null);
   const [shareNote, setShareNote] = useState('');
   // 自服务:新增行业 + 每行业配置面板开关
@@ -342,7 +348,7 @@ export default function IndustryInsightsPage() {
             <span className="text-xs text-slate-400">订阅后即可生成(计入行业额度);「待配置」行业需平台先完成品牌与问题配置</span>
           </div>
           <div className="grid gap-3 md:grid-cols-3">
-            {(data?.library ?? []).map((lib) => {
+            {(hub.data?.library ?? []).slice(libraryPageSafe * LIBRARY_PAGE_SIZE, (libraryPageSafe + 1) * LIBRARY_PAGE_SIZE).map((lib) => {
               const full = (data?.used ?? 0) >= (data?.quota ?? 0);
               return (
                 <div key={lib.industryId} className="card rise flex items-center justify-between gap-2 p-4">
@@ -366,6 +372,29 @@ export default function IndustryInsightsPage() {
               );
             })}
           </div>
+          {(hub.data?.library ?? []).length > LIBRARY_PAGE_SIZE && (
+            <div className="mt-4 flex items-center justify-between text-xs text-slate-500">
+              <span className="metric-num text-[11px] text-slate-400">
+                第 {libraryPageSafe + 1} / {Math.ceil((hub.data?.library ?? []).length / LIBRARY_PAGE_SIZE)} 页 · 共 {(hub.data?.library ?? []).length} 个行业
+              </span>
+              <div className="flex gap-2">
+                <button
+                  className="btn-ghost h-8 px-3 text-xs disabled:opacity-40"
+                  disabled={libraryPageSafe === 0}
+                  onClick={() => setLibraryPage((p) => Math.min(Math.max(p - 1, 0), libraryTotalPages - 1))}
+                >
+                  上一页
+                </button>
+                <button
+                  className="btn-ghost h-8 px-3 text-xs disabled:opacity-40"
+                  disabled={(libraryPageSafe + 1) * LIBRARY_PAGE_SIZE >= (hub.data?.library ?? []).length}
+                  onClick={() => setLibraryPage((p) => Math.min(p + 1, libraryTotalPages - 1))}
+                >
+                  下一页
+                </button>
+              </div>
+            </div>
+          )}
         </section>
       )}
 
