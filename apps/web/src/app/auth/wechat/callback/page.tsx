@@ -49,6 +49,8 @@ export default function WechatCallbackPage() {
           return;
         }
         const r = JSON.parse(bodyText) as { accessToken: string; refreshToken: string; account: SessionAccount };
+        // 微信账号登入前先清旧会话:避免旧手机号 token 的 401 拦截器在写入前抢跳登录页(Safari 复现)
+        tokenStore.clear();
         tokenStore.save(r.accessToken, r.refreshToken);
         if (r.account) accountStore.save(r.account);
         const next = sessionStorage.getItem('wx_next');
