@@ -35,10 +35,20 @@ export default function WechatCallbackPage() {
 
     (async () => {
       try {
-        const r = await api<{ accessToken: string; refreshToken: string; account: SessionAccount }>(
-          '/auth/wechat/exchange',
-          { method: 'POST', json: { code, state } },
-        );
+        // 诊断模式:直连 exchange 并展示微信侧真实错误(不走 api() 的 401 自动跳登录)
+        const res = await fetch('/api/auth/wechat/exchange', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ code, state }),
+        });
+        const bodyText = await res.text();
+        if (!res.ok) {
+          let msg = `HTTP ${res.status}`;
+          try { msg = JSON.parse(bodyText)?.error?.message ?? bodyText.slice(0, 150); } catch { msg = bodyText.slice(0, 150); }
+          setError(`授权失败:${msg}`);
+          return;
+        }
+        const r = JSON.parse(bodyText) as { accessToken: string; refreshToken: string; account: SessionAccount };
         tokenStore.save(r.accessToken, r.refreshToken);
         if (r.account) accountStore.save(r.account);
         const next = sessionStorage.getItem('wx_next');
