@@ -1,9 +1,13 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Req, Query, HttpCode } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, ParseIntPipe, Post, Query, Req, HttpCode } from '@nestjs/common';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsInt, IsOptional, IsIn, IsString, MaxLength, Max, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import type { Request } from 'express';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PoolSpec, SurveyQuestion } from '@geo/db';
 import { currentAccount } from '../common/auth';
+import { DB } from '../common/infra.module';
+import { loadPlatformSettings } from '@geo/db';
+import { chatCompletion } from '@geo/insight-agent';
 import { CalibrationService } from './calibration.service';
 import { SurveysService } from './surveys.service';
 
@@ -41,12 +45,39 @@ class CreatePoolDto {
 
 @Controller()
 export class SurveysController {
-  constructor(private readonly surveysService: SurveysService, private readonly calibration: CalibrationService) {}
+  constructor(
+    @Inject(DB) private readonly db: NodePgDatabase,
+    private readonly surveysService: SurveysService,
+    private readonly calibration: CalibrationService,
+  ) {}
 
   @Post('surveys')
-  create(@Req() req: Request, @Body() dto: CreateSurveyDto) {
+  async create(@Req() req: Request, @Body() dto: CreateSurveyDto) {
     const { accountId } = currentAccount(req);
-    return this.surveysService.create({ accountId, brandId: dto.brandId, title: dto.title ?? titleFromObjective(dto.objective), objective: dto.objective });
+    const title = dto.title ?? (await this.titleFor(dto.objective));
+    return this.surveysService.create({ accountId, brandId: dto.brandId, title, objective: dto.objective });
+  }
+
+  /** 标题生成:LLM 优先(Insight Agent 配置复用);未配置/失败时规则兜底,创建不因标题失败。 */
+  private async titleFor(objective: string): Promise<string> {
+    try {
+      const cfg = (await loadPlatformSettings(this.db)).insightAgent;
+      if (cfg.enabled && cfg.mode !== 'rules' && cfg.endpoint && cfg.apiKey && cfg.model) {
+        const raw = await chatCompletion(
+          { protocol: cfg.protocol as 'openai' | 'anthropic', endpoint: cfg.endpoint, apiKey: cfg.apiKey, model: cfg.model, timeoutMs: 15_000 },
+          {
+            system: '你是调研命名助手。为用户调研目标起一个简洁标题:6-16 字,名词短语,不含动词「探索/了解」开头,概括研究对象与核心问题。只输出 JSON: {"title":"..."}',
+            user: objective.slice(0, 1500),
+            maxTokens: 100,
+          },
+        );
+        const m = raw.text.match(/"title"\s*:\s*"([^"]{2,40})"/);
+        if (m?.[1]) return m[1];
+      }
+    } catch (err) {
+      console.warn('[surveys] LLM 标题生成失败,回退规则:', (err as Error).message);
+    }
+    return titleFromObjective(objective);
   }
 
   // Resource paths avoid Express interpreting action names as route parameters.
