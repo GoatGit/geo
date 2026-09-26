@@ -21,6 +21,9 @@ RUN pnpm install --frozen-lockfile
 FROM deps AS build
 ARG API_ORIGIN=http://localhost:3000
 ENV API_ORIGIN=$API_ORIGIN
+# 短信通道未开通期间可 build-arg NEXT_PUBLIC_SMS_LOGIN=off 隐藏短信登录
+ARG NEXT_PUBLIC_SMS_LOGIN=on
+ENV NEXT_PUBLIC_SMS_LOGIN=$NEXT_PUBLIC_SMS_LOGIN
 COPY . .
 RUN pnpm -r build
 

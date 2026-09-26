@@ -14,7 +14,9 @@ const VALUE_POINTS = [
   { title: '可行动', text: '问题分层与缺口定位,输出可直接交付的行动清单' },
 ];
 
-/** 登录(docs/01 §5):左品牌叙事右表单;验证码显式点击才发送(docs/research 03 A8 对策)。 */
+/** 登录(docs/01 §5):左品牌叙事右表单;验证码显式点击才发送(docs/research 03 A8 对策)。
+ * 短信通道未开通期间可用 NEXT_PUBLIC_SMS_LOGIN=off 隐藏短信表单(只留微信扫码)。 */
+const SMS_LOGIN_ENABLED = process.env.NEXT_PUBLIC_SMS_LOGIN !== 'off';
 export default function LoginPage() {
   const router = useRouter();
   const [phone, setPhone] = useState('');
@@ -167,6 +169,7 @@ export default function LoginPage() {
           )}
 
           <div className="mt-8 space-y-4">
+            {SMS_LOGIN_ENABLED && (<>
             <div>
               <label className="mb-1.5 block text-xs font-medium text-slate-600">手机号</label>
               <input
@@ -218,12 +221,15 @@ export default function LoginPage() {
               登录 / 注册
               <IconArrowRight width={15} height={15} />
             </button>
+            </>)}
 
+            {SMS_LOGIN_ENABLED && (
             <div className="flex items-center gap-3">
               <div className="h-px flex-1 bg-slate-200" />
               <span className="text-xs text-slate-400">或</span>
               <div className="h-px flex-1 bg-slate-200" />
             </div>
+            )}
             <button
               className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-[#07c160] text-[15px] font-medium text-white hover:opacity-90"
               onClick={() => void wechatLogin()}
