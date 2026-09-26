@@ -151,8 +151,10 @@ export default function LoginPage() {
           <div className="lg:hidden">
             <LogoMark className="mb-6 h-10 w-10" />
           </div>
-          <h2 className="text-2xl font-semibold tracking-tight text-slate-900">登录 / 注册</h2>
-          <p className="mt-1.5 text-sm text-slate-500">未注册的手机号验证后将自动创建账号</p>
+          <h2 className="text-2xl font-semibold tracking-tight text-slate-900">{SMS_LOGIN_ENABLED ? '登录 / 注册' : '登录'}</h2>
+          <p className="mt-1.5 text-sm text-slate-500">
+            {SMS_LOGIN_ENABLED ? '未注册的手机号验证后将自动创建账号' : '首次扫码将自动创建账号'}
+          </p>
 
           {reasonKey && LOGIN_REASONS[reasonKey] && (
             <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-brand-100 bg-brand-50 px-3.5 py-3">

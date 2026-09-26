@@ -23,22 +23,17 @@ const c = new pg.Client({ connectionString: process.env.DATABASE_URL, ssl: false
   const queue = rows.map((r) => r.raw_url);
 
   async function worker(idx) {
-    const page = await ctx.newPage();
-    try {
-      await page.route('**/*', (route) => {
-        const t = route.request().resourceType();
-        if (['image', 'media', 'font'].includes(t)) return route.abort();
-        return route.continue();
-      });
-    } catch {}
+    let page = await ctx.newPage().catch(() => null);
     while (true) {
       const i = queue.shift();
       if (i === undefined) break;
       const url = i;
       let title = null;
       try {
+        if (!page || page.isClosed()) page = await ctx.newPage().catch(() => null);
+        if (!page) { dead++; done++; continue; }
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
-        await page.waitForTimeout(2500);
+        await page.waitForTimeout(2200);
         title = await page.evaluate(() => {
           const t = document.title?.trim();
           if (t && t.length >= 4 && t.length <= 120) return t;
@@ -46,7 +41,11 @@ const c = new pg.Client({ connectionString: process.env.DATABASE_URL, ssl: false
           if (og && og.length >= 4 && og.length <= 120) return og;
           return null;
         }).catch(() => null);
-      } catch {}
+      } catch {
+        // 页签异常(协议断言/崩溃):丢弃重建,URL 计失败
+        await page.close().catch(() => {});
+        page = null;
+      }
       if (title && !JUNK.test(title)) {
         await c.query("UPDATE citation_facts SET title=$1 WHERE raw_url=$2 AND (title IS NULL OR title='')", [title.slice(0, 120), url]).catch(() => {});
         fixed++;
@@ -56,7 +55,7 @@ const c = new pg.Client({ connectionString: process.env.DATABASE_URL, ssl: false
       }
       done++;
     }
-    await page.close().catch(() => {});
+    await page?.close().catch(() => {});
   }
 
   await Promise.all(Array.from({ length: CONCURRENCY }, (_, i) => worker(i)));
