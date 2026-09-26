@@ -76,7 +76,7 @@ export async function backfillCitationTitles(db: Db, limit = 40): Promise<number
   if (rows.length === 0) return 0;
 
   let fixed = 0;
-  const CONCURRENCY = 8;
+  const CONCURRENCY = 12;
   for (let i = 0; i < rows.length; i += CONCURRENCY) {
     const batch = rows.slice(i, i + CONCURRENCY);
     await Promise.all(

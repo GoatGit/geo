@@ -22,10 +22,10 @@ const failed = new Set();
 let total = 0;
 for (let round = 0; round < 8; round++) {
   const r = await c.query("select id, raw_url from citation_facts where (title is null or title='') order by random() limit 200");
-  const rows = r.rows.filter((x) => !failed.has(x.raw_url)).slice(0, 100);
+  const rows = r.rows.filter((x) => !failed.has(x.raw_url)).slice(0, 150);
   if (rows.length === 0) break;
   let fixed = 0;
-  for (let i = 0; i < rows.length; i += 10) {
+  for (let i = 0; i < rows.length; i += 15) {
     await Promise.all(rows.slice(i, i + 10).map(async (row) => {
       const t = await fetchTitle(row.raw_url);
       if (t) { await c.query("update citation_facts set title=$1 where id=$2 and (title is null or title='')", [t, row.id]); fixed++; }

@@ -105,6 +105,8 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     stopSelectors: ['div[class*="stop"]', 'button:has-text("停止")'],
     // DeepSeek authenticates with localStorage.userToken; generic session cookies are insufficient.
     answerNoisePatterns: [],
+    // 引用来源走 SSE 载荷(url+title 配对);DOM 锚点为纯角标无文本——"未取到标题"主因(实测)
+    netCitationAllow: ['deepseek.com'],
     completionStableMs: BASE_COMPLETION_STABLE_MS,
     navigationTimeoutMs: BASE_NAV_TIMEOUT_MS,
   },
@@ -131,6 +133,8 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
       '^搜索\\d+个关键词.*$', '^搜索关键词.*$', '^使用工具.*$', '^搜索全球\\d+篇资料$',
     ],
     leadingNoiseLineRe: '^(搜索|使用工具|全球搜|\\d{1,2}\\.\\s)',
+    // 引用来源在 chat.baidu.com 搜索结果 API 载荷(新 UI 引用卡为 JS 渲染)
+    netCitationAllow: ['chat.baidu.com', 'wenxin.baidu.com'],
     completionStableMs: BASE_COMPLETION_STABLE_MS,
     navigationTimeoutMs: BASE_NAV_TIMEOUT_MS,
   },

@@ -87,7 +87,7 @@ async function bootstrap() {
 
   // 引用标题回填(docs/14 §33):每 10 分钟补 40 条缺标题引用,启动即跑一轮
   const runTitleBackfill = () =>
-    void backfillCitationTitles(db, 40)
+    void backfillCitationTitles(db, 120)
       .then((n) => n > 0 && console.log(`[citations] 标题回填 +${n}`))
       .catch(() => undefined);
   runTitleBackfill();
