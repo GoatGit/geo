@@ -6,12 +6,12 @@ import { REPORT_TEMPLATES } from './render.service';
 
 /**
  * 品牌报告 PDF 渲染(docs/01 §3.8):payload → 矢量 PDF(pdfkit),分节与 HTML 模板一致。
- * - 中文字体复用 assets/fonts/NotoSansSC(insight-pdf 同源,pdfkit 自动子集化)
+ * - 中文字体复用 assets/fonts/Noto Sans CJK SC Medium(OTF/CFF,macOS 预览渲染锐利)
  * - A4 纵向;表格手绘(列宽/截断/斑马纹);KPI 卡与优先级标签配色对齐控制台
  * - 分节随模板类型裁剪:weekly/diagnostic 无竞品/口碑/引用源,monthly 全量
  */
 
-const FONT_PATH = join(__dirname, '..', '..', 'assets', 'fonts', 'NotoSansSC.ttf');
+const FONT_PATH = join(__dirname, '..', '..', 'assets', 'fonts', 'NotoSansCJKsc-Medium.otf');
 
 const NAVY = '#1d3fae';
 const BRAND = '#6f7c6d';

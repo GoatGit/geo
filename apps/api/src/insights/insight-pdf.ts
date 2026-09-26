@@ -34,7 +34,7 @@ export interface PdfInsight {
  * - A4 纵向,内容游标不足即换页;每页页脚带页码
  */
 
-const FONT_PATH = join(__dirname, '..', '..', 'assets', 'fonts', 'NotoSansSC.ttf');
+const FONT_PATH = join(__dirname, '..', '..', 'assets', 'fonts', 'NotoSansCJKsc-Medium.otf');
 
 const NAVY = '#1d3fae';
 const BRAND = '#6f7c6d';

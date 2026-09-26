@@ -711,6 +711,31 @@ export class MonitorService {
       categories: Array<{ category: string; hits: number }>;
       domains: Map<string, number>;
     }
+    // DB 域名字典优先(LLM 识别产物),根域+子域后缀匹配;未命中退代码默认字典
+    const dictRows = await this.db.execute(sql`select domain, platform, category from platform_domain_dict`);
+    const dict = new Map(
+      ((dictRows as unknown as { rows: Array<{ domain: string; platform: string }> }).rows ?? []).map((r) => [
+        r.domain.toLowerCase(),
+        r.platform,
+      ]),
+    );
+    const categoryDict = new Map<string, string>(
+      ((dictRows as unknown as { rows: Array<{ domain: string; category: string }> }).rows ?? []).map((r) => [
+        r.domain.toLowerCase(),
+        r.category,
+      ]),
+    );
+    const domainPlatform = new Map<string, string>();
+    for (const r of byEngineDomain) {
+      const host = r.domain.toLowerCase().replace(/^www\./, '');
+      if (dict.has(host)) {
+        domainPlatform.set(host, dict.get(host)!);
+        continue;
+      }
+      const suffix = [...dict.keys()].filter((d) => host.endsWith(`.${d}`)).sort((a, b) => b.length - a.length)[0];
+      domainPlatform.set(host, suffix ? dict.get(suffix)! : '');
+    }
+
     const engines = new Map<string, EngineAgg>();
     const ensureEngine = (engine: string): EngineAgg => {
       let e = engines.get(engine);
@@ -721,8 +746,12 @@ export class MonitorService {
       return e;
     };
     for (const r of byEngineCategory) {
-      const category =
-        r.category === 'unknown' ? classifyDomain(r.domain).category : r.category;
+      const dictHost = r.domain.toLowerCase().replace(/^www\./, '');
+      let category = r.category;
+      if (category === 'unknown') {
+        const hit = categoryDict.get(dictHost);
+        category = hit ?? classifyDomain(r.domain).category;
+      }
       total += r.n;
       ownedTotal += r.owned;
       const e = ensureEngine(r.engine);
@@ -768,8 +797,12 @@ export class MonitorService {
         categories: e.categories.sort((a, b) => b.hits - a.hits).slice(0, 6),
         topDomains: [...e.domains.entries()]
           .sort((a, b) => b[1] - a[1])
-          .slice(0, 5)
-          .map(([domain, hits]) => ({ domain, platform: classifyDomain(domain).platform, hits })),
+          .slice(0, 6)
+          .map(([domain, hits]) => ({
+            domain,
+            platform: domainPlatform.get(domain.toLowerCase().replace(/^www\./, '')) ?? classifyDomain(domain).platform,
+            hits,
+          })),
       }))
       .sort((a, b) => b.total - a.total);
 
