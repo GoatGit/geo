@@ -89,6 +89,7 @@ const ADMIN_NAV: NavGroup = {
     { href: '/admin/accounts', label: '账号池', icon: <IconShield /> },
     { href: '/admin/settings', label: '全局配置', icon: <IconConfig /> },
     { href: '/admin/rounds', label: '采集轮次', icon: <IconList /> },
+    { href: '/admin/audit', label: '口碑抽检', icon: <IconVoice /> },
     { href: '/admin/insights', label: '行业洞察', icon: <IconLogo width={15} height={15} /> },
   ],
 };
@@ -123,6 +124,7 @@ const ROUTE_TITLES: Array<[RegExp, string]> = [
   [/^\/config\/collection/, '采集状态'],
   [/^\/brands\/new/, '新建品牌'],
   [/^\/admin\/insights/, '行业洞察管理'],
+  [/^\/admin\/audit/, '口碑抽检'],
   [/^\/admin/, '平台后台'],
   [/^\/dashboard/, '总览'],
 ];

@@ -209,7 +209,16 @@ export default function DashboardPage() {
             <Step
               done={hasRound}
               label="等待首轮采集完成"
-              desc="5 大引擎逐条出数,进度见采集状态"
+              desc={
+                (() => {
+                  const t = status.data?.rounds[0]?.totals ?? {};
+                  const done = t.done ?? 0;
+                  const total = t.total ?? 0;
+                  return total > 0 && done < total
+                    ? `采集进行中:${done}/${total}(约 ${Math.max(1, Math.ceil(((total - done) * 90) / 60))} 分钟后可看)`
+                    : '5 大引擎逐条出数,进度见采集状态';
+                })()
+              }
               href="/config/collection"
               icon={<IconPulse width={15} height={15} />}
             />

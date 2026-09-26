@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpException, HttpStatus, OnModuleDestroy, Param, ParseIntPipe, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpException, HttpStatus, OnModuleDestroy, Param, ParseIntPipe, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { BadRequestException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
@@ -618,5 +618,37 @@ export class AdminController implements OnModuleDestroy {
     if (!this.redis.status || this.redis.status === 'end') {
       throw new ServiceUnavailableException('Redis 不可用,无法操作熔断位');
     }
+  }
+
+  // ===== 口碑抽检闭环(docs/14 §25):低置信 LLM 判定的人工审核 =====
+
+  @Get('reputation-audit')
+  async reputationAudit(@Query('status') status = 'pending') {
+    const rows = await this.db.execute(sql`
+      select rf.id, rf.brand_id, b.name as brand_name, qr.engine, qr.ran_at,
+             rf.sentiment, rf.confidence, rf.impression_terms, rf.excerpt, rf.audit_state
+      from reputation_facts rf
+      join brands b on b.id = rf.brand_id
+      left join query_runs qr on qr.id = rf.run_id
+      where rf.audit_state = ${status}
+      order by rf.confidence asc, rf.id desc
+      limit 100
+    `);
+    return { items: (rows as unknown as { rows: unknown[] }).rows };
+  }
+
+  @Patch('reputation-audit/:id')
+  async reputationAuditFix(@Param('id', ParseIntPipe) id: number, @Body() dto: { sentiment?: 'pos' | 'neu' | 'neg'; keep?: boolean }) {
+    if (dto.keep) {
+      await this.db.execute(sql`update reputation_facts set audit_state = 'audited' where id = ${id}`);
+      return { updated: true };
+    }
+    if (!dto.sentiment || !['pos', 'neu', 'neg'].includes(dto.sentiment)) {
+      throw new HttpException('sentiment 必须是 pos/neu/neg', HttpStatus.BAD_REQUEST);
+    }
+    await this.db.execute(
+      sql`update reputation_facts set sentiment = ${dto.sentiment}, confidence = 1, audit_state = 'audited' where id = ${id}`,
+    );
+    return { updated: true };
   }
 }

@@ -327,8 +327,25 @@ export class RoundScheduler {
       return true;
     }
 
+    // 公平调度(尾部饥饿根治,docs/14 §2):按"最近一次成功采集"升序排题——
+    // 从未采到/最久未采的问题排最前,配额优先还欠账;高频题自然沉底轮空,
+    // 而不是按插入顺序让前排永远吃光额度(实测 26 个尾部问题连续多轮零数据)。
+    const lastOkRes = await this.db.execute(sql`
+      select question_id::bigint as qid, max(ran_at) as last_ok
+      from query_runs
+      where brand_id = ${brandId} and status = 'ok_with_answer'
+      group by 1
+    `);
+    const lastOk = new Map<number, number>();
+    for (const r of (lastOkRes as unknown as { rows: Array<{ qid: string; last_ok: string }> }).rows) {
+      lastOk.set(Number(r.qid), new Date(r.last_ok).getTime());
+    }
+    const ordered = [...questions].sort(
+      (a, b) => (lastOk.get(a.id) ?? 0) - (lastOk.get(b.id) ?? 0),
+    );
+
     // 入队计划:每任务复查全局/引擎额度(纯函数,预算账本被就地扣减)
-    const jobs = planRoundJobs(questions, engineList, budget);
+    const jobs = planRoundJobs(ordered, engineList, budget);
     if (jobs.length === 0) return true;
     const round = (
       await this.db.insert(collectionRounds).values({ brandId }).returning()

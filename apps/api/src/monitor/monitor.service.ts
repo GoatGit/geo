@@ -824,6 +824,11 @@ export class MonitorService {
     const pos = rows.filter((r) => r.sentiment === 'pos').length;
     const neu = rows.filter((r) => r.sentiment === 'neu').length;
     const neg = rows.filter((r) => r.sentiment === 'neg').length;
+    // 加权情绪分(docs/14 §23):正+1/中0/负-1 映射到 0-100(50=中性),
+    // 替代"正面占比"——中性占比高时旧口径会系统性压低分值
+    const weightedScore = rows.length > 0 ? Math.round(((pos - neg) / rows.length) * 50 + 50) : null;
+    // 小样本门槛(docs/14 §24):N<10 不出结论性得分,页面展示"数据积累中"
+    const MIN_REPUTATION_SAMPLE = 10;
 
     const terms = new Map<string, { term: string; polarity: 'pos' | 'neg'; runs: number; excerpt: string }>();
     for (const r of rows) {
@@ -835,7 +840,7 @@ export class MonitorService {
       }
     }
     const all = [...terms.values()].sort((a, b) => b.runs - a.runs);
-    const sentimentScore = sentimentScoreOf(pos, neu, neg, rows.length);
+    const sentimentScore = rows.length >= MIN_REPUTATION_SAMPLE ? weightedScore : null;
 
     // 证据样本补充引擎信息(reputation_facts 不落引擎,从 query_runs 关联)
     const sampleRunIds = [...new Set(rows.slice(0, MonitorService.REPUTATION_SAMPLE_LIMIT).map((r) => r.runId))];
@@ -851,7 +856,19 @@ export class MonitorService {
     );
 
     return {
-      totals: { runs: rows.length, pos, neu, neg, sentimentScore, hasData: rows.length > 0 },
+      totals: {
+        runs: rows.length,
+        pos,
+        neu,
+        neg,
+        sentimentScore,
+        hasData: rows.length > 0,
+        /** 口径透明(docs/14 §23/§24):样本是否达门槛 + 中性占比 */
+        minimumMet: rows.length >= MIN_REPUTATION_SAMPLE,
+        minimumRequired: MIN_REPUTATION_SAMPLE,
+        neutralShare: rows.length > 0 ? neu / rows.length : null,
+        weightedScore,
+      },
       strengths: all.filter((t) => t.polarity === 'pos').slice(0, 6),
       weaknesses: all.filter((t) => t.polarity === 'neg').slice(0, 6),
       samples: rows.slice(0, MonitorService.REPUTATION_SAMPLE_LIMIT).map((r) => ({

@@ -18,6 +18,7 @@ import { Queue, Worker, type Job } from 'bullmq';
 import type { Browser, Page } from 'playwright-core';
 import { chromium } from 'playwright-core';
 import { EngineBreaker } from './breaker';
+import { Alerter } from './alerts';
 import { ProxyPoolManager } from './qg-proxy';
 import { envInt } from './config';
 import { createHash } from 'node:crypto';
@@ -55,6 +56,8 @@ export class CollectProcessor {
     retryStrategy: (times) => Math.min(times * 1_000, 10_000),
   });
   private readonly breaker: EngineBreaker;
+  /** 运营告警(可选;main 注入,缺省静默) */
+  private alerter: Alerter | null = null;
   private readonly pool: AccountPoolService;
   private readonly storage = createStorageFromEnv();
   private readonly registry = new AdapterRegistry();
@@ -64,7 +67,9 @@ export class CollectProcessor {
     redis: Redis,
     private readonly broker: SessionBroker = createBrokerFromEnv(),
     proxyPool?: ProxyPoolManager,
+    alerter?: Alerter,
   ) {
+    this.alerter = alerter ?? null;
     this.breaker = new EngineBreaker(redis);
     this.pool = new AccountPoolService(db);
     // 代理池全进程单例(main 注入):登录与采集共用同一租约表,IP 亲和才能成立
@@ -154,6 +159,7 @@ export class CollectProcessor {
     // 熔断(docs/04 §5):该引擎通道维护中 → 延迟重排,不产生 failed 污染口径
     if (await this.breaker.isTripped(engine)) {
       await this.requeue.add('collect', { ...data, deferredCount: deferredCount + 1 }, { delay: 60_000, priority: data.priority });
+      void this.alerter?.breakerTripped(engine, -1, -1);
       return { status: 'deferred' };
     }
 
@@ -166,6 +172,7 @@ export class CollectProcessor {
     if (!profile) {
       // 账号池耗尽(docs/04 §3.2):延迟重排,扩容与冗余由运营策略解决
       await this.requeue.add('collect', { ...data, deferredCount: deferredCount + 1 }, { delay: 120_000, priority: data.priority });
+      void this.alerter?.poolExhausted(engine);
       return { status: 'deferred' };
     }
 
@@ -210,6 +217,10 @@ export class CollectProcessor {
           await this.pool.markLoginRequired(profile);
           console.error(
             `[collect] engine=${engine} profile=${profile.id} 登录态失效(无持久化 Cookie),已置 login_required`,
+          );
+          void this.alerter?.loginExpired(engine, profile.id, '无持久化 Cookie');
+          console.error(
+            '[collect] suppressed duplicate log',
           );
         }
       } else {

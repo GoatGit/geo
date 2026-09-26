@@ -9,7 +9,18 @@ import { api, useBrandId } from '@/lib/queries';
 import { EmptyState, PageHeader, Skeleton } from '@/components/ui';
 
 interface ReputationDto {
-  totals: { runs: number; pos: number; neu: number; neg: number; sentimentScore: number | null; hasData: boolean };
+  totals: {
+    runs: number;
+    pos: number;
+    neu: number;
+    neg: number;
+    sentimentScore: number | null;
+    hasData: boolean;
+    minimumMet?: boolean;
+    minimumRequired?: number;
+    neutralShare?: number | null;
+    weightedScore?: number | null;
+  };
   strengths: Array<{ term: string; runs: number; excerpt: string }>;
   weaknesses: Array<{ term: string; runs: number; excerpt: string }>;
   samples: Array<{ runId: number; sentiment: string; excerpt: string | null; engine: string | null; ranAt: string }>;
@@ -68,9 +79,9 @@ export default function ReputationPage() {
       <PageHeader title="口碑分析" />
 
       <div className="card rise flex items-center gap-8 p-6">
-        <ScoreRing value={data.totals.sentimentScore} />
+        <ScoreRing value={data.totals.minimumMet === false ? null : data.totals.sentimentScore} />
         <div>
-          <h2 className="font-semibold text-slate-900">情绪得分</h2>
+          <h2 className="font-semibold text-slate-900">情绪得分(加权口径)</h2>
           <p className="mt-1 text-sm leading-6 text-slate-500">
             口碑词有效回答 <b className="metric-num text-slate-700">{data.totals.runs}</b> 条 ·
             正面 <CountUp value={data.totals.pos} className="metric-num text-good" /> / 中性{' '}
@@ -88,6 +99,11 @@ export default function ReputationPage() {
         </div>
       </div>
 
+      {data.totals.minimumMet === false && (
+        <p className="rounded-lg bg-warn-50 px-3 py-2 text-xs text-warn">
+          数据积累中:{data.totals.runs}/{data.totals.minimumRequired ?? 10} 条有效口碑回答——达到门槛后展示加权情绪分与口碑天平结论,当前样本不足以下结论。
+        </p>
+      )}
       {/* 口碑天平:正负面印象双向发散条形图,视觉呈现口碑天平的倾斜方向 */}
       <section className="card rise-1 p-6">
         <h2 className="mb-1 font-semibold text-slate-900">口碑天平</h2>

@@ -8,6 +8,7 @@ import { envInt } from './config';
 import { CollectProcessor } from './processor';
 import { LoginManager } from './login-manager';
 import { RoundScheduler } from './scheduler';
+import { Alerter } from './alerts';
 import { AccountPoolService } from './profiles';
 import { ProxyPoolManager } from './qg-proxy';
 import { startReportsWorker, startReputationWorker, scheduleWeeklyReports } from './report-worker';
@@ -22,6 +23,14 @@ import { SurveyWorker } from './survey-worker';
  * 启动自迁移是生产的标准迁移通道(RDS 公网不可达,本地无法直连执行 db:migrate);
  * 多实例同时启动时迁移各自串行加锁执行,幂等无冲突。
  */
+/** 告警去重用的 Redis(与采集连接隔离,lazyConnect 断连互不影响)。 */
+function collectRedisForAlerts() {
+  // ioredis CJS 互操作:运行时 default 才是构造器,类型上双断言
+  const Mod = require('ioredis') as { default?: unknown } & Record<string, unknown>;
+  const Ctor = (Mod.default ?? Mod) as new (url: string, opts?: Record<string, unknown>) => import('ioredis').default;
+  return new Ctor(process.env.REDIS_URL ?? 'redis://localhost:6379', { lazyConnect: true, maxRetriesPerRequest: 1 });
+}
+
 async function bootstrap() {
   const { pool, db } = createDb(process.env.DATABASE_URL ?? 'postgres://geo:geo_dev@localhost:5432/geo');
   const logger = console;
@@ -30,6 +39,7 @@ async function bootstrap() {
   if (applied.length > 0) logger.log(`[worker-web] applied migrations: ${applied.join(', ')}`);
   await ensurePartitions(pool, 2);
 
+  const alerter = new Alerter(collectRedisForAlerts(), process.env.ALERT_WEBHOOK_URL ?? '');
   const scheduler = new RoundScheduler(db);
   const concurrency = envInt('WORKER_CONCURRENCY', 4, 1, 64);
   scheduler.start(undefined, concurrency); // 间隔经 SCHEDULER_INTERVAL_MS 配置(默认 60s);并发数随心跳上报
@@ -48,7 +58,7 @@ async function bootstrap() {
   const proxyPool = new ProxyPoolManager(db, process.env.QG_PROXY_KEY ?? '');
   await proxyPool.bootstrap();
   proxyPool.start();
-  const collect = new CollectProcessor(db, new Redis(bullConnection().url, { maxRetriesPerRequest: 3 }), broker, proxyPool);
+  const collect = new CollectProcessor(db, new Redis(bullConnection().url, { maxRetriesPerRequest: 3 }), broker, proxyPool, alerter);
   const collectWorker = collect.start(concurrency);
 
   const loginRedis = new Redis(bullConnection().url, { maxRetriesPerRequest: null });
@@ -64,7 +74,20 @@ async function bootstrap() {
   const surveyWorker = new SurveyWorker(db).start();
   const personaLibraryWorker = new PersonaLibraryWorker(db).start();
   await scheduleWeeklyReports();
-  await scheduleWeeklyInsights(); // 行业洞察每周一 09:00 自动生成(docs/01 §3.10 市场化)
+  await scheduleWeeklyInsights();
+
+  // 运营巡检(docs/14 §94):队列积压告警,10 分钟一次
+  setInterval(() => {
+    void (async () => {
+      try {
+        const { Queue } = await import('bullmq');
+        const q = new Queue('collect', { connection: bullConnection() });
+        const counts = await q.getJobCounts('delayed', 'failed');
+        await q.close();
+        if ((counts.delayed ?? 0) > 200) await alerter.queueBacklog(counts.delayed ?? 0);
+      } catch { /* 巡检失败静默 */ }
+    })();
+  }, 10 * 60_000); // 行业洞察每周一 09:00 自动生成(docs/01 §3.10 市场化)
 
   // 周报 cron 触发时,给每个活跃品牌入队报告;同一品牌同一周期幂等(failed 除外,可重生成)
   const cronQueue = new Queue(REPORTS_QUEUE, { connection: bullConnection() });
