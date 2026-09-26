@@ -40,9 +40,9 @@ export class WechatPayProvider implements PaymentProvider {
     this.serialNo = env.WECHAT_PAY_SERIAL_NO ?? '';
     this.apiV3Key = env.WECHAT_PAY_APIV3_KEY ?? '';
     const keyPath = env.WECHAT_PAY_PRIVATE_KEY_PATH ?? '';
-    this.privateKey = keyPath ? readKey(keyPath) : null;
+    this.privateKey = readKeyFlexible(env.WECHAT_PAY_PRIVATE_KEY, keyPath || undefined);
     const platformCertPath = env.WECHAT_PAY_PLATFORM_CERT_PATH ?? '';
-    this.platformPublicKey = platformCertPath ? readKey(platformCertPath) : null;
+    this.platformPublicKey = readKeyFlexible(env.WECHAT_PAY_PLATFORM_PUBLIC_KEY, platformCertPath || undefined);
     this.configured = Boolean(
       this.appId && this.mchId && this.serialNo && this.apiV3Key && this.privateKey && this.platformPublicKey,
     );
@@ -160,4 +160,19 @@ function readKey(path: string): KeyObject | null {
   } catch {
     return null;
   }
+}
+
+/** 优先读 PEM 内容环境变量(适合 SAE 注入,免文件挂载),回退文件路径。 */
+function readKeyFlexible(pemEnv: string | undefined, pathEnv: string | undefined): KeyObject | null {
+  const pem = pemEnv ?? '';
+  if (pem.includes('-----BEGIN')) {
+    try {
+      const normalized = pem.replace(/\\n/g, '\n');
+      if (normalized.includes('PRIVATE KEY')) return createPrivateKey(normalized);
+      return createPublicKey(normalized);
+    } catch {
+      return null;
+    }
+  }
+  return pathEnv ? readKey(pathEnv) : null;
 }
