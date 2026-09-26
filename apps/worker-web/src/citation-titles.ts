@@ -54,7 +54,7 @@ export async function backfillCitationTitles(db: Db, limit = 40): Promise<number
   const res = await db.execute(sql`
     select id, raw_url from citation_facts
     where (title is null or title = '')
-    order by id desc
+    order by random()
     limit ${limit * 2}
   `);
   const rows = (res as unknown as { rows: Array<{ id: string; raw_url: string }> }).rows

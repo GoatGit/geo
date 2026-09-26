@@ -21,7 +21,7 @@ await c.connect();
 const failed = new Set();
 let total = 0;
 for (let round = 0; round < 8; round++) {
-  const r = await c.query("select id, raw_url from citation_facts where (title is null or title='') order by id desc limit 200");
+  const r = await c.query("select id, raw_url from citation_facts where (title is null or title='') order by random() limit 200");
   const rows = r.rows.filter((x) => !failed.has(x.raw_url)).slice(0, 100);
   if (rows.length === 0) break;
   let fixed = 0;
