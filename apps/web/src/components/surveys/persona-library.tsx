@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { EmptyState, Skeleton } from '@/components/ui';
+import { EmptyState, SearchInput, Skeleton } from '@/components/ui';
 import { SurveyError } from './common';
 interface LibraryRow {
   id: number; description: string; profile: Record<string, unknown> | null; status: string;
@@ -29,7 +29,7 @@ export function PersonaLibraryPanel() {
   return <div className="space-y-5">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h2 className="text-base font-semibold">全库人物（{library.counts.ready}）</h2>
-      <label className="text-xs text-slate-500">检索人物<input className="input mt-1" aria-label="检索人物" placeholder="如：教师、软件工程师、谨慎" value={q} onChange={e => { setQ(e.target.value); setOffset(0); }} /></label>
+      <label className="text-xs text-slate-500">检索人物<SearchInput ariaLabel="检索人物" placeholder="如：教师、软件工程师、谨慎" onSearch={v => { setQ(v); setOffset(0); }} /></label>
     </div>
     {!library.rows.length ? <EmptyState title={q ? '没有匹配的人物' : '人群库建设中'} text={q ? '换个关键词试试，可按职业、性格或城市检索。' : '人物由离线批量结构化生成，完成后全库在这里可查、可选、可抽样。'} /> : <div className="grid gap-4 lg:grid-cols-2">{library.rows.map(row => { const profile = row.profile ?? {}; return <article key={row.id} className="card p-5">
       <div className="flex flex-wrap gap-1.5">{TRAIT_CHIPS.filter(k => profile[k] != null).map(k => <span key={k} className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-800">{String(profile[k])}</span>)}</div>

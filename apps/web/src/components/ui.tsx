@@ -1,5 +1,7 @@
 'use client';
 
+import { useRef, useState } from 'react';
+
 /** 页面通用组件:骨架屏(shimmer)/空态/徽章/页头。 */
 
 export function Badge({ label, tone = 'slate' }: { label: string; tone?: 'slate' | 'brand' | 'good' | 'warn' | 'bad' }) {
@@ -78,4 +80,29 @@ export function PageHeader({
 
 export function pct(v: number | null | undefined): string {
   return v == null ? '—' : `${Math.round(v * 100)}%`;
+}
+
+/** IME 安全的检索输入框:组合词(中文输入法)期间不触发检索,提交后 400ms 防抖回调。 */
+export function SearchInput({ onSearch, placeholder, ariaLabel, className = 'input mt-1' }: {
+  onSearch: (value: string) => void;
+  placeholder: string;
+  ariaLabel: string;
+  className?: string;
+}) {
+  const [text, setText] = useState('');
+  const composing = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const commit = (v: string) => {
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => onSearch(v.trim()), 400);
+  };
+  return <input
+    className={className}
+    aria-label={ariaLabel}
+    placeholder={placeholder}
+    value={text}
+    onChange={e => { const v = e.target.value; setText(v); if (!composing.current) commit(v); }}
+    onCompositionStart={() => { composing.current = true; }}
+    onCompositionEnd={e => { composing.current = false; commit(e.currentTarget.value); }}
+  />;
 }
