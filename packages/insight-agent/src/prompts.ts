@@ -161,6 +161,7 @@ export function buildPersonaEnrichPrompt(input: { description: string }): { syst
     '你是人口档案结构化器。把一段人物描述解析为结构化字段。',
     '规则:只提取原文有依据的信息;没有依据的字段填 null 并给低 confidence,禁止臆测(如从职业猜年龄只能给宽区间与低置信);',
     'occupationGroup 从以下选一:专业技术人员/企业管理/办事人员/商业服务业/农林牧渔/生产运输/自由职业/学生/退休/其他;',
+    '枚举格式:gender 只能是 男/女;ageBand 用数字区间(如 18-24、25-34、35-44、45-54、55-70),不能用"青年/老年"等文字;cityTier 只能是 一线/新一线/二线/三线及以下;incomeBand 用年区间(如 10-20万);',
     '语言:occupation 与 traits 必须输出简体中文(可由英文描述意译,如 software engineer→软件工程师,ambitious→有上进心);occupationGroup 按枚举原文输出;',
     `输出 JSON:{"occupation":string|null,"occupationGroup":string|null,"ageBand":string|null,"cityTier":string|null,"incomeBand":string|null,"gender":string|null,"traits":[string],"confidence":0到1}。${JSON_ONLY}`,
   ].join('\n');

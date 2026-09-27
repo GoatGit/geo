@@ -54,14 +54,21 @@ export class PersonaLibraryService {
       from persona_library
       where status = 'ready'
       group by 1, 2, 3, 4, 5`)).rows as Array<Record<string, string | number>>;
-    const normalize = (v: string) => (/^unknown$/i.test(v) ? '未知' : v);
+    const normalize = (key: string, v: string): string => {
+      const s = /^unknown$/i.test(v) ? '未知' : v;
+      if (key === 'gender') return s.startsWith('女') ? '女' : s.startsWith('男') ? '男' : '未知';
+      if (key === 'cityTier') return /一线/.test(s) && !/新一线/.test(s) ? '一线' : /新一线/.test(s) ? '新一线' : /二线/.test(s) ? '二线' : /三线/.test(s) ? '三线及以下' : '未知';
+      return s;
+    };
     const tally = (key: string) => {
       const m = new Map<string, number>();
       for (const r of rows) {
-        const value = normalize(String(r[key]));
+        const value = normalize(key, String(r[key]));
         m.set(value, (m.get(value) ?? 0) + Number(r.n));
       }
-      return [...m.entries()].map(([value, count]) => ({ value, count })).sort((a, b) => b.count - a.count);
+      // 已知取值降序在前,「未知」恒沉底——地图可读,且不掩饰档案边界
+      return [...m.entries()].filter(([v]) => v !== '未知').map(([value, count]) => ({ value, count })).sort((a, b) => b.count - a.count)
+        .concat(([...m.entries()].filter(([v]) => v === '未知')).map(([value, count]) => ({ value, count })));
     };
     const pending = Number(((await this.db.execute(sql`select count(*)::int as n from persona_library where status in ('queued','enriching','imported')`)).rows[0] as { n: number }).n);
     return {
