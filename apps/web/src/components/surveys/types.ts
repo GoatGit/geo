@@ -7,6 +7,8 @@ export interface SurveyRow {
 export interface SurveyPool {
   id: number; surveyId: number; surveyTitle?: string; size: number; approved: boolean;
   calibrationStatus: string; active?: boolean; sourceMode: string; sourceStats: Record<string, number>; activeCalibrationId?: number | null; spec: { segments: SurveySegment[] };
+  /** pending/building=LLM+库内检索合成中;ready=档案完整可确认(0019) */
+  synthesisStatus?: 'pending' | 'building' | 'ready' | string;
 }
 export interface SurveyDetail extends SurveyRow {
   pool: SurveyPool | null; progress: { total: number; completed: number; failed: number }; editable: boolean;
@@ -23,3 +25,5 @@ export const STATUS: Record<string, { label: string; tone: 'slate' | 'brand' | '
 };
 export const QUESTION_TYPES = { single: '单选题', multi: '多选题', scale: '量表题', open: '开放题' } as const;
 export const busySurvey = (status: string) => ['generating', 'queued', 'running'].includes(status);
+export const synthesizing = (pool: SurveyPool | null | undefined) =>
+  !!pool && pool.synthesisStatus != null && pool.synthesisStatus !== 'ready';

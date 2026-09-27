@@ -8,7 +8,7 @@ import { validateSurveyQuestions, validateSurveySegments } from '@geo/shared';
 export class SurveyWorker {
   private stopped = false;
   private task?: Promise<void>;
-  constructor(private readonly db: Db, private readonly makeAgent?: () => Promise<InsightAgent>, private readonly concurrency = 3) {}
+  constructor(private readonly db: Db, private readonly makeAgent?: () => Promise<InsightAgent>, private readonly concurrency = 3, private readonly synthesisConcurrency = 4) {}
 
   start() {
     this.task ??= this.loop();
@@ -17,10 +17,97 @@ export class SurveyWorker {
   async stop() { this.stopped = true; await this.task; }
   private async loop() {
     while (!this.stopped) {
-      try { if (await this.processNext()) continue; }
-      catch { console.error('[surveys] task polling failed; retrying'); }
+      try {
+        if (await this.processSynthesis()) continue;
+        if (await this.processNext()) continue;
+      } catch { console.error('[surveys] task polling failed; retrying'); }
       await new Promise(resolve => setTimeout(resolve, 2_000));
     }
+  }
+
+  /**
+   * 超级问卷(0019):人群池档案合成——LLM + 人群职业性格库 RAG 检索。
+   * 消化全部 pending 池:认领置 building;段级检索库内中文参考人物,逐 persona LLM 合成生活化档案;
+   * 单条失败回落确定性骨架,池永不卡死;building 超 10 分钟无进展视为死任务可重新认领。
+   */
+  async processSynthesis(): Promise<boolean> {
+    let any = false;
+    for (;;) {
+      const claimed = await this.db.execute(sql`
+        with picked as (
+          select id from persona_pools
+          where synthesis_status = 'pending'
+             or (synthesis_status = 'building' and updated_at < now() - interval '10 minutes')
+          order by id limit 1 for update skip locked
+        )
+        update persona_pools p set synthesis_status = 'building', updated_at = now()
+        from picked where p.id = picked.id returning p.id`);
+      const poolId = Number(claimed.rows[0]?.id);
+      if (!poolId) break;
+      any = true;
+      await this.synthesizePool(poolId);
+      if (this.stopped) break;
+    }
+    return any;
+  }
+
+  private async synthesizePool(poolId: number): Promise<void> {
+    const pool = (await this.db.select().from(personaPools).where(eq(personaPools.id, poolId)))[0];
+    if (!pool) return;
+    const settings = resolveInsightSettings((await loadPlatformSettings(this.db)).insightAgent, process.env);
+    const agent = this.makeAgent ? await this.makeAgent() : new InsightAgent({ settings });
+    const canSynthesize = agent.usable && typeof agent.personaSynthesize === 'function';
+    const people = await this.db.select().from(personas).where(eq(personas.poolId, poolId)).orderBy(asc(personas.id));
+    // 段级 RAG 检索:同段人物共享库内中文参考(职业/性格),按池种子随机取样
+    const referencesBySegment = new Map<number, Array<{ occupation: string; traits: string[] }>>();
+    const refsFor = async (segmentIndex: number) => {
+      const cached = referencesBySegment.get(segmentIndex);
+      if (cached) return cached;
+      const seg = pool.spec.segments[segmentIndex];
+      let refs: Array<{ occupation: string; traits: string[] }> = [];
+      if (seg && canSynthesize) {
+        const rows = await this.db.execute(sql`
+          select profile from persona_library
+          where status = 'ready'
+            and profile->>'occupationGroup' = ${seg.occupationGroup}
+            and (${seg.gender} = '不限' or profile->>'gender' is null or profile->>'gender' = ${seg.gender})
+          order by md5(source_key || ${String(poolId)}) limit 3`);
+        refs = (rows.rows as Array<{ profile: Record<string, unknown> }>).map(r => ({
+          occupation: String(r.profile?.occupation ?? seg.occupationGroup),
+          traits: Array.isArray(r.profile?.traits) ? (r.profile?.traits as string[]).slice(0, 3) : [],
+        }));
+      }
+      referencesBySegment.set(segmentIndex, refs);
+      return refs;
+    };
+
+    let next = 0;
+    let liveness = Promise.resolve();
+    await Promise.all(Array.from({ length: Math.min(this.synthesisConcurrency, people.length) }, async () => {
+      while (!this.stopped) {
+        const person = people[next++];
+        if (!person) return;
+        if (person.profile?.synthesized) continue;
+        const segmentIndex = Number(String(person.profile?.sampleKey ?? '1-1').split('-')[0]) - 1;
+        const seg = pool.spec.segments[segmentIndex] ?? pool.spec.segments[0];
+        const quota = {
+          ageBand: seg?.ageBand ?? '', cityTier: seg?.cityTier ?? '', incomeBand: seg?.incomeBand ?? '',
+          gender: (person.profile?.gender as string) ?? seg?.gender ?? '', occupationGroup: seg?.occupationGroup ?? '',
+        };
+        const refs = canSynthesize && seg ? await refsFor(segmentIndex) : [];
+        const synthesized = canSynthesize && seg
+          ? await agent.personaSynthesize!({ quota, references: refs }).then(r => r?.profile ?? null).catch(() => null)
+          : null;
+        const merged = synthesized
+          ? { ...person.profile, ...synthesized, ...quota, synthesized: true }
+          : { ...person.profile, synthesized: true }; // LLM 不可用/失败:保留确定性骨架,不阻塞池
+        await this.db.update(personas).set({ profile: merged as Record<string, unknown> }).where(eq(personas.id, person.id));
+        liveness = liveness.then(() => this.db.update(personaPools).set({ updatedAt: new Date() }).where(eq(personaPools.id, poolId))).catch(() => undefined);
+      }
+    }));
+    await liveness;
+    await this.db.update(personaPools).set({ synthesisStatus: 'ready', updatedAt: new Date() }).where(eq(personaPools.id, poolId));
+    return true;
   }
 
   async processNext(): Promise<boolean> {
@@ -76,6 +163,7 @@ export class SurveyWorker {
       if (!survey.activePoolId || !validateSurveyQuestions(survey.questions).ok) throw Error('问卷或人群数据不完整，请重新检查');
       const pool = (await this.db.select().from(personaPools).where(and(eq(personaPools.id, survey.activePoolId), eq(personaPools.surveyId, id))))[0];
       if (!pool?.approved) throw Error('当前人群未经确认，已停止作答');
+      if (pool.synthesisStatus !== 'ready') throw Error('人物档案正在合成中，已完成即可作答');
       const people = await this.db.select().from(personas).where(eq(personas.poolId, pool.id)).orderBy(asc(personas.id));
       if (people.length !== pool.size || !people.length) throw Error('人群数量不一致，请重新生成人群');
       const existing = new Set((await this.db.select({ personaId: surveyResponses.personaId }).from(surveyResponses).where(eq(surveyResponses.surveyId, id))).map(r => r.personaId));

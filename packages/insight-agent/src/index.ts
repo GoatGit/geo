@@ -15,6 +15,7 @@ import {
   buildMentionPrompt,
   buildPersonaAnswerPrompt,
   buildPersonaEnrichPrompt,
+  buildPersonaSynthesizePrompt,
   buildReputationPrompt,
   buildSurveyGenPrompt,
   buildWebsitePrompt,
@@ -30,6 +31,8 @@ import {
   type PersonaAnswerOutput,
   type PersonaEnrichOutput,
   validatePersonaEnrichOutput,
+  type PersonaSynthesizeOutput,
+  validatePersonaSynthesizeOutput,
   validateReputationOutput,
   type SurveyGenOutput,
   validateSurveyGenOutput,
@@ -69,7 +72,7 @@ export function resolveInsightSettings(
 
 export interface InsightEvent {
   kind: 'call' | 'fallback' | 'invalid_partial';
-  task: 'mention' | 'reputation' | 'classify' | 'expand' | 'website' | 'survey_gen' | 'persona_answer' | 'persona_enrich';
+  task: 'mention' | 'reputation' | 'classify' | 'expand' | 'website' | 'survey_gen' | 'persona_answer' | 'persona_enrich' | 'persona_synthesize';
   ok: boolean;
   latencyMs?: number;
   error?: string;
@@ -396,6 +399,31 @@ export class InsightAgent {
     try {
       const validated = validatePersonaEnrichOutput(this.parseJson(raw));
       if (!validated.ok) return null;
+      return { profile: validated.value, parserVersion: insightParserVersion(this.settings.protocol, this.settings.model) };
+    } catch {
+      return null;
+    }
+  }
+
+  /** 超级问卷(0019):配额硬约束 + 库内 RAG 参考 → LLM 合成一位人物的生活化中文档案;失败返回 null(调用方回落确定性模板)。 */
+  async personaSynthesize(input: {
+    quota: { ageBand: string; cityTier: string; incomeBand: string; gender: string; occupationGroup: string };
+    references: Array<{ occupation: string; traits: string[] }>;
+  }): Promise<{ profile: PersonaSynthesizeOutput; parserVersion: string } | null> {
+    if (!this.usable) return null;
+    const { system, user } = buildPersonaSynthesizePrompt(input);
+    let raw: string;
+    try {
+      raw = await this.chatWithRetry(this.endpointCfg(), system, user, 'persona_synthesize', 1024);
+    } catch {
+      return null;
+    }
+    try {
+      const validated = validatePersonaSynthesizeOutput(this.parseJson(raw));
+      if (!validated.ok) {
+        this.onEvent({ kind: 'fallback', task: 'persona_synthesize', ok: false, error: validated.errors.join('; ').slice(0, 300) });
+        return null;
+      }
       return { profile: validated.value, parserVersion: insightParserVersion(this.settings.protocol, this.settings.model) };
     } catch {
       return null;

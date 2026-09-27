@@ -494,6 +494,10 @@ export const personaPools = pgTable('persona_pools', {
   calibrationStatus: text('calibration_status').notNull().default('uncalibrated'),
   sourceMode: text('source_mode').notNull().default('generated'),
   sourceStats: jsonb('source_stats').$type<Record<string, number>>().notNull().default({}),
+  /** 超级问卷(0019):人物档案合成状态 pending/building/ready——LLM+库内检索(RAG)合成完整中文档案 */
+  synthesisStatus: text('synthesis_status').notNull().default('ready'),
+  /** 超级问卷(0019):合成进度活性时间戳(0019 迁移补齐) */
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   activeCalibrationId: bigint('active_calibration_id', { mode: 'number' }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });

@@ -143,7 +143,8 @@ export class SurveysService {
       await this.editable(survey, tx);
       if (!survey.questions.length) conflict('请先生成或填写问卷');
       const size = checked.value.reduce((n, s) => n + s.count, 0);
-      const pool = (await tx.insert(personaPools).values({ surveyId: survey.id, spec: { segments: checked.value }, size, sourceMode }).returning())[0]!;
+      // 合成走 LLM+库内检索(0019),worker 异步补齐生活化档案;确定性骨架先行入格,逐条查看不空窗
+      const pool = (await tx.insert(personaPools).values({ surveyId: survey.id, spec: { segments: checked.value }, size, sourceMode, synthesisStatus: 'pending' }).returning())[0]!;
       const rows: Array<typeof personas.$inferInsert> = [];
       let hubCount = 0; const usedLibrary = new Set<number>();
       for (const [segmentIndex, seg] of checked.value.entries()) {
@@ -177,6 +178,7 @@ export class SurveysService {
       const survey = await this.ownedSurvey(input.accountId, input.surveyId, tx, true);
       const pool = (await tx.select().from(personaPools).where(and(eq(personaPools.id, input.poolId), eq(personaPools.surveyId, survey.id))).limit(1))[0];
       if (!pool) throw new HttpException('人群池不存在', HttpStatus.NOT_FOUND);
+      if (pool.synthesisStatus !== 'ready') conflict('人物档案正在合成中，完成后才能确认');
       await this.editable(survey, tx);
       if (pool.id !== survey.activePoolId) conflict('人群已更新，请确认当前人群');
       return (await tx.update(personaPools).set({ approved: input.approved }).where(eq(personaPools.id, pool.id)).returning())[0]!;
@@ -192,6 +194,7 @@ export class SurveysService {
       if (!validateSurveyQuestions(survey.questions).ok) conflict('请先保存有效问卷');
       const pool = survey.activePoolId ? (await tx.select().from(personaPools).where(and(eq(personaPools.id, survey.activePoolId), eq(personaPools.surveyId, survey.id))).limit(1))[0] : null;
       if (!pool?.approved) return conflict('请先确认当前人群，再开始作答');
+      if (pool.synthesisStatus !== 'ready') return conflict('人物档案正在合成中，完成后即可开始作答');
       await tx.update(personas).set({ weight: 1 }).where(eq(personas.poolId, pool.id));
       await tx.update(personaPools).set({ activeCalibrationId: null, calibrationStatus: 'uncalibrated' }).where(eq(personaPools.id, pool.id));
       await tx.update(surveyCalibrations).set({ applied: false }).where(eq(surveyCalibrations.poolId, pool.id));
@@ -251,7 +254,7 @@ export class SurveysService {
 
   async pools(accountId: number, surveyId?: number) {
     if (surveyId != null) await this.ownedSurvey(accountId, surveyId);
-    return this.db.select({ id: personaPools.id, surveyId: surveys.id, surveyTitle: surveys.title, size: personaPools.size, approved: personaPools.approved, calibrationStatus: personaPools.calibrationStatus, activeCalibrationId: personaPools.activeCalibrationId, sourceMode: personaPools.sourceMode, sourceStats: personaPools.sourceStats, spec: personaPools.spec, active: sql<boolean>`${surveys.activePoolId} = ${personaPools.id}` }).from(personaPools)
+    return this.db.select({ id: personaPools.id, surveyId: surveys.id, surveyTitle: surveys.title, size: personaPools.size, approved: personaPools.approved, calibrationStatus: personaPools.calibrationStatus, activeCalibrationId: personaPools.activeCalibrationId, sourceMode: personaPools.sourceMode, sourceStats: personaPools.sourceStats, spec: personaPools.spec, synthesisStatus: personaPools.synthesisStatus, active: sql<boolean>`${surveys.activePoolId} = ${personaPools.id}` }).from(personaPools)
       .innerJoin(surveys, eq(surveys.id, personaPools.surveyId))
       .where(and(eq(surveys.accountId, accountId), surveyId == null ? undefined : eq(surveys.id, surveyId))).orderBy(desc(personaPools.id)).limit(200);
   }

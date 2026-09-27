@@ -141,10 +141,22 @@ describe('超级问卷 e2e(隔离 schema,docs/11 全生命周期)', () => {
     expect(s!.questions[0]!.text).toBe('你最看重什么?');
   });
 
-  it('4. 建池:按配额生成 persona,未确认前禁止运行;人群可逐条查看', async () => {
+  it('4. 建池:按配额生成 persona;档案合成闸门(未合成禁止确认);人群可逐条查看', async () => {
     const r = await service.createPool({ accountId, surveyId, spec: { segments: SEGMENTS } });
     poolId = r!.poolId;
     expect(r!.size).toBe(5);
+    // 合成闸门:建池后处于 pending,未完成合成前禁止确认与运行
+    const pendingDetail = await service.detail(accountId, surveyId);
+    expect(pendingDetail.pool!.synthesisStatus).toBe('pending');
+    await expect(service.approvePool({ accountId, surveyId, poolId, approved: true })).rejects.toMatchObject({ status: 409 });
+    await expect(service.run({ accountId, surveyId })).rejects.toMatchObject({ status: 409 });
+    // 逐条查看:合成前即可看到占位骨架(配额维度已入格)
+    const preList = await service.personaList({ accountId, surveyId, poolId, page: 1, pageSize: 20 });
+    expect(preList.items[0]!.profile.ageBand).toBe(SEGMENTS[0]!.ageBand);
+    // 桩未实现 personaSynthesize → 合成回落确定性骨架并置 ready(产品永不卡死)
+    await worker.processSynthesis();
+    const afterDetail = await service.detail(accountId, surveyId);
+    expect(afterDetail.pool!.synthesisStatus).toBe('ready');
     // 逐条查看:档案带生活化字段(姓名/城市/具体职业),且配额维度与方案一致
     const list = await service.personaList({ accountId, surveyId, poolId, page: 1, pageSize: 20 });
     expect(list.total).toBe(5);
@@ -155,6 +167,7 @@ describe('超级问卷 e2e(隔离 schema,docs/11 全生命周期)', () => {
     expect(first.profile.occupation).toBeTruthy();
     expect(first.profile.channels).toBeTruthy();
     expect(first.profile.ageBand).toBe(SEGMENTS[0]!.ageBand);
+    expect(first.profile.synthesized).toBe(true);
     // 同段位内人物彼此错开(职业不撞车,姓名大体不同),贴近真实人群多样性
     const seg1 = list.items.slice(0, SEGMENTS[0]!.count).map(p => String(p.profile.occupation));
     expect(new Set(seg1).size).toBe(seg1.length);
@@ -164,8 +177,6 @@ describe('超级问卷 e2e(隔离 schema,docs/11 全生命周期)', () => {
     expect(page2.items).toHaveLength(2);
     // 他人账号不可见
     await expect(service.personaList({ accountId: 999, surveyId, poolId, page: 1, pageSize: 20 })).rejects.toMatchObject({ status: 404 });
-    // 未确认 → 409
-    await expect(service.run({ accountId, surveyId })).rejects.toMatchObject({ status: 409 });
   });
 
   it('5. 确认人群(approved 闸门)后运行:逐 persona 作答入库,状态 completed', async () => {
@@ -175,6 +186,7 @@ describe('超级问卷 e2e(隔离 schema,docs/11 全生命周期)', () => {
       if (q.id === 'q2') return profile.priceSensitivity === '高' ? 3 : 7;
       return `我是${profile.occupationGroup},主要担心售后。`;
     };
+    await worker.processSynthesis(); // 0019:确认前必须完成档案合成
     await service.approvePool({ accountId, surveyId, poolId, approved: true });
     const accepted = await service.run({ accountId, surveyId });
     expect(accepted.status).toBe('queued');
@@ -226,6 +238,7 @@ describe('超级问卷 e2e(隔离 schema,docs/11 全生命周期)', () => {
     await service.generateSurvey({ accountId, surveyId: s!.id });
     await worker.processNext();
     const p = await service.createPool({ accountId, surveyId: s!.id, spec: { segments: SEGMENTS } });
+    await worker.processSynthesis(); // 0019:确认前必须完成档案合成
     await service.approvePool({ accountId, surveyId: s!.id, poolId: p!.poolId, approved: true });
     agentState.answerScript = null; // 作答全失败
     await service.run({ accountId, surveyId: s!.id });
@@ -261,6 +274,7 @@ describe('超级问卷 e2e(隔离 schema,docs/11 全生命周期)', () => {
     await service.updateQuestions({ accountId, surveyId: s.id, questions: QUESTIONS as never });
     await service.createPool({ accountId, surveyId: s.id, spec: { segments: SEGMENTS } });
     const latest = await service.createPool({ accountId, surveyId: s.id, spec: { segments: [{ ...SEGMENTS[0], count: 3 }] } });
+    await worker.processSynthesis(); // 0019:确认前必须完成档案合成
     await service.approvePool({ accountId, surveyId: s.id, poolId: latest.poolId, approved: true });
     const runs = await Promise.allSettled([service.run({ accountId, surveyId: s.id }), service.run({ accountId, surveyId: s.id })]);
     expect(runs.filter(r => r.status === 'fulfilled')).toHaveLength(1);
@@ -286,6 +300,7 @@ describe('超级问卷 e2e(隔离 schema,docs/11 全生命周期)', () => {
     const s = await service.create({ accountId, title: '取消恢复', objective: '中断测试' });
     await service.updateQuestions({ accountId, surveyId: s.id, questions: QUESTIONS as never });
     const p = await service.createPool({ accountId, surveyId: s.id, spec: { segments: [{ ...SEGMENTS[0], count: 1 }] } });
+    await worker.processSynthesis(); // 0019:确认前必须完成档案合成
     await service.approvePool({ accountId, surveyId: s.id, poolId: p.poolId, approved: true });
     await service.run({ accountId, surveyId: s.id });
     let began!: () => void;
@@ -312,6 +327,7 @@ describe('超级问卷 e2e(隔离 schema,docs/11 全生命周期)', () => {
     const s = await service.create({ accountId, title: '撤销确认', objective: '修改后重新确认' });
     await service.updateQuestions({ accountId, surveyId: s.id, questions: QUESTIONS as never });
     const p = await service.createPool({ accountId, surveyId: s.id, spec: { segments: SEGMENTS } });
+    await worker.processSynthesis(); // 0019:确认前必须完成档案合成
     await service.approvePool({ accountId, surveyId: s.id, poolId: p.poolId, approved: true });
     await service.updateQuestions({ accountId, surveyId: s.id, questions: QUESTIONS.map(q => ({ ...q, text: q.text + '（修改）' })) as never });
     await expect(service.run({ accountId, surveyId: s.id })).rejects.toMatchObject({ status: 409 });
@@ -330,6 +346,7 @@ describe('超级问卷 e2e(隔离 schema,docs/11 全生命周期)', () => {
     await service.updateQuestions({ accountId, surveyId: s.id, questions: QUESTIONS as never });
     const first = await service.createPool({ accountId, surveyId: s.id, spec: { segments: SEGMENTS } });
     const newer = await service.createPool({ accountId, surveyId: s.id, spec: { segments: SEGMENTS } });
+    await worker.processSynthesis(); // 0019:确认前必须完成档案合成
     await service.approvePool({ accountId, surveyId: s.id, poolId: newer.poolId, approved: true });
     const person = (await pool.query('select id from personas where pool_id = $1 order by id limit 1', [first.poolId])).rows[0];
     await pool.query("insert into survey_responses(survey_id, persona_id, answers, model, parser_version) values ($1, $2, $3, 'legacy', 'legacy')", [s.id, person.id, JSON.stringify([{ questionId: 'q1', answer: '价格' }, { questionId: 'q2', answer: 7 }, { questionId: 'q3', answer: '售后' }])]);

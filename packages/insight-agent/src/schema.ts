@@ -280,3 +280,40 @@ export function validatePersonaEnrichOutput(v: unknown): ValidateResult<PersonaE
     },
   };
 }
+
+/** 超级问卷(0019):人物档案合成输出(全部简体中文,受配额硬约束)。 */
+export interface PersonaSynthesizeOutput {
+  name: string;
+  city: string;
+  occupation: string;
+  familyStage: string;
+  channels: string[];
+  consumptionNote: string;
+  headline: string;
+}
+
+export function validatePersonaSynthesizeOutput(v: unknown): ValidateResult<PersonaSynthesizeOutput> {
+  if (!isRecord(v)) return { ok: false, errors: ['root is not an object'] };
+  const str = (k: string, max: number) => {
+    const s = v[k];
+    return typeof s === 'string' && s.trim().length >= 1 && s.trim().length <= max ? s.trim() : null;
+  };
+  const name = str('name', 12);
+  const city = str('city', 20);
+  const occupation = str('occupation', 24);
+  const familyStage = str('familyStage', 30);
+  const consumptionNote = str('consumptionNote', 80);
+  const channels = Array.isArray(v.channels) ? v.channels.filter((c): c is string => typeof c === 'string' && c.trim().length > 0 && c.trim().length <= 20).map(c => c.trim()) : [];
+  const headline = str('headline', 60);
+  if (!name || !city || !occupation || !familyStage || !consumptionNote || channels.length < 1 || channels.length > 4) {
+    const errors: string[] = [];
+    if (!name) errors.push('name invalid');
+    if (!city) errors.push('city invalid');
+    if (!occupation) errors.push('occupation invalid');
+    if (!familyStage) errors.push('familyStage invalid');
+    if (!consumptionNote) errors.push('consumptionNote invalid');
+    if (channels.length < 1 || channels.length > 4) errors.push('channels invalid');
+    return { ok: false, errors };
+  }
+  return { ok: true, value: { name, city, occupation, familyStage, channels, consumptionNote, headline: headline ?? `${occupation}（${city}）` } };
+}
