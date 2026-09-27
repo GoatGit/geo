@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Skeleton } from '@/components/ui';
 
-interface BenchRow { value: string; share: number; note?: string }
+interface BenchRow { value: string; share: number; note?: string; bar?: number }
 interface DistributionDto {
   pending: number;
   source: string;
@@ -42,7 +42,7 @@ export function PersonaMap() {
                   <span className="shrink-0 tabular-nums"><strong className="text-sm font-semibold text-slate-800">{(r.share * 100).toFixed(1)}%</strong>{r.note && <span className="ml-2 text-slate-400">{r.note}</span>}</span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                  <div className="h-full rounded-full bg-ink-700" style={{ width: `${Math.max(2, r.share * 100)}%` }} />
+                  <div className="h-full rounded-full bg-ink-700" style={{ width: `${Math.max(2, (r.bar ?? r.share) * 100)}%` }} />
                 </div>
               </div>
             ))}
