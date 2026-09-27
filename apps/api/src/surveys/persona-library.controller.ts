@@ -12,6 +12,7 @@ export class PersonaLibraryController {
   @Get() list(@Query('q') q?: string, @Query('offset') offset?: string, @Query('status') status?: string) {
     return this.service.list(q, Number(offset ?? 0), status || undefined);
   }
+  @Get('distribution') distribution() { return this.service.distribution(); }
   @Post('imports') @HttpCode(202) @UseGuards(AdminGuard)
   import(@Req() req: Request, @Body() body: ImportDto) { return this.service.startImport(currentAccount(req).accountId, body.count); }
   @Post('enrich') @HttpCode(202) @UseGuards(AdminGuard)

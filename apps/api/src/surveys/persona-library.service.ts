@@ -42,6 +42,39 @@ export class PersonaLibraryService {
     return { queued: result.rows.length };
   }
 
+  /** 人口地图(0019):已增强库在性别/年龄/城市/收入/职业五个维度上的分布,一次分组查询 JS 聚合。 */
+  async distribution() {
+    const rows = (await this.db.execute(sql`
+      select coalesce(nullif(profile->>'gender',''),'未知') as gender,
+             coalesce(nullif(profile->>'ageBand',''),'未知') as age_band,
+             coalesce(nullif(profile->>'cityTier',''),'未知') as city_tier,
+             coalesce(nullif(profile->>'incomeBand',''),'未知') as income_band,
+             coalesce(nullif(profile->>'occupationGroup',''),'未知') as occupation_group,
+             count(*)::int as n
+      from persona_library
+      where status = 'ready'
+      group by 1, 2, 3, 4, 5`)).rows as Array<Record<string, string | number>>;
+    const normalize = (v: string) => (/^unknown$/i.test(v) ? '未知' : v);
+    const tally = (key: string) => {
+      const m = new Map<string, number>();
+      for (const r of rows) {
+        const value = normalize(String(r[key]));
+        m.set(value, (m.get(value) ?? 0) + Number(r.n));
+      }
+      return [...m.entries()].map(([value, count]) => ({ value, count })).sort((a, b) => b.count - a.count);
+    };
+    const pending = Number(((await this.db.execute(sql`select count(*)::int as n from persona_library where status in ('queued','enriching','imported')`)).rows[0] as { n: number }).n);
+    return {
+      ready: rows.reduce((s, r) => s + Number(r.n), 0),
+      pending,
+      gender: tally('gender'),
+      ageBand: tally('age_band'),
+      cityTier: tally('city_tier'),
+      incomeBand: tally('income_band'),
+      occupationGroup: tally('occupation_group'),
+    };
+  }
+
   /** 全库增强(全量转化):把所有未增强的源描述批量入队,worker 并发消化;量大时以天计。 */
   async enrichAll() {
     if (!personaHubAllowed()) throw new HttpException('当前环境未启用 Persona Hub 授权', 409);
