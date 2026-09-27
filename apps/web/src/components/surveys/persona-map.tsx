@@ -13,14 +13,16 @@ interface DistributionDto {
 
 /** 收入分布折线:横轴各组人均收入,纵轴累计人口占比(洛伦兹式)——线越陡的区间,人口越集中。 */
 function IncomeLine({ rows }: { rows: Array<{ value: string; share: number; amount: number }> }) {
-  const w = 560, h = 200, pl = 46, pr = 18, pt = 16, pb = 40;
-  const n = rows.length;
-  const x = (i: number) => pl + (i * (w - pl - pr)) / (n - 1);
+  const w = 560, h = 210, pl = 46, pr = 20, pt = 16, pb = 46;
+  const maxAmount = Math.max(...rows.map(r => r.amount), 1);
+  // 横轴按收入金额等比定位:点间距反映真实收入差距,而非人为等分
+  const x = (amount: number) => pl + (amount / maxAmount) * (w - pl - pr);
   const y = (cum: number) => pt + (1 - cum) * (h - pt - pb);
-  const points = rows.map((r, i) => ({ r, x: x(i), y: y((i + 1) / n) }));
+  const points = rows.map((r, i) => ({ r, x: x(r.amount), y: y((i + 1) / rows.length), cum: ((i + 1) / rows.length) * 100 }));
   const line = points.map(p => `${p.x},${p.y}`).join(' ');
-  const area = `${pl},${y(0)} ${line} ${x(n - 1)},${y(0)}`;
-  return <svg viewBox={`0 0 ${w} ${h}`} className="h-52 w-full" role="img" aria-label="居民收入分布折线图">
+  const area = `${pl},${y(0)} ${line} ${x(maxAmount)},${y(0)}`;
+  const ticks = [0, 20000, 40000, 60000, 80000].filter(t => t <= maxAmount);
+  return <svg viewBox={`0 0 ${w} ${h}`} className="h-56 w-full" role="img" aria-label="居民收入分布折线图">
     <defs>
       <linearGradient id="incomeArea" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stopColor="#3e7c59" stopOpacity="0.28" />
@@ -33,17 +35,21 @@ function IncomeLine({ rows }: { rows: Array<{ value: string; share: number; amou
         <text x={pl - 6} y={y(v / 100) + 3} textAnchor="end" fontSize="9" fill="#94a3b8">{v}%</text>
       </g>
     ))}
+    {ticks.map(t => (
+      <g key={t}>
+        <line x1={x(t)} x2={x(t)} y1={y(0)} y2={y(0) + 4} stroke="#cbd5e1" strokeWidth="1" />
+        <text x={x(t)} y={h - pb + 26} textAnchor="middle" fontSize="9" fill="#94a3b8">{t / 10000} 万</text>
+      </g>
+    ))}
+    <text x={w - pr} y={h - pb + 26} textAnchor="end" fontSize="9" fill="#94a3b8">{(maxAmount / 10000).toFixed(1)} 万</text>
     <polygon points={area} fill="url(#incomeArea)" />
     <polyline points={line} fill="none" stroke="#3e7c59" strokeWidth="2.5" strokeLinejoin="round" />
     {points.map((p, i) => <g key={`d${i}`}>
       <circle cx={p.x} cy={p.y} r="3.5" fill="#3e7c59" stroke="#fff" strokeWidth="1.5" />
-      <text x={p.x} y={p.y - 8} textAnchor="middle" fontSize="9.5" fill="#475569">{((i + 1) * 20)}%</text>
+      <text x={p.x} y={p.y - 9} textAnchor="middle" fontSize="9.5" fontWeight="600" fill="#334155">{p.cum}%</text>
+      <text x={p.x} y={h - pb + 16} textAnchor="middle" fontSize="9.5" fill="#475569">{p.r.value.replace('组', '')}</text>
     </g>)}
-    {points.map((p, i) => <g key={`x${i}`}>
-      <text x={p.x} y={h - pb + 14} textAnchor="middle" fontSize="9.5" fill="#475569">{p.r.value.replace('组', '')}</text>
-      <text x={p.x} y={h - pb + 27} textAnchor="middle" fontSize="9" fill="#94a3b8">{(p.r.amount / 10000).toFixed(1)} 万</text>
-    </g>)}
-    <text x={w - pr} y={h - 6} textAnchor="end" fontSize="9" fill="#94a3b8">横轴:各组人均收入 · 纵轴:累计人口占比</text>
+    <text x={w - pr} y={h - 6} textAnchor="end" fontSize="9" fill="#94a3b8">横轴:人均收入(等比) · 纵轴:累计人口占比</text>
   </svg>;
 }
 
