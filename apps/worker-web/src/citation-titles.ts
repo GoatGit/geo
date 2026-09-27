@@ -26,7 +26,8 @@ export function extractHtmlTitle(html: string): string | null {
     .replace(/&#x?[0-9a-f]+;/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  return t.length >= 4 && t.length <= 120 ? t : null;
+  // 必须含 CJK 或字母:纯数字/符号("- 13"等 1289 条实测)不是标题
+  return t.length >= 4 && t.length <= 120 && /[\u4e00-\u9fff a-zA-Z]/.test(t) ? t : null;
 }
 
 /** 抓单条 URL 的页面标题(8s 超时,最多读 96KB);失败 null。
