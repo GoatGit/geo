@@ -51,9 +51,9 @@ export class SurveyWorker {
     return any;
   }
 
-  private async synthesizePool(poolId: number): Promise<void> {
+  private async synthesizePool(poolId: number): Promise<boolean> {
     const pool = (await this.db.select().from(personaPools).where(eq(personaPools.id, poolId)))[0];
-    if (!pool) return;
+    if (!pool) return true;
     const settings = resolveInsightSettings((await loadPlatformSettings(this.db)).insightAgent, process.env);
     const agent = this.makeAgent ? await this.makeAgent() : new InsightAgent({ settings });
     const canSynthesize = agent.usable && typeof agent.personaSynthesize === 'function';
@@ -82,7 +82,7 @@ export class SurveyWorker {
     };
 
     let next = 0;
-    let liveness = Promise.resolve();
+    let liveness: Promise<unknown> = Promise.resolve();
     await Promise.all(Array.from({ length: Math.min(this.synthesisConcurrency, people.length) }, async () => {
       while (!this.stopped) {
         const person = people[next++];
