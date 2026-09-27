@@ -230,7 +230,7 @@ function Sidebar({ pathname }: { pathname: string }) {
       <aside
         onMouseEnter={() => collapsed && setHovered(true)}
         onMouseLeave={() => setHovered(false)}
-        className={`sticky top-0 flex h-screen flex-col bg-ink-950 text-slate-300 transition-[width,box-shadow] duration-200 ${
+        className={`sticky top-0 flex h-screen flex-col bg-ink-950 text-slate-300 transition-[width,box-shadow] duration-200 print:hidden ${
           rail ? 'w-[68px]' : 'w-[232px]'
         } ${collapsed && hovered ? 'relative z-30 shadow-2xl' : ''}`}
       >
@@ -395,7 +395,7 @@ function NavCollapsible({
 
 function TopBar({ onMenu }: { onMenu: () => void }) {
   return (
-    <header className="sticky top-0 z-10 border-b border-slate-200/70 bg-slate-50/80 px-4 py-3 backdrop-blur md:px-8">
+    <header className="sticky top-0 z-10 border-b border-slate-200/70 bg-slate-50/80 px-4 py-3 backdrop-blur md:px-8 print:hidden">
       <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <button

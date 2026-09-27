@@ -97,3 +97,16 @@
     @apply font-mono tabular-nums;
   }
 }
+
+@media print {
+  .card {
+    break-inside: avoid;
+    box-shadow: none !important;
+  }
+  body {
+    background: #fff !important;
+  }
+  details {
+    display: none !important;
+  }
+}
