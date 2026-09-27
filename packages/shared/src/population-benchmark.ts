@@ -9,7 +9,7 @@ export interface PopulationBenchmarkCard {
   key: string;
   title: string;
   unit: string;
-  rows: Array<{ value: string; share: number; note?: string }>;
+  rows: Array<{ value: string; share: number; note?: string; bar?: number }>;
 }
 
 export const POPULATION_BENCHMARK_SOURCE =
@@ -51,13 +51,13 @@ export const POPULATION_BENCHMARK: { source: string; dimensions: PopulationBench
       ],
     },
     {
-      key: 'income', title: '居民收入(五等份,2023)', unit: '各组人口占 20%',
+      key: 'income', title: '居民收入(五等份,2023)', unit: '各组人口占 20%,条高按人均收入',
       rows: [
-        { value: '低收入组', share: 0.2, note: '人均可支配收入 9,215 元' },
-        { value: '中间偏下组', share: 0.2, note: '20,442 元' },
-        { value: '中间收入组', share: 0.2, note: '32,195 元' },
-        { value: '中间偏上组', share: 0.2, note: '50,220 元' },
-        { value: '高收入组', share: 0.2, note: '95,055 元' },
+        { value: '低收入组', share: 0.2, bar: 9215 / 95055, note: '人均可支配收入 9,215 元' },
+        { value: '中间偏下组', share: 0.2, bar: 20442 / 95055, note: '20,442 元' },
+        { value: '中间收入组', share: 0.2, bar: 32195 / 95055, note: '32,195 元' },
+        { value: '中间偏上组', share: 0.2, bar: 50220 / 95055, note: '50,220 元' },
+        { value: '高收入组', share: 0.2, bar: 1, note: '95,055 元' },
       ],
     },
     {
