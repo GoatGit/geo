@@ -1,22 +1,18 @@
 'use client';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { EmptyState, Skeleton } from '@/components/ui';
+import { Skeleton } from '@/components/ui';
 
-interface Dist { value: string; count: number }
+interface BenchRow { value: string; share: number; note?: string }
 interface DistributionDto {
-  ready: number; pending: number;
-  gender: Dist[]; ageBand: Dist[]; cityTier: Dist[]; incomeBand: Dist[]; occupationGroup: Dist[];
+  pending: number;
+  source: string;
+  benchmark: Record<string, { title: string; unit: string; rows: BenchRow[]; syntheticNote: string }>;
+  synthetic: Record<string, Array<{ value: string; count: number; share?: number }>>;
 }
-const DIMENSIONS: Array<{ key: keyof DistributionDto & string; label: string }> = [
-  { key: 'gender', label: '性别' },
-  { key: 'ageBand', label: '年龄段' },
-  { key: 'cityTier', label: '城市层级' },
-  { key: 'incomeBand', label: '收入档' },
-  { key: 'occupationGroup', label: '职业大类' },
-];
+const CARDS = ['gender', 'age', 'region', 'income', 'occupation'] as const;
 
-/** 人口地图:全库结构化人物在五个维度上的分布(离线增强进度实时反映)。 */
+/** 人口地图:按国家统计局权威公开数据展示真实人口结构;合成人群库分布作对照。 */
 export function PersonaMap() {
   const data = useQuery({
     queryKey: ['persona-distribution'],
@@ -26,32 +22,35 @@ export function PersonaMap() {
   if (data.isPending) return <Skeleton />;
   if (data.error) return <p className="text-sm text-bad-600">{(data.error as Error).message}</p>;
   const d = data.data;
-  if (!d.ready) return <EmptyState title="还没有可统计的人物" text="离线批量增强完成后,这里会呈现全库的性别、年龄、城市、收入与职业分布。" />;
   return <div className="space-y-5">
     <p className="rounded-xl bg-slate-50 px-4 py-3 text-xs leading-6 text-slate-600">
-      当前已增强 <strong className="metric-num text-sm text-slate-800">{d.ready}</strong> 位人物{d.pending > 0 ? `,离线增强还在进行中(队列 ${d.pending} 条),分布会持续变化` : ''}。人口属性来自源描述提取,未提及的归入「未知」——是档案的真实边界,不是数据缺失。
+      人口结构数据来源:{d.source}。这张图是<strong>真实人口参考地图</strong>——做人群配额决策时,先看目标人群在真实人口中的位置;下方灰字为合成人群库的对应分布,便于对照差距。增强离线跑批进行中(队列 {d.pending} 条)。
     </p>
     <div className="grid gap-4 lg:grid-cols-2">
-      {DIMENSIONS.map(({ key, label }) => {
-        const dist = d[key] as Dist[];
-        const max = dist[0]?.count ?? 1;
+      {CARDS.map(key => {
+        const card = d.benchmark[key];
         return <section key={key} className="card p-5">
-          <h3 className="mb-3 text-sm font-semibold text-slate-800">{label}分布</h3>
-          <div className="space-y-2">
-            {dist.slice(0, 10).map(({ value, count }) => (
-              <div key={value} className="flex items-center gap-3 text-xs">
-                <span className="w-28 shrink-0 truncate text-slate-600" title={value}>{value}</span>
-                <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100">
-                  <div className="h-full rounded-full bg-brand-500" style={{ width: `${Math.max(2, count / max * 100)}%` }} />
+          <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-800">{card.title}</h3>
+            <span className="text-[11px] text-slate-400">{card.unit}</span>
+          </div>
+          <div className="space-y-2.5">
+            {card.rows.map(r => (
+              <div key={r.value}>
+                <div className="mb-1 flex items-baseline justify-between gap-3 text-xs">
+                  <span className="min-w-0 truncate text-slate-600">{r.value}</span>
+                  <span className="shrink-0 tabular-nums"><strong className="text-sm font-semibold text-slate-800">{(r.share * 100).toFixed(1)}%</strong>{r.note && <span className="ml-2 text-slate-400">{r.note}</span>}</span>
                 </div>
-                <span className="w-10 shrink-0 text-right tabular-nums text-slate-500">{(count / d.ready * 100).toFixed(1)}%</span>
-                <span className="w-14 shrink-0 text-right tabular-nums text-slate-400">{count}</span>
+                <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                  <div className="h-full rounded-full bg-ink-700" style={{ width: `${Math.max(2, r.share * 100)}%` }} />
+                </div>
               </div>
             ))}
           </div>
-          {dist.length > 10 && <p className="mt-2 text-[11px] text-slate-400">其余 {dist.length - 10} 个取值合计 {dist.slice(10).reduce((s, x) => s + x.count, 0)} 人</p>}
+          <p className="mt-3 border-t border-slate-50 pt-2.5 text-[11px] leading-5 text-slate-400">{card.syntheticNote}</p>
         </section>;
       })}
     </div>
+    <p className="text-xs leading-6 text-slate-400">合成人群库的人物由离线结构化生成,其人口属性只来自源描述明示的信息(未提及即「未知」),因此与真实人口分布存在差距属预期现象;需要代表性时,请使用配额抽样并参照上方权威基准。</p>
   </div>;
 }
