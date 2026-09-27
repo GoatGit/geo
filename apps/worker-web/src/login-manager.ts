@@ -471,12 +471,20 @@ export class LoginManager {
       if (!phoneLoc) throw new Error('手机号输入框未找到(可能被弹窗遮挡)');
       await phoneLoc.fill('');
       await phoneLoc.type(phone, { delay: 60 });
-      // 协议勾选(如可见)
-      const agree = await visibleAcrossFrames(page, 'input[type=checkbox]', 400);
-      if (agree) await agree.check({ timeout: 1_000 }).catch(() => undefined);
-      // 发送验证码
+      // 协议勾选:优先标准 checkbox;豆包用自定义圆圈(非 input),按「已阅读并同意」文本左侧坐标点击
+      const agreeInput = await visibleAcrossFrames(page, 'input[type=checkbox]', 400);
+      if (agreeInput) {
+        await agreeInput.check({ timeout: 1_000 }).catch(() => undefined);
+      } else {
+        const agreeText = await clickableTextAcrossFrames(page, '已阅读并同意', 500);
+        if (agreeText) {
+          const box = await agreeText.boundingBox().catch(() => null);
+          if (box) await page.mouse.click(box.x - 14, box.y + box.height / 2).catch(() => undefined);
+        }
+      }
+      // 发送验证码:豆包手机号视图先点「下一步」触发发码
       let sent = false;
-      for (const label of ['发送验证码', '获取验证码']) {
+      for (const label of ['下一步', '发送验证码', '获取验证码']) {
         const btn = await clickableTextAcrossFrames(page, label, 500);
         if (btn) { await btn.click({ timeout: 2_000 }).catch(() => undefined); sent = true; break; }
       }
