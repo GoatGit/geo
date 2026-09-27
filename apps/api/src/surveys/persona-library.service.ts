@@ -3,7 +3,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { loadPlatformSettings, personaImportJobs, personaLibrary } from '@geo/db';
 import { InsightAgent } from '@geo/insight-agent';
-import { personaHubUseAllowed, POPULATION_BENCHMARK } from '@geo/shared';
+import { personaHubUseAllowed, POPULATION_BENCHMARK, AGE_PYRAMID } from '@geo/shared';
 import { DB } from '../common/infra.module';
 export const PERSONA_HUB_REVISION = '72bf19b886312041b32f7cae12c02dab8653c6fa';
 export const PERSONA_HUB_URL = `https://raw.githubusercontent.com/tencent-ailab/persona-hub/${PERSONA_HUB_REVISION}/data/persona.jsonl`;
@@ -48,7 +48,7 @@ export class PersonaLibraryService {
    */
   async distribution() {
     const pending = Number(((await this.db.execute(sql`select count(*)::int as n from persona_library where status in ('queued','enriching','imported')`)).rows[0] as { n: number }).n);
-    return { pending, benchmark: POPULATION_BENCHMARK };
+    return { pending, benchmark: POPULATION_BENCHMARK, agePyramid: AGE_PYRAMID };
   }
 
   /** 全库增强(全量转化):把所有未增强的源描述批量入队,worker 并发消化;量大时以天计。 */

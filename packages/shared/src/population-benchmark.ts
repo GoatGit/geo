@@ -26,15 +26,6 @@ export const POPULATION_BENCHMARK: { source: string; dimensions: PopulationBench
       ],
     },
     {
-      key: 'age', title: '年龄结构(七普)', unit: '占总人口',
-      rows: [
-        { value: '0-14 岁', share: 0.1795, note: '25,338 万人' },
-        { value: '15-59 岁', share: 0.6335, note: '89,438 万人' },
-        { value: '60-64 岁', share: 0.052, note: '60 岁及以上 18.70% 中的 60-64 段(推导)' },
-        { value: '65 岁及以上', share: 0.135, note: '约 19,064 万人' },
-      ],
-    },
-    {
       key: 'education', title: '受教育程度(七普)', unit: '占总人口',
       rows: [
         { value: '大学(大专及以上)', share: 0.155, note: '21,836 万人' },
@@ -86,3 +77,30 @@ export function populationBenchmarkContext(): string {
     .map(d => `${d.title}:${d.rows.map(r => `${r.value}${(r.share * 100).toFixed(1)}%`).join('/')}`)
     .join(';');
 }
+
+/**
+ * 人口金字塔(七普,《中国人口普查年鉴-2020》表 7-1 全国分年龄、性别的人口,单位:万人)。
+ * 各组为常见公开引用值,合计约 139,604 万,与公报全国人口 141,178 万略有出入(年鉴细分表口径),展示时注明。
+ */
+export const AGE_PYRAMID: Array<{ band: string; male: number; female: number }> = [
+  { band: '0-4', male: 4178.8, female: 3609.6 },
+  { band: '5-9', male: 4842.7, female: 4202.7 },
+  { band: '10-14', male: 4540.1, female: 3982.5 },
+  { band: '15-19', male: 7562.9, female: 3529.0 },
+  { band: '20-24', male: 8008.7, female: 3730.1 },
+  { band: '25-29', male: 9191.1, female: 4353.9 },
+  { band: '30-34', male: 10080.8, female: 4793.0 },
+  { band: '35-39', male: 9901.3, female: 4717.6 },
+  { band: '40-44', male: 9342.9, female: 4510.4 },
+  { band: '45-49', male: 10230.9, female: 4994.5 },
+  { band: '50-54', male: 12125.6, female: 5964.8 },
+  { band: '55-59', male: 11016.7, female: 5454.8 },
+  { band: '60-64', male: 7734.7, female: 3867.9 },
+  { band: '65-69', male: 8404.5, female: 4283.1 },
+  { band: '70-74', male: 4779.6, female: 2458.5 },
+  { band: '75-79', male: 3062.3, female: 1562.9 },
+  { band: '80-84', male: 1661.1, female: 873.2 },
+  { band: '85-89', male: 777.5, female: 413.1 },
+  { band: '90-94', male: 274.9, female: 144.0 },
+  { band: '95+', male: 92.5, female: 47.0 },
+].map(({ band, male, female }) => ({ band, male: Math.round(male * 10) / 10, female: Math.round(female * 10) / 10 }));
