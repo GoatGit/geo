@@ -4,7 +4,7 @@ function extractTitle(html) {
   const m = html.match(/<title[^>]*>([\s\S]{1,300}?)<\/title>/i);
   if (!m) return null;
   const t = m[1].replace(/<[^>]+>/g, '').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;|&apos;/g,"'").replace(/&nbsp;/g,' ').replace(/&#x?[0-9a-f]+;/gi,' ').replace(/\s+/g,' ').trim();
-  return t.length >= 4 && t.length <= 120 ? t : null;
+  return t.length >= 4 && t.length <= 120 && /[\u4e00-\u9fff a-zA-Z]/.test(t) ? t : null;
 }
 async function fetchTitle(url) {
   try {
@@ -13,7 +13,15 @@ async function fetchTitle(url) {
     const ct = res.headers.get('content-type') ?? '';
     if (!/text\/html|application\/xhtml/i.test(ct)) return null;
     const buf = await res.arrayBuffer().then((b) => b.slice(0, 96 * 1024));
-    return extractTitle(new TextDecoder('utf-8', { fatal: false }).decode(buf));
+    const bytes = new Uint8Array(buf);
+    let charset = /charset=([\w-]+)/i.exec(ct)?.[1]?.toLowerCase() ?? '';
+    if (!charset) {
+      const head = new TextDecoder('ascii', { fatal: false }).decode(bytes.slice(0, 2048));
+      charset = /charset=["']?([\w-]+)/i.exec(head)?.[1]?.toLowerCase() ?? '';
+    }
+    const dec = charset.startsWith('gb') || charset === 'gb2312' || charset === 'gbk'
+      ? new TextDecoder('gbk', { fatal: false }) : new TextDecoder('utf-8', { fatal: false });
+    return extractTitle(dec.decode(bytes));
   } catch { return null; }
 }
 const c = new pg.Client({ connectionString: 'postgres://geo:bekvom-weBvyx-6nogri@geopub.pg.rds.aliyuncs.com:15432/geo', ssl: false });
