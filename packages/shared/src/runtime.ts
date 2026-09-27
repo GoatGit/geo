@@ -67,6 +67,8 @@ export interface LoginRequest {
   proxyHint: string | null;
   contextRef: string | null;
   requestedAt: string;
+  /** 收码站链接(0019 豆包批量登录):存在时 worker 自动完成手机号验证码流程 */
+  smsLink?: string;
 }
 
 /** Worker 登录会话状态(后台轮询展示)。 */

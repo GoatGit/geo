@@ -285,6 +285,34 @@ export default function AdminAccountsPage() {
     }
   };
 
+  const [smsLinks, setSmsLinks] = useState('');
+  const [smsBusy, setSmsBusy] = useState(false);
+  const batchSmsLogin = async () => {
+    const links = smsLinks.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('http'));
+    if (!links.length) {
+      setMessage('请先粘贴收码链接(每行一条,含 t= 参数)');
+      return;
+    }
+    setSmsBusy(true);
+    setMessage('');
+    try {
+      const r = await api<{ assigned: number; unassignedCount: number; unassigned: string[] }>(
+        '/admin/accounts/sms-login-batch',
+        { method: 'POST', json: { links } },
+      );
+      setMessage(
+        `已发起 ${r.assigned} 个豆包自动验证码登录(系统自动取号/填号/收码/回填)` +
+          (r.unassignedCount ? `;${r.unassignedCount} 条链接暂无空闲豆包档案,请先「添加账号」后重试` : '。登录成功的账号会自动入可用池'),
+      );
+      setSmsLinks('');
+      void queryClient.invalidateQueries({ queryKey: ['admin-accounts'] });
+    } catch (e) {
+      setMessage((e as Error).message);
+    } finally {
+      setSmsBusy(false);
+    }
+  };
+
   const setStatus = async (id: number, action: 'disable' | 'enable') => {
     try {
       await api(`/admin/accounts/${id}/${action}`, { method: 'POST' });
@@ -358,6 +386,27 @@ export default function AdminAccountsPage() {
           LOGIN_VIEWER=1 模式在下方实时画面中操作(点击画面 = 远程鼠标,发送文字 = 远程键盘)→
           系统验证并保存登录态后自动入可用池。默认等待 10 分钟,以登录状态中的剩余时间为准,超时可重试。
         </p>
+        <div className="mt-4 border-t border-slate-100 pt-4">
+          <h3 className="font-semibold text-slate-900">豆包批量验证码登录</h3>
+          <p className="mt-1 text-xs leading-5 text-slate-500">
+            粘贴收码站链接(每行一条,如 https://sms.xxx/?t=…,取号/收码全自动):
+            系统逐条分配待登录豆包档案,自动完成 取号 → 填手机号 → 发验证码 → 收码 → 回填登录。
+            建议先「添加账号」补足豆包档案数,再粘贴等量的收码链接。
+          </p>
+          <textarea
+            className="input mt-2 h-28 w-full font-mono text-xs"
+            placeholder={'https://sms.xxx/?t=aaaa…\nhttps://sms.xxx/?t=bbbb…'}
+            value={smsLinks}
+            onChange={(e) => setSmsLinks(e.target.value)}
+          />
+          <button
+            className="btn-primary mt-2 h-9 px-5"
+            disabled={smsBusy || !smsLinks.trim()}
+            onClick={() => void batchSmsLogin()}
+          >
+            {smsBusy ? '发起中…' : '批量发起自动登录'}
+          </button>
+        </div>
       </section>
 
       {viewerEntries.map(([profileId, st]) => (

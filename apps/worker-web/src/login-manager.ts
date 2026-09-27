@@ -21,6 +21,7 @@ import {
 import { checkLogin, hasVisibleInput, loginBlockerVisible, siteConfigOf } from '@geo/engine-adapters';
 import { browserModeFromEnv, viewerLoginFromEnv, type SessionBroker } from '@geo/browser-session';
 import { ProxyPoolManager } from './qg-proxy';
+import { SmsLinkClient, smsTokenFromLink } from './sms-client';
 import { envInt } from './config';
 import { browserContextOptions, verifyStoredLogin } from './browser-context';
 
@@ -197,6 +198,35 @@ export class LoginManager {
         ? [this.frameLoop(req.sessionId, page, stopViewer), this.commandLoop(req.sessionId, page, stopViewer)]
         : [];
 
+      // 收码链接自动登录(0019 豆包批量登录):smsLink 存在时系统自动完成
+      // 取号 → 填手机号 → 发验证码 → 收码 → 回填,完成后由下方既有轮询验证并保存。
+      // 任一步失败不阻断:状态说明原因,viewer/人工通道仍在,可接管完成。
+      if (req.smsLink && req.engine === 'doubao') {
+        const token = smsTokenFromLink(req.smsLink);
+        if (!token) {
+          await this.setStatus(req.sessionId, {
+            state: 'running',
+            detail: '收码链接无法解析(缺少 t= 参数),请人工完成登录。',
+            viewer, updatedAt: new Date().toISOString(),
+          });
+        } else {
+          const sms = new SmsLinkClient(token);
+          try {
+            await this.autoPhoneLogin(page, sms, req.sessionId, async detail => {
+              await this.setStatus(req.sessionId, { state: 'running', detail, viewer, updatedAt: new Date().toISOString() });
+            });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.warn(`[login] session=${req.sessionId} 自动验证码登录失败:${msg}`);
+            await this.setStatus(req.sessionId, {
+              state: 'running',
+              detail: `自动验证码登录未完成(${msg});请人工完成登录,或停用后重新批量发起。`,
+              viewer, updatedAt: new Date().toISOString(),
+            });
+          }
+        }
+      }
+
       try {
         // 轮询:正向登录凭证 + 提问框可见,连续两轮成立才算成功;
         // 操作者登录后若落在非会话页(如站点首页),周期性重导航回提问页再验证;
@@ -349,6 +379,90 @@ export class LoginManager {
     } finally {
       await releaseSession();
     }
+  }
+
+  /**
+   * 豆包手机号验证码自动登录(0019):收码站 API 取号 → 远程页填手机号并发送 →
+   * start 收取 → 轮询验证码 → 回填提交。换号(replacing)自动重走;60 秒码效期内完成。
+   */
+  private async autoPhoneLogin(page: Page, sms: SmsLinkClient, sessionId: string, status: (detail: string) => Promise<void>): Promise<void> {
+    // 切到手机号登录(豆包登录弹窗默认扫码)
+    for (const tab of ['手机号登录', '验证码登录']) {
+      const tabBtn = page.getByText(tab, { exact: false }).first();
+      if (await tabBtn.isVisible({ timeout: 600 }).catch(() => false)) {
+        await tabBtn.click({ timeout: 2_000 }).catch(() => undefined);
+        break;
+      }
+    }
+    const phoneInput = page.locator('input[type=tel], input[placeholder*=手机], input[id*=phone]').first();
+    await phoneInput.waitFor({ state: 'visible', timeout: 10_000 });
+
+    for (let round = 1; round <= 6; round++) {
+      const session = await sms.getSession();
+      if (session.status === 'failed') throw new Error('收码站判定号码失败');
+      const phone = session.phone;
+      if (!phone) throw new Error('收码站未返回手机号');
+      await status(`第 ${round} 轮:手机号 ${phone},正在填入豆包并发送验证码…`);
+
+      await phoneInput.fill('');
+      await phoneInput.type(phone, { delay: 60 });
+      // 协议勾选(如可见)
+      const agree = page.locator('input[type=checkbox]:not(:checked)').first();
+      if (await agree.isVisible({ timeout: 300 }).catch(() => false)) {
+        await agree.check({ timeout: 1_000 }).catch(() => undefined);
+      }
+      // 发送验证码
+      let sent = false;
+      for (const label of ['发送验证码', '获取验证码', '下一步']) {
+        const btn = page.getByRole('button', { name: new RegExp(label) }).first();
+        if (await btn.isVisible({ timeout: 400 }).catch(() => false)) {
+          await btn.click({ timeout: 2_000 });
+          sent = true;
+          break;
+        }
+      }
+      if (!sent) throw new Error('豆包登录页未找到发送验证码按钮');
+
+      // 开始收取并轮询验证码(约 90 秒,豆包码效 60 秒)
+      let slot = session.slot ?? 0;
+      await sms.startCollect(slot);
+      let code: string | null = null;
+      let replaced = false;
+      for (let poll = 0; poll < 45; poll++) {
+        await page.waitForTimeout(2_000);
+        const s = await sms.poll(slot).catch(() => null);
+        if (!s) continue;
+        slot = s.slot ?? slot;
+        if (s.status === 'completed' && s.code) { code = s.code; break; }
+        if (s.status === 'replacing') { replaced = true; continue; }
+        if (s.status === 'failed') break;
+      }
+      if (!code) {
+        if (replaced) { await status('收码站已自动换号,用新号码重走流程…'); continue; }
+        throw new Error('90 秒内未收到验证码');
+      }
+      await status(`验证码已收到(${code}),正在回填豆包…`);
+      // 回填:优先单个验证码输入框;分格输入则点击首格后逐字键入
+      const codeInput = page.locator('input[placeholder*=验证码], input[autocomplete=one-time-code]').first();
+      if (await codeInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await codeInput.fill('');
+        await codeInput.type(code, { delay: 80 });
+      } else {
+        const firstBox = page.locator('input[maxlength="1"], input[maxlength="4"]').first();
+        await firstBox.click({ timeout: 2_000 }).catch(() => undefined);
+        await page.keyboard.type(code, { delay: 120 });
+      }
+      // 提交登录
+      for (const label of ['登录', '提交', '下一步']) {
+        const btn = page.getByRole('button', { name: new RegExp(`^\\s*${label}`) }).first();
+        if (await btn.isVisible({ timeout: 400 }).catch(() => false)) {
+          await btn.click({ timeout: 2_000 }).catch(() => undefined);
+          break;
+        }
+      }
+      return; // 之后由既有登录验证轮询确认并保存
+    }
+    throw new Error('收码站多次换号仍未成功,请更换收码链接后重试');
   }
 
   /** 截帧循环:远程页面 JPEG → Redis frame key(后台轮询展示)。 */

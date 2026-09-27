@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, HttpException, HttpStatus, OnModuleDestr
 import { BadRequestException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Request } from 'express';
 import { Queue } from 'bullmq';
@@ -523,6 +523,58 @@ export class AdminController implements OnModuleDestroy {
       throw err;
     }
     return { sessionId, engine: profile.engine, profileId: profile.id };
+  }
+
+  /**
+   * 豆包收码链接批量登录(0019):每行一条收码站链接,逐条分配待登录豆包档案,
+   * 以 smsLink 入登录队列;worker 自动完成 取号→填手机号→发码→收码→回填。
+   * 未分配到档案的链接原样返回,便于补充档案后重试。
+   */
+  @Post('accounts/sms-login-batch')
+  async smsLoginBatch(@Req() req: Request, @Body() body: { links?: string[] }) {
+    void currentAccount(req);
+    const links = (body.links ?? []).map(l => l.trim()).filter(l => /^https?:\/\/|^sms:/.test(l));
+    if (!links.length) throw new BadRequestException('请提供收码链接(每行一条)');
+    const free = await this.db
+      .select({ id: accountProfiles.id })
+      .from(accountProfiles)
+      .where(and(eq(accountProfiles.engine, 'doubao'), eq(accountProfiles.status, 'pending_login')))
+      .orderBy(asc(accountProfiles.id));
+    const assignments: Array<{ link: string; profileId: number; sessionId: string }> = [];
+    const unassigned: string[] = [];
+    let cursor = 0;
+    for (const link of links) {
+      let profileId: number | null = null;
+      while (cursor < free.length) {
+        const candidate = free[cursor++]!.id;
+        const lockKey = loginProfileKey(candidate);
+        const sessionId = randomUUID();
+        const claimed = await this.redis.set(lockKey, sessionId, 'EX', LOGIN_STATUS_TTL_SEC, 'NX');
+        if (!claimed) continue;
+        profileId = candidate;
+        const profile = (await this.db.select().from(accountProfiles).where(eq(accountProfiles.id, candidate)).limit(1))[0];
+        const payload: LoginRequest = {
+          sessionId,
+          profileId: candidate,
+          engine: 'doubao',
+          profileKey: `profile:${candidate}`,
+          fingerprint: profile?.fingerprint,
+          proxyHint: profile?.proxyHint,
+          contextRef: profile?.contextRef,
+          requestedAt: new Date().toISOString(),
+          smsLink: link,
+        };
+        await this.redis.multi()
+          .set(loginStatusKey(sessionId), JSON.stringify({ state: 'queued', updatedAt: new Date().toISOString() }), 'EX', LOGIN_STATUS_TTL_SEC)
+          .rpush(LOGIN_REQ_QUEUE, JSON.stringify(payload))
+          .exec();
+        await this.db.update(accountProfiles).set({ status: 'pending_login' }).where(eq(accountProfiles.id, candidate));
+        assignments.push({ link, profileId: candidate, sessionId });
+        break;
+      }
+      if (!profileId) unassigned.push(link);
+    }
+    return { assigned: assignments.length, unassignedCount: unassigned.length, assignments, unassigned };
   }
 
   /** 登录会话状态轮询(queued/running/done/timeout/error/cancelled;viewer=true 时展示实时画面)。 */
