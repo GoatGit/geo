@@ -673,7 +673,9 @@ export class MonitorService {
       .select()
       .from(citationFacts)
       .where(where)
-      .orderBy(desc(citationFacts.extractedAt))
+      // 有标题的行排前,未取标题的长尾沉底(避免整屏"未取到标题"占据第 1 页——
+      // 未取行按时间聚堆,倒序时会连片置顶,观感远差于实际覆盖率)
+      .orderBy(sql`(title is null or title = '') asc`, desc(citationFacts.extractedAt))
       .offset((page - 1) * pageSize)
       .limit(pageSize);
 
