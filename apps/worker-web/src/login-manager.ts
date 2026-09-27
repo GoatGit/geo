@@ -25,6 +25,22 @@ import { SmsLinkClient, smsTokenFromLink } from './sms-client';
 import { envInt } from './config';
 import { browserContextOptions, verifyStoredLogin } from './browser-context';
 
+/** 关闭登录页常见运营弹窗(下载客户端/领订阅等):右上角×、关闭/跳过文案,再补 Escape。 */
+async function dismissPromos(page: Page): Promise<void> {
+  const candidates = [
+    page.locator('[class*="close" i]:visible'),
+    page.locator('[aria-label*="关闭" i]:visible, [aria-label*="close" i]:visible'),
+    page.getByText(/^(×|×|x|X|关闭|跳过|暂不下载|暂不使用|以后再说|暂不)$/),
+  ];
+  for (const c of candidates) {
+    const n = await c.count().catch(() => 0);
+    for (let i = 0; i < Math.min(n, 3); i++) {
+      await c.nth(i).click({ timeout: 300 }).catch(() => undefined);
+    }
+  }
+  await page.keyboard.press('Escape').catch(() => undefined);
+}
+
 /** 人工登录等待窗口:操作者扫码/验证码在此时间内完成,超时置 timeout 可重试。
  *  10 分钟起步:扫码后常要切换手机 App 再确认,窗口太短会"刚扫完就关"(可用 LOGIN_TIMEOUT_MS 覆盖)。 */
 const LOGIN_TIMEOUT_MS = envInt('LOGIN_TIMEOUT_MS', 600_000, 30_000, 1_800_000);
@@ -212,7 +228,7 @@ export class LoginManager {
         } else {
           const sms = new SmsLinkClient(token);
           try {
-            await this.autoPhoneLogin(page, sms, req.sessionId, async detail => {
+            await this.autoPhoneLogin(page, site, sms, req.sessionId, async detail => {
               await this.setStatus(req.sessionId, { state: 'running', detail, viewer, updatedAt: new Date().toISOString() });
             });
           } catch (err) {
@@ -385,8 +401,17 @@ export class LoginManager {
    * 豆包手机号验证码自动登录(0019):收码站 API 取号 → 远程页填手机号并发送 →
    * start 收取 → 轮询验证码 → 回填提交。换号(replacing)自动重走;60 秒码效期内完成。
    */
-  private async autoPhoneLogin(page: Page, sms: SmsLinkClient, sessionId: string, status: (detail: string) => Promise<void>): Promise<void> {
-    // 切到手机号登录(豆包登录弹窗默认扫码)
+  private async autoPhoneLogin(page: Page, site: ReturnType<typeof siteConfigOf>, sms: SmsLinkClient, sessionId: string, status: (detail: string) => Promise<void>): Promise<void> {
+    // 关运营弹窗("下载豆包电脑版"等)→ 打开登录入口 → 切手机号登录
+    await dismissPromos(page);
+    for (const h of site.loginHints) {
+      const loc = page.locator(h).first();
+      if (await loc.isVisible({ timeout: 600 }).catch(() => false)) {
+        await loc.click({ timeout: 2_000 }).catch(() => undefined);
+        break;
+      }
+    }
+    await dismissPromos(page);
     for (const tab of ['手机号登录', '验证码登录']) {
       const tabBtn = page.getByText(tab, { exact: false }).first();
       if (await tabBtn.isVisible({ timeout: 600 }).catch(() => false)) {
@@ -398,6 +423,7 @@ export class LoginManager {
     await phoneInput.waitFor({ state: 'visible', timeout: 10_000 });
 
     for (let round = 1; round <= 6; round++) {
+      await dismissPromos(page);
       const session = await sms.getSession();
       if (session.status === 'failed') throw new Error('收码站判定号码失败');
       const phone = session.phone;
