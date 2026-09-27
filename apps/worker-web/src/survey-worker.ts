@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { brands, loadPlatformSettings, personas, personaPools, surveyResponses, surveys, type Db } from '@geo/db';
 import { InsightAgent, resolveInsightSettings, validatePersonaAnswerOutput } from '@geo/insight-agent';
-import { validateSurveyQuestions, validateSurveySegments } from '@geo/shared';
+import { populationBenchmarkContext, validateSurveyQuestions, validateSurveySegments } from '@geo/shared';
 
 /** PostgreSQL task claim and token fencing keep retries/cancellation safe across worker restarts. */
 export class SurveyWorker {
@@ -96,7 +96,7 @@ export class SurveyWorker {
         };
         const refs = canSynthesize && seg ? await refsFor(segmentIndex) : [];
         const synthesized = canSynthesize && seg
-          ? await agent.personaSynthesize!({ quota, references: refs }).then(r => r?.profile ?? null).catch(() => null)
+          ? await agent.personaSynthesize!({ quota, references: refs, populationContext: populationBenchmarkContext() }).then(r => r?.profile ?? null).catch(() => null)
           : null;
         const merged = synthesized
           ? { ...person.profile, ...synthesized, ...quota, synthesized: true }

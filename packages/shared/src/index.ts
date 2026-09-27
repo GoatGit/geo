@@ -6,3 +6,4 @@ export * from './citation-title';
 export * from './surveys';
 export * from './calibration';
 export * from './persona-license';
+export * from './population-benchmark';
