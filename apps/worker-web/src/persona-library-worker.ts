@@ -46,7 +46,7 @@ export class PersonaLibraryWorker {
         for await (const chunk of createReadStream(localFile)) hash.update(chunk);
         if (hash.digest('hex') !== '43ec406a7df5c881bfc1723334cf566a4ded2aaa') throw Error('上游文件校验失败：本地镜像与固定版本不一致');
         response = new Response(Readable.toWeb(createReadStream(localFile)) as ReadableStream<Uint8Array>);
-      } else response = await this.fetchImpl(job.sourceUrl, { redirect: 'error', signal: AbortSignal.timeout(30000) });
+      } else response = await this.fetchImpl(job.sourceUrl, { redirect: 'error', signal: AbortSignal.timeout(900_000) });
       if (!response.ok || !response.body) throw Error('上游数据暂时不可用，请重试导入');
       const reader = response.body.getReader(), decoder = new TextDecoder();
       let buffer = '', processed = 0, imported = 0, bytes = 0;
