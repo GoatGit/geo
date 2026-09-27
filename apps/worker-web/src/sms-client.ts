@@ -55,15 +55,15 @@ export class SmsLinkClient {
     return JSON.parse(text) as T;
   }
 
-  async getSession(slot = 0): Promise<SmsSession> {
+  async getSession(slot = 1): Promise<SmsSession> {
     return this.call<SmsSession>(`/api/session?t=${encodeURIComponent(this.token)}&slot=${slot}&probe=0`);
   }
 
-  async startCollect(slot = 0): Promise<SmsSession> {
+  async startCollect(slot = 1): Promise<SmsSession> {
     return this.call<SmsSession>('/api/session/start', { method: 'POST', json: { t: this.token, slot } });
   }
 
-  async poll(slot = 0): Promise<SmsSession> {
+  async poll(slot = 1): Promise<SmsSession> {
     return this.call<SmsSession>('/api/session/poll', { method: 'POST', json: { t: this.token, slot } });
   }
 }
