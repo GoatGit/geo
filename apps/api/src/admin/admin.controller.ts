@@ -7,7 +7,7 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Request } from 'express';
 import { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
-import { accountProfiles, brands, collectionRounds, queryRuns } from '@geo/db';
+import { accountProfiles, brands, collectionRounds, queryRuns, surveys } from '@geo/db';
 import {
   REPORTS_QUEUE,
   REPUTATION_QUEUE,
@@ -117,10 +117,24 @@ export class AdminController implements OnModuleDestroy {
     return row;
   }
 
+  /** 示例案例打标(0020):品牌/问卷标记为 is_demo,对全部新账号只读可见。 */
+  @Post('demo/seed')
+  async demoSeed(@Body() body: { brandId?: number; surveyId?: number }) {
+    const out: Record<string, unknown> = {};
+    if (body.brandId) {
+      const r = await this.db.update(brands).set({ isDemo: true }).where(eq(brands.id, body.brandId)).returning({ id: brands.id });
+      out.brand = r[0] ?? null;
+    }
+    if (body.surveyId) {
+      const r = await this.db.update(surveys).set({ isDemo: true }).where(eq(surveys.id, body.surveyId)).returning({ id: surveys.id });
+      out.survey = r[0] ?? null;
+    }
+    return out;
+  }
+
   /** 删除品牌及其全部从属数据(平台运营处置;确认操作,不可逆)。 */
   @Delete('brands/:id')
-  async deleteBrand(@Param('id', ParseIntPipe) id: number) {
-    const brand = (
+  async deleteBrand(@Param('id', ParseIntPipe) id: number) {    const brand = (
       await this.db.select({ id: brands.id, name: brands.name }).from(brands).where(eq(brands.id, id)).limit(1)
     )[0];
     if (!brand) throw new HttpException('品牌不存在', HttpStatus.NOT_FOUND);
