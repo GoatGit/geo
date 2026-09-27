@@ -3,12 +3,48 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Skeleton } from '@/components/ui';
 
-interface BenchCard { key: string; title: string; unit: string; rows: Array<{ value: string; share: number; note?: string; bar?: number }> }
+interface BenchCard { key: string; title: string; unit: string; rows: Array<{ value: string; share: number; note?: string; bar?: number; amount?: number }> }
 interface PyramidBand { band: string; male: number; female: number }
 interface DistributionDto {
   pending: number;
   benchmark: { source: string; dimensions: BenchCard[] };
   agePyramid: PyramidBand[];
+}
+
+/** 收入分布折线:横轴各组人均收入,纵轴累计人口占比(洛伦兹式)——线越陡的区间,人口越集中。 */
+function IncomeLine({ rows }: { rows: Array<{ value: string; share: number; amount: number }> }) {
+  const w = 560, h = 200, pl = 46, pr = 18, pt = 16, pb = 40;
+  const n = rows.length;
+  const x = (i: number) => pl + (i * (w - pl - pr)) / (n - 1);
+  const y = (cum: number) => pt + (1 - cum) * (h - pt - pb);
+  const points = rows.map((r, i) => ({ r, x: x(i), y: y((i + 1) / n) }));
+  const line = points.map(p => `${p.x},${p.y}`).join(' ');
+  const area = `${pl},${y(0)} ${line} ${x(n - 1)},${y(0)}`;
+  return <svg viewBox={`0 0 ${w} ${h}`} className="h-52 w-full" role="img" aria-label="居民收入分布折线图">
+    <defs>
+      <linearGradient id="incomeArea" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor="#3e7c59" stopOpacity="0.28" />
+        <stop offset="100%" stopColor="#3e7c59" stopOpacity="0.02" />
+      </linearGradient>
+    </defs>
+    {[0, 20, 40, 60, 80, 100].map(v => (
+      <g key={v}>
+        <line x1={pl} x2={w - pr} y1={y(v / 100)} y2={y(v / 100)} stroke="#e2e8f0" strokeWidth="1" />
+        <text x={pl - 6} y={y(v / 100) + 3} textAnchor="end" fontSize="9" fill="#94a3b8">{v}%</text>
+      </g>
+    ))}
+    <polygon points={area} fill="url(#incomeArea)" />
+    <polyline points={line} fill="none" stroke="#3e7c59" strokeWidth="2.5" strokeLinejoin="round" />
+    {points.map((p, i) => <g key={`d${i}`}>
+      <circle cx={p.x} cy={p.y} r="3.5" fill="#3e7c59" stroke="#fff" strokeWidth="1.5" />
+      <text x={p.x} y={p.y - 8} textAnchor="middle" fontSize="9.5" fill="#475569">{((i + 1) * 20)}%</text>
+    </g>)}
+    {points.map((p, i) => <g key={`x${i}`}>
+      <text x={p.x} y={h - pb + 14} textAnchor="middle" fontSize="9.5" fill="#475569">{p.r.value.replace('组', '')}</text>
+      <text x={p.x} y={h - pb + 27} textAnchor="middle" fontSize="9" fill="#94a3b8">{(p.r.amount / 10000).toFixed(1)} 万</text>
+    </g>)}
+    <text x={w - pr} y={h - 6} textAnchor="end" fontSize="9" fill="#94a3b8">横轴:各组人均收入 · 纵轴:累计人口占比</text>
+  </svg>;
 }
 
 /** 人口地图:按权威公开数据(国家统计局公报/七普/通用城市分层)展示真实人口结构。 */
@@ -45,21 +81,21 @@ export function PersonaMap() {
       <p className="mt-3 text-[11px] leading-5 text-slate-400">条长按各年龄组人口数;金字塔能同时看出年龄结构与性别结构。</p>
     </section>
     <div className="grid gap-4 lg:grid-cols-2">
-      {dimensions.map(card => <section key={card.key} className="card p-5">
+      {dimensions.map(card => card.key === 'income'
+        ? <section key={card.key} className="card p-5 lg:col-span-2">
+            <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+              <h3 className="text-sm font-semibold text-slate-800">{card.title}</h3>
+              <span className="text-[11px] text-slate-400">{card.unit}</span>
+            </div>
+            <IncomeLine rows={card.rows.map(r => ({ value: r.value, share: r.share, amount: r.amount ?? 0 }))} />
+          </section>
+        : <section key={card.key} className="card p-5">
         <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
           <h3 className="text-sm font-semibold text-slate-800">{card.title}</h3>
           <span className="text-[11px] text-slate-400">{card.unit}</span>
         </div>
         {card.key === 'income'
-          ? <div className="mt-4 flex h-36 items-end gap-3">
-              {card.rows.map(r => (
-                <div key={r.value} className="flex flex-1 flex-col items-center gap-1.5" title={`${r.value}:${r.note}`}>
-                  <span className="text-[10px] tabular-nums text-slate-500">{((r.bar ?? 0) * 95055 / 10000).toFixed(1)} 万</span>
-                  <div className="w-full rounded-t-md bg-brand-500" style={{ height: `${Math.max(4, (r.bar ?? 0) * 100)}%` }} />
-                  <span className="text-center text-[10px] leading-4 text-slate-500">{r.value.replace('组', '')}</span>
-                </div>
-              ))}
-            </div>
+          ? <IncomeLine rows={card.rows.map(r => ({ value: r.value, share: r.share, amount: r.amount ?? 0 }))} />
           : <div className="space-y-2.5">
               {card.rows.map(r => (
                 <div key={r.value}>
