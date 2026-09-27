@@ -82,7 +82,7 @@ export function pct(v: number | null | undefined): string {
   return v == null ? '—' : `${Math.round(v * 100)}%`;
 }
 
-/** IME 安全的检索输入框:组合词(中文输入法)期间不触发检索,提交后 400ms 防抖回调。 */
+/** 检索输入框:回车提交(IME 组合词中的回车视为选词,不提交);输入过程不触发检索。 */
 export function SearchInput({ onSearch, placeholder, ariaLabel, className = 'input mt-1' }: {
   onSearch: (value: string) => void;
   placeholder: string;
@@ -91,18 +91,14 @@ export function SearchInput({ onSearch, placeholder, ariaLabel, className = 'inp
 }) {
   const [text, setText] = useState('');
   const composing = useRef(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const commit = (v: string) => {
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => onSearch(v.trim()), 400);
-  };
   return <input
     className={className}
     aria-label={ariaLabel}
     placeholder={placeholder}
     value={text}
-    onChange={e => { const v = e.target.value; setText(v); if (!composing.current) commit(v); }}
+    onChange={e => setText(e.target.value)}
     onCompositionStart={() => { composing.current = true; }}
-    onCompositionEnd={e => { composing.current = false; commit(e.currentTarget.value); }}
+    onCompositionEnd={e => { composing.current = false; setText(e.currentTarget.value); }}
+    onKeyDown={e => { if (e.key === 'Enter' && !composing.current) onSearch(text.trim()); }}
   />;
 }
