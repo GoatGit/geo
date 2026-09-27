@@ -63,7 +63,6 @@ const NAV: NavGroup[] = [
     items: [
       { href: '/surveys', label: '问卷', icon: <IconList />, exact: true },
       { href: '/surveys/pools', label: '人群库', icon: <IconPulse /> },
-      { href: '/surveys/reports', label: '调研报告', icon: <IconReport /> },
     ],
   },
   { kind: 'item', item: { href: '/reports', label: '报告中心', icon: <IconReport /> } },
