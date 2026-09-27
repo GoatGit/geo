@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm';
-import type { Page } from 'playwright-core';
+import type { Locator, Page } from 'playwright-core';
 import { chromium } from 'playwright-core';
 import type { Db } from '@geo/db';
 import { accountProfiles } from '@geo/db';
@@ -24,6 +24,34 @@ import { ProxyPoolManager } from './qg-proxy';
 import { SmsLinkClient, smsTokenFromLink } from './sms-client';
 import { envInt } from './config';
 import { browserContextOptions, verifyStoredLogin } from './browser-context';
+
+/** 跨 frame 查找:豆包登录弹窗常是嵌入 iframe,page.locator 只扫主文档会找不到。 */
+async function visibleAcrossFrames(page: Page, selector: string, timeoutMs = 1_000): Promise<Locator | null> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    for (const frame of page.frames()) {
+      const loc = frame.locator(selector).first();
+      if (await loc.isVisible().catch(() => false)) return loc;
+    }
+    if (Date.now() >= deadline) return null;
+    await page.waitForTimeout(120).catch(() => undefined);
+  }
+}
+
+/** 跨 frame 按文本/角色查找可点击元素(按钮/页签)。 */
+async function clickableTextAcrossFrames(page: Page, text: string, timeoutMs = 1_000): Promise<Locator | null> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    for (const frame of page.frames()) {
+      const byRole = frame.getByRole('button', { name: new RegExp(text) }).first();
+      if (await byRole.isVisible().catch(() => false)) return byRole;
+      const byText = frame.getByText(text, { exact: false }).first();
+      if (await byText.isVisible().catch(() => false)) return byText;
+    }
+    if (Date.now() >= deadline) return null;
+    await page.waitForTimeout(120).catch(() => undefined);
+  }
+}
 
 /** 关闭登录页常见运营弹窗(下载客户端/领订阅等):右上角×、关闭/跳过文案,再补 Escape。 */
 async function dismissPromos(page: Page): Promise<void> {
@@ -418,21 +446,14 @@ export class LoginManager {
     };
 
     const phoneInputReady = async (): Promise<boolean> => {
-      // 已切到手机号输入视图
-      const input = page.locator('input[type=tel], input[placeholder*=手机], input[id*=phone]').first();
-      return input.isVisible({ timeout: 600 }).catch(() => false);
+      return (await visibleAcrossFrames(page, 'input[type=tel], input[placeholder*=手机], input[id*=phone]', 400)) !== null;
     };
     const openPhoneInput = async () => {
       if (await phoneInputReady()) return true;
       // 登录弹窗没开就先点开,再切「手机号登录」
       if (!(await openLoginDialog())) return false;
-      for (const tab of ['手机号登录', '验证码登录']) {
-        const tabBtn = page.getByText(tab, { exact: false }).first();
-        if (await tabBtn.isVisible({ timeout: 600 }).catch(() => false)) {
-          await tabBtn.click({ timeout: 2_000 }).catch(() => undefined);
-          break;
-        }
-      }
+      const tabLoc = await clickableTextAcrossFrames(page, '手机号登录', 3_000);
+      if (tabLoc) { await tabLoc.click({ timeout: 2_000 }).catch(() => undefined); }
       return phoneInputReady();
     };
     if (!(await openPhoneInput())) throw new Error('未能打开豆包手机号登录视图');
@@ -446,23 +467,18 @@ export class LoginManager {
       await status(`第 ${round} 轮:手机号 ${phone},正在填入豆包并发送验证码…`);
 
       await page.getByText(/暂不下载|以后再说|暂不使用/).first().click({ timeout: 300 }).catch(() => undefined);
-      const input = page.locator('input[type=tel], input[placeholder*=手机], input[id*=phone]').first();
-      await input.fill('');
-      await input.type(phone, { delay: 60 });
+      const phoneLoc = await visibleAcrossFrames(page, 'input[type=tel], input[placeholder*=手机], input[id*=phone]', 3_000);
+      if (!phoneLoc) throw new Error('手机号输入框未找到(可能被弹窗遮挡)');
+      await phoneLoc.fill('');
+      await phoneLoc.type(phone, { delay: 60 });
       // 协议勾选(如可见)
-      const agree = page.locator('input[type=checkbox]:not(:checked)').first();
-      if (await agree.isVisible({ timeout: 300 }).catch(() => false)) {
-        await agree.check({ timeout: 1_000 }).catch(() => undefined);
-      }
+      const agree = await visibleAcrossFrames(page, 'input[type=checkbox]', 400);
+      if (agree) await agree.check({ timeout: 1_000 }).catch(() => undefined);
       // 发送验证码
       let sent = false;
-      for (const label of ['发送验证码', '获取验证码', '下一步']) {
-        const btn = page.getByRole('button', { name: new RegExp(label) }).first();
-        if (await btn.isVisible({ timeout: 400 }).catch(() => false)) {
-          await btn.click({ timeout: 2_000 });
-          sent = true;
-          break;
-        }
+      for (const label of ['发送验证码', '获取验证码']) {
+        const btn = await clickableTextAcrossFrames(page, label, 500);
+        if (btn) { await btn.click({ timeout: 2_000 }).catch(() => undefined); sent = true; break; }
       }
       if (!sent) throw new Error('豆包登录页未找到发送验证码按钮');
 
@@ -486,23 +502,17 @@ export class LoginManager {
       }
       await status(`验证码已收到(${code}),正在回填豆包…`);
       // 回填:优先单个验证码输入框;分格输入则点击首格后逐字键入
-      const codeInput = page.locator('input[placeholder*=验证码], input[autocomplete=one-time-code]').first();
-      if (await codeInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
-        await codeInput.fill('');
-        await codeInput.type(code, { delay: 80 });
+      const codeLoc = await visibleAcrossFrames(page, 'input[placeholder*=验证码], input[autocomplete=one-time-code], input[maxlength="4"], input[maxlength="6"]', 3_000);
+      if (codeLoc) {
+        await codeLoc.fill('');
+        await codeLoc.type(code, { delay: 80 });
       } else {
-        const firstBox = page.locator('input[maxlength="1"], input[maxlength="4"]').first();
-        await firstBox.click({ timeout: 2_000 }).catch(() => undefined);
-        await page.keyboard.type(code, { delay: 120 });
+        const anyInput = await visibleAcrossFrames(page, 'input', 2_000);
+        if (anyInput) { await anyInput.click({ timeout: 1_000 }).catch(() => undefined); await page.keyboard.type(code, { delay: 120 }); }
       }
-      // 提交登录
-      for (const label of ['登录', '提交', '下一步']) {
-        const btn = page.getByRole('button', { name: new RegExp(`^\\s*${label}`) }).first();
-        if (await btn.isVisible({ timeout: 400 }).catch(() => false)) {
-          await btn.click({ timeout: 2_000 }).catch(() => undefined);
-          break;
-        }
-      }
+      // 提交登录(精确「登录」,避免误点「手机号登录」页签)
+      const submit = await clickableTextAcrossFrames(page, '^登录$|^提交$', 2_000);
+      if (submit) await submit.click({ timeout: 2_000 }).catch(() => undefined);
       return; // 之后由既有登录验证轮询确认并保存
     }
     throw new Error('收码站多次换号仍未成功,请更换收码链接后重试');
