@@ -40,7 +40,7 @@ export class PersonaLibraryWorker {
       const localFile = process.env.PERSONA_HUB_DATA_FILE;
       if (localFile && job.sourceRevision === '72bf19b886312041b32f7cae12c02dab8653c6fa') {
         const info = await stat(localFile);
-        if (info.size > 100_000_000) throw Error('上游文件超过 100 MB 限制');
+        if (info.size > 500_000_000) throw Error('上游文件超过 500 MB 限制');
         // Verify the official Git blob, not just a filename. Local mirrors remain attributable.
         const hash = createHash('sha1').update(`blob ${info.size}\0`);
         for await (const chunk of createReadStream(localFile)) hash.update(chunk);
@@ -71,7 +71,7 @@ export class PersonaLibraryWorker {
       try {
         while (!this.stopped && processed < job.requestedCount) {
           const { value, done } = await reader.read(); if (done) { buffer += decoder.decode(); if (buffer.trim()) consume(buffer); break; }
-          bytes += value.byteLength; if (bytes > 100_000_000) throw Error('上游文件超过 100 MB 限制');
+          bytes += value.byteLength; if (bytes > 500_000_000) throw Error('上游文件超过 500 MB 限制');
           buffer += decoder.decode(value, { stream: true });
           let newline: number;
           while ((newline = buffer.indexOf('\n')) >= 0 && processed < job.requestedCount) {
