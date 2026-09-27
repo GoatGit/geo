@@ -402,36 +402,53 @@ export class LoginManager {
    * start 收取 → 轮询验证码 → 回填提交。换号(replacing)自动重走;60 秒码效期内完成。
    */
   private async autoPhoneLogin(page: Page, site: ReturnType<typeof siteConfigOf>, sms: SmsLinkClient, sessionId: string, status: (detail: string) => Promise<void>): Promise<void> {
-    // 关运营弹窗("下载豆包电脑版"等)→ 打开登录入口 → 切手机号登录
+    // 运营弹窗("下载豆包电脑版"等)只在打开登录入口前清扫——登录弹窗打开后
+    // 不能再无差别清扫:弹窗右上角 × 会被误点,把登录框关掉(批量流程卡死根因)。
     await dismissPromos(page);
-    for (const h of site.loginHints) {
-      const loc = page.locator(h).first();
-      if (await loc.isVisible({ timeout: 600 }).catch(() => false)) {
-        await loc.click({ timeout: 2_000 }).catch(() => undefined);
-        break;
+
+    const openLoginDialog = async () => {
+      for (const h of site.loginHints) {
+        const loc = page.locator(h).first();
+        if (await loc.isVisible({ timeout: 600 }).catch(() => false)) {
+          await loc.click({ timeout: 2_000 }).catch(() => undefined);
+          return true;
+        }
       }
-    }
-    await dismissPromos(page);
-    for (const tab of ['手机号登录', '验证码登录']) {
-      const tabBtn = page.getByText(tab, { exact: false }).first();
-      if (await tabBtn.isVisible({ timeout: 600 }).catch(() => false)) {
-        await tabBtn.click({ timeout: 2_000 }).catch(() => undefined);
-        break;
+      return false;
+    };
+
+    const phoneInputReady = async (): Promise<boolean> => {
+      // 已切到手机号输入视图
+      const input = page.locator('input[type=tel], input[placeholder*=手机], input[id*=phone]').first();
+      return input.isVisible({ timeout: 600 }).catch(() => false);
+    };
+    const openPhoneInput = async () => {
+      if (await phoneInputReady()) return true;
+      // 登录弹窗没开就先点开,再切「手机号登录」
+      if (!(await openLoginDialog())) return false;
+      for (const tab of ['手机号登录', '验证码登录']) {
+        const tabBtn = page.getByText(tab, { exact: false }).first();
+        if (await tabBtn.isVisible({ timeout: 600 }).catch(() => false)) {
+          await tabBtn.click({ timeout: 2_000 }).catch(() => undefined);
+          break;
+        }
       }
-    }
-    const phoneInput = page.locator('input[type=tel], input[placeholder*=手机], input[id*=phone]').first();
-    await phoneInput.waitFor({ state: 'visible', timeout: 10_000 });
+      return phoneInputReady();
+    };
+    if (!(await openPhoneInput())) throw new Error('未能打开豆包手机号登录视图');
 
     for (let round = 1; round <= 6; round++) {
-      await dismissPromos(page);
+      if (!(await phoneInputReady()) && !(await openPhoneInput())) throw new Error('登录视图丢失');
       const session = await sms.getSession();
       if (session.status === 'failed') throw new Error('收码站判定号码失败');
       const phone = session.phone;
       if (!phone) throw new Error('收码站未返回手机号');
       await status(`第 ${round} 轮:手机号 ${phone},正在填入豆包并发送验证码…`);
 
-      await phoneInput.fill('');
-      await phoneInput.type(phone, { delay: 60 });
+      await page.getByText(/暂不下载|以后再说|暂不使用/).first().click({ timeout: 300 }).catch(() => undefined);
+      const input = page.locator('input[type=tel], input[placeholder*=手机], input[id*=phone]').first();
+      await input.fill('');
+      await input.type(phone, { delay: 60 });
       // 协议勾选(如可见)
       const agree = page.locator('input[type=checkbox]:not(:checked)').first();
       if (await agree.isVisible({ timeout: 300 }).catch(() => false)) {
