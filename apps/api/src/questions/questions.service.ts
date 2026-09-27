@@ -199,6 +199,11 @@ export class QuestionsService {
 
   async list(accountId: number, brandId: number) {
     await this.planOf(brandId, accountId);
+    return this.listForBrand(brandId);
+  }
+
+  /** 示例品牌可读(0020):跳过套餐归属校验,仅返回题目列表。 */
+  async listForBrand(brandId: number) {
     const rows = await this.db
       .select()
       .from(monitoringQuestions)

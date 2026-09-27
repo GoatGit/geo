@@ -3,6 +3,8 @@ export type { SurveyQuestion, SurveySegment } from '@geo/shared';
 export interface SurveyRow {
   id: number; title: string; objective: string; status: string; questions: SurveyQuestion[];
   createdAt: string; updatedAt: string; lastError: string | null; suggestedSegments: SurveySegment[];
+  /** 示例调研(0020):全账号可见只读 */
+  isDemo?: boolean;
 }
 export interface SurveyPool {
   id: number; surveyId: number; surveyTitle?: string; size: number; approved: boolean;

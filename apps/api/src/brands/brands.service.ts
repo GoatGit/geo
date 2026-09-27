@@ -1,5 +1,5 @@
 import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, or, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import {
   brandMaterials,
@@ -134,7 +134,8 @@ export class BrandsService {
   }
 
   async list(accountId: number) {
-    return this.db.select().from(brands).where(eq(brands.accountId, accountId));
+    // 示例品牌对全部账号可见(0020):自有品牌在前,示例品牌殿后并带标记
+    return this.db.select().from(brands).where(or(eq(brands.accountId, accountId), eq(brands.isDemo, true))).orderBy(asc(brands.isDemo), asc(brands.id));
   }
 
   async getOwned(accountId: number, brandId: number) {
@@ -145,8 +146,26 @@ export class BrandsService {
         .where(and(eq(brands.id, brandId), eq(brands.accountId, accountId)))
         .limit(1)
     )[0];
-    if (!brand) throw new HttpException('品牌不存在', HttpStatus.NOT_FOUND);
+    if (!brand) {
+      // 示例品牌对本账号可见但只读:给出明确引导而非"品牌不存在"
+      const demo = (await this.db.select().from(brands).where(and(eq(brands.id, brandId), eq(brands.isDemo, true))).limit(1))[0];
+      if (demo) throw new HttpException('示例品牌为只读演示数据，不可修改', HttpStatus.FORBIDDEN);
+      throw new HttpException('品牌不存在', HttpStatus.NOT_FOUND);
+    }
     return brand;
+  }
+
+  /** 可读访问(0020):自有品牌或示例品牌;monitor 等只读端点使用。 */
+  async getReadable(accountId: number, brandId: number) {
+    const brand = (
+      await this.db
+        .select()
+        .from(brands)
+        .where(and(eq(brands.id, brandId), or(eq(brands.accountId, accountId), eq(brands.isDemo, true))))
+        .limit(1)
+    )[0];
+    if (!brand) throw new HttpException('品牌不存在', HttpStatus.NOT_FOUND);
+    return { ...brand, readOnly: brand.accountId !== accountId };
   }
 
   /**

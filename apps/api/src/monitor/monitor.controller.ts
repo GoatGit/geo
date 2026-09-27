@@ -17,6 +17,12 @@ export class MonitorController {
     await this.brandsService.getOwned(currentAccount(req).accountId, id);
   }
 
+  /** 只读访问(0020):自有品牌或示例品牌;监测类 GET 使用,写操作仍走 owned。 */
+  private async readable(req: Request, id: number) {
+    if (!Number.isInteger(id) || id <= 0) throw new BadRequestException('brand 参数非法');
+    await this.brandsService.getReadable(currentAccount(req).accountId, id);
+  }
+
   /** days 限幅 1..180:未限幅的 days=100000 会把 since 推到 1970,分区大表全范围聚合可被单请求打挂(DB DoS)。 */
   private clampDays(days: string, fallback = 7): number {
     return Math.min(Math.max(Number(days) || fallback, 1), 180);
@@ -31,7 +37,7 @@ export class MonitorController {
     @Query('engine') engine?: string,
   ) {
     const brandId = Number(brand);
-    await this.owned(req, brandId);
+    await this.readable(req, brandId);
     return this.monitorService.rankings({
       brandId,
       days: this.clampDays(days, 1),
@@ -58,7 +64,7 @@ export class MonitorController {
   @Get('funnel')
   async funnel(@Req() req: Request, @Query('brand') brand: string, @Query('days') days = '7') {
     const brandId = Number(brand);
-    await this.owned(req, brandId);
+    await this.readable(req, brandId);
     const r = await this.monitorService.rankings({ brandId, days: this.clampDays(days) });
     return { funnel: r.funnel, excluded: r.excluded, asOf: r.asOf, source: r.source };
   }
@@ -66,7 +72,7 @@ export class MonitorController {
   @Get('competitors')
   async competitors(@Req() req: Request, @Query('brand') brand: string, @Query('days') days = '7') {
     const brandId = Number(brand);
-    await this.owned(req, brandId);
+    await this.readable(req, brandId);
     return this.monitorService.competitors(brandId, this.clampDays(days));
   }
 
@@ -74,7 +80,7 @@ export class MonitorController {
   @Get('competitors/matrix')
   async competitorsMatrix(@Req() req: Request, @Query('brand') brand: string, @Query('days') days = '7') {
     const brandId = Number(brand);
-    await this.owned(req, brandId);
+    await this.readable(req, brandId);
     return this.monitorService.competitorsMatrix(brandId, this.clampDays(days));
   }
 
@@ -87,7 +93,7 @@ export class MonitorController {
     @Query('pageSize') pageSize = '20',
   ) {
     const brandId = Number(brand);
-    await this.owned(req, brandId);
+    await this.readable(req, brandId);
     const p = Math.min(Math.max(Number(page) || 1, 1), 500);
     const size = Math.min(Math.max(Number(pageSize) || 20, 5), 100);
     return this.monitorService.citations(brandId, this.clampDays(days), p, size);
@@ -96,14 +102,14 @@ export class MonitorController {
   @Get('reputation')
   async reputation(@Req() req: Request, @Query('brand') brand: string, @Query('days') days = '7') {
     const brandId = Number(brand);
-    await this.owned(req, brandId);
+    await this.readable(req, brandId);
     return this.monitorService.reputation(brandId, this.clampDays(days));
   }
 
   @Get('actions')
   async actions(@Req() req: Request, @Query('brand') brand: string, @Query('days') days = '7') {
     const brandId = Number(brand);
-    await this.owned(req, brandId);
+    await this.readable(req, brandId);
     return this.monitorService.actionList(brandId, this.clampDays(days));
   }
 }

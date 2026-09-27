@@ -34,6 +34,7 @@ import {
 interface BrandRow {
   id: number;
   name: string;
+  isDemo?: boolean;
 }
 
 type NavItem = { href: string; label: string; icon: React.ReactNode; exact?: boolean };
@@ -530,6 +531,7 @@ function BrandSwitcher() {
                 {b.name.slice(0, 1)}
               </span>
               <span className="flex-1 truncate">{b.name}</span>
+              {b.isDemo && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">示例</span>}
               {brand?.id === b.id && <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />}
             </button>
           ))}

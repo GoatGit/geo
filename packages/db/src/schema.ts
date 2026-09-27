@@ -46,6 +46,8 @@ export const brands = pgTable(
     accountId: bigint('account_id', { mode: 'number' }).notNull(),
     name: text('name').notNull(),
     industry: text('industry'),
+    /** 示例案例数据(0020):所有账号可读,写操作仅限属主 */
+    isDemo: boolean('is_demo').notNull().default(false),
     website: text('website'),
     intro: text('intro'),
     status: text('status').notNull().default('active'),
@@ -465,6 +467,8 @@ export const surveys = pgTable(
     accountId: bigint('account_id', { mode: 'number' }).notNull(),
     brandId: bigint('brand_id', { mode: 'number' }),
     title: text('title').notNull(),
+    /** 示例案例数据(0020):所有账号可读,写操作仅限属主 */
+    isDemo: boolean('is_demo').notNull().default(false),
     objective: text('objective').notNull(),
     /** draft/generating/ready_selecting/running/completed/failed */
     status: text('status').notNull().default('draft'),

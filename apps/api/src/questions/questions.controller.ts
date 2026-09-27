@@ -3,6 +3,7 @@ import { IsArray, IsIn, IsOptional, IsString, MaxLength, ValidateNested } from '
 import { Type } from 'class-transformer';
 import type { Request } from 'express';
 import { currentAccount } from '../common/auth';
+import { BrandsService } from '../brands/brands.service';
 import { QuestionsService } from './questions.service';
 
 class QuestionItemDto {
@@ -24,7 +25,10 @@ class BatchQuestionsDto {
 
 @Controller()
 export class QuestionsController {
-  constructor(private readonly questionsService: QuestionsService) {}
+  constructor(
+    private readonly questionsService: QuestionsService,
+    private readonly brandsService: BrandsService,
+  ) {}
 
   @Post('brands/:id/questions:batch')
   async batch(
@@ -41,7 +45,9 @@ export class QuestionsController {
 
   @Get('brands/:id/questions')
   async list(@Req() req: Request, @Param('id', ParseIntPipe) brandId: number) {
-    return this.questionsService.list(currentAccount(req).accountId, brandId);
+    // 示例品牌可读(0020):先过可读校验,再按品牌取题(跳过套餐归属)
+    await this.brandsService.getReadable(currentAccount(req).accountId, brandId);
+    return this.questionsService.listForBrand(brandId);
   }
 
   @Get('brands/:id/quota')

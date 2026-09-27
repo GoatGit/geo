@@ -1,5 +1,5 @@
 import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, or, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { brands, loadPlatformSettings, personaPools, personaLibrary, surveyCalibrations, type PoolSpec, personas, surveyResponses, surveys, type SurveyQuestion } from '@geo/db';
 import { InsightAgent } from '@geo/insight-agent';
@@ -80,6 +80,13 @@ export class SurveysService {
   private async ownedSurvey(accountId: number, surveyId: number, db: Database = this.db, lock = false) {
     const query = db.select().from(surveys).where(and(eq(surveys.id, surveyId), eq(surveys.accountId, accountId))).limit(1);
     const row = (await (lock ? query.for('update') : query))[0];
+    if (!row) throw new HttpException('调研不存在', HttpStatus.NOT_FOUND);
+    return row;
+  }
+
+  /** 可读访问(0020):自有调研或示例调研;报告/逐条查看等只读端点使用。 */
+  private async readableSurvey(accountId: number, surveyId: number, db: Database = this.db) {
+    const row = (await db.select().from(surveys).where(and(eq(surveys.id, surveyId), or(eq(surveys.accountId, accountId), eq(surveys.isDemo, true)))).limit(1))[0];
     if (!row) throw new HttpException('调研不存在', HttpStatus.NOT_FOUND);
     return row;
   }
@@ -213,12 +220,13 @@ export class SurveysService {
   }
 
   async list(accountId: number) {
-    const rows = await this.db.select().from(surveys).where(eq(surveys.accountId, accountId)).orderBy(desc(surveys.id)).limit(200);
+    // 示例调研(0020)对全部账号可见:自有在前,示例殿后并带标记,新用户即见完整案例
+    const rows = await this.db.select().from(surveys).where(or(eq(surveys.accountId, accountId), eq(surveys.isDemo, true))).orderBy(asc(surveys.isDemo), desc(surveys.id)).limit(200);
     return rows.map(publicSurvey);
   }
 
   async detail(accountId: number, surveyId: number) {
-    const row = await this.ownedSurvey(accountId, surveyId);
+    const row = await this.readableSurvey(accountId, surveyId);
     const pool = row.activePoolId ? (await this.db.select().from(personaPools).where(eq(personaPools.id, row.activePoolId)).limit(1))[0] : null;
     const counts = (await this.db.select({
       all: sql<number>`count(*)::int`,
@@ -261,7 +269,7 @@ export class SurveysService {
 
   /** 人群逐条查看:分页返回池内 persona 档案(确认人群前可先点名审阅)。 */
   async personaList(input: { accountId: number; surveyId: number; poolId: number; page: number; pageSize: number }) {
-    const survey = await this.ownedSurvey(input.accountId, input.surveyId);
+    const survey = await this.readableSurvey(input.accountId, input.surveyId);
     const pool = (await this.db.select().from(personaPools).where(and(eq(personaPools.id, input.poolId), eq(personaPools.surveyId, survey.id))).limit(1))[0];
     if (!pool) throw new HttpException('人群池不存在', HttpStatus.NOT_FOUND);
     const total = (await this.db.select({ n: sql<number>`count(*)::int` }).from(personas).where(eq(personas.poolId, pool.id)))[0]!.n;
@@ -277,7 +285,7 @@ export class SurveysService {
 
   /** 问卷逐条查看:分页返回每份答卷(profile + 逐题回答),供逐条阅读原文。 */
   async responseList(input: { accountId: number; surveyId: number; page: number; pageSize: number; status?: string }) {
-    const survey = await this.ownedSurvey(input.accountId, input.surveyId);
+    const survey = await this.readableSurvey(input.accountId, input.surveyId);
     const poolId = survey.activePoolId ?? -1;
     const where = and(eq(surveyResponses.surveyId, survey.id), eq(personas.poolId, poolId),
       input.status === 'completed' || input.status === 'failed' ? eq(surveyResponses.status, input.status) : undefined);

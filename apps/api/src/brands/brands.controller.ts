@@ -72,7 +72,7 @@ export class BrandsController {
 
   @Get(':id')
   get(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
-    return this.brandsService.getOwned(currentAccount(req).accountId, id);
+    return this.brandsService.getReadable(currentAccount(req).accountId, id);
   }
 
   /** 品牌资料修改(品牌资产栏目):名称/行业/官网/描述;改名同步本品识别口径。 */
