@@ -731,14 +731,14 @@ export class AdminController implements OnModuleDestroy {
   @Patch('reputation-audit/:id')
   async reputationAuditFix(@Param('id', ParseIntPipe) id: number, @Body() dto: { sentiment?: 'pos' | 'neu' | 'neg'; keep?: boolean }) {
     if (dto.keep) {
-      await this.db.execute(sql`update reputation_facts set audit_state = 'audited' where id = ${id}`);
+      await this.db.execute(sql`update reputation_facts set audit_state = 'done' where id = ${id}`);
       return { updated: true };
     }
     if (!dto.sentiment || !['pos', 'neu', 'neg'].includes(dto.sentiment)) {
       throw new HttpException('sentiment 必须是 pos/neu/neg', HttpStatus.BAD_REQUEST);
     }
     await this.db.execute(
-      sql`update reputation_facts set sentiment = ${dto.sentiment}, confidence = 1, audit_state = 'audited' where id = ${id}`,
+      sql`update reputation_facts set sentiment = ${dto.sentiment}, confidence = 1, audit_state = 'done' where id = ${id}`,
     );
     return { updated: true };
   }

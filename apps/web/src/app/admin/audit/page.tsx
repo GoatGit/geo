@@ -9,7 +9,7 @@ import { PageHeader, Skeleton } from '@/components/ui';
 /**
  * 平台后台 · 口碑抽检(docs/14 §25):低置信 LLM 判定的人工审核闭环——
  * pending 池只进不出的问题修复。审核动作:确认原判 / 纠正三分类;
- * 纠正写回 reputation_facts(audit_state=audited,confidence=1)。
+ * 纠正写回 reputation_facts(audit_state=done,confidence=1)。
  */
 
 interface AuditRow {
@@ -35,7 +35,7 @@ const SENT_LABEL: Record<string, string> = { pos: '正面', neu: '中性', neg: 
 export default function ReputationAuditPage() {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const [status, setStatus] = useState<'pending' | 'audited'>('pending');
+  const [status, setStatus] = useState<'pending' | 'done'>('pending');
   const list = useQuery({
     queryKey: ['rep-audit', status],
     queryFn: () => api<{ items: AuditRow[] }>(`/admin/reputation-audit?status=${status}`),
@@ -60,7 +60,7 @@ export default function ReputationAuditPage() {
         desc="低置信 LLM 判定的人工审核:确认原判或纠正三分类——纠正会写回口碑事实并影响口碑分析口径。"
         actions={
           <div className="flex rounded-lg border border-slate-200 bg-white p-0.5">
-            {(['pending', 'audited'] as const).map((s) => (
+            {(['pending', 'done'] as const).map((s) => (
               <button
                 key={s}
                 onClick={() => setStatus(s)}
