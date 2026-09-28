@@ -664,10 +664,19 @@ export class LoginManager {
         throw new Error(`登录视图丢失;页面文本:${snippet}`);
       }
       const session = await sms.getSession();
-      if (await stationFailed(session)) { round--; continue; }
+      // 收码站在换号进行中会拒绝请求(HTTP 409「正在换号」):稍候重试而不是整体失败
+      const smsRetry = async <T>(fn: () => Promise<T>, tries = 4): Promise<T> => {
+        let lastErr: unknown;
+        for (let i = 0; i < tries; i++) {
+          try { return await fn(); } catch (err) { lastErr = err; await page.waitForTimeout(4_000); }
+        }
+        throw lastErr;
+      };
+      const sessionSafe = await smsRetry(() => sms.getSession()).catch(() => session);
+      if (await stationFailed(sessionSafe)) { round--; continue; }
       // start 先行(发码之前):站方可能借 start 轮换号码(旧链接实测),以 start 返回的号
       // 为准填表,短信才会发进被监控的号——先发码后 start 会让短信进旧号作废(实测)
-      const started = await sms.startCollect(session.slot ?? 0);
+      const started = await smsRetry(() => sms.startCollect(session.slot ?? 0));
       if (await stationFailed(started)) { round--; continue; }
       const phone = [started.phone, session.phone].find(p => p && digits(p).length >= 11) ?? session.phone ?? started.phone ?? '';
       if (!phone) throw new Error('收码站未返回手机号');
@@ -741,12 +750,18 @@ export class LoginManager {
           // 号码被站方轮换(轮询响应的 phone 与所填号不一致)→ 本轮作废,马上重取号
           if (s.status === 'replacing' || (s.phone && digits(s.phone) !== digits(phone))) { rotated = true; break; }
         }
-        // 每 20 秒检测一次人机验证并心跳;检测到则提示操作者在画面里手动完成
+        // 每 20 秒检测一次人机验证并心跳;检测到则提示操作者在画面里手动完成,
+        // 并持续续收取窗口(站方 wait_seconds≈65s 超时自动换号,人工解题必须续命)
         if (poll > 0 && poll % 10 === 0) {
           const humanCheck = await detectHumanCheck(page);
-          if (humanCheck && !captchaNoted) {
-            captchaNoted = true;
-            await status('检测到人机验证(图形/滑块),请在下方画面手动完成,完成后自动继续收取验证码…');
+          if (humanCheck) {
+            await sms.resetTimer(slot).catch(() => undefined);
+            if (!captchaNoted) {
+              captchaNoted = true;
+              await status('检测到人机验证(图形/滑块),请在下方画面手动完成,完成后自动继续收取验证码…');
+            } else {
+              await status(`人机验证等待中(${poll * 2}s),已续收取窗口…`);
+            }
           } else {
             await status(`等待短信验证码(${poll * 2}s/${POLL_MAX * 2}s)${captchaNoted ? ',人机验证已处理' : ''}…`);
           }

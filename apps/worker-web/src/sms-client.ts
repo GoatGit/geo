@@ -66,4 +66,9 @@ export class SmsLinkClient {
   async poll(slot = 1): Promise<SmsSession> {
     return this.call<SmsSession>('/api/session/poll', { method: 'POST', json: { t: this.token, slot } });
   }
+
+  /** 续收取窗口(站方 wait_seconds≈65s 超时自动换号):人机验证等待期间调用,避免号码被轮换。 */
+  async resetTimer(slot = 1): Promise<SmsSession> {
+    return this.call<SmsSession>('/api/session/reset-timer', { method: 'POST', json: { t: this.token, slot } });
+  }
 }
