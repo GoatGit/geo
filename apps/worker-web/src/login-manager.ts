@@ -95,6 +95,48 @@ async function dismissPromos(page: Page): Promise<void> {
   await page.keyboard.press('Escape').catch(() => undefined);
 }
 
+/** 服务协议确认弹窗(元宝「服务协议及隐私保护」等):只有弹窗文案在场时才点「同意」,
+ *  避免误点登录表单里同名的协议链接;点击后复核弹窗真的关闭(实测可能重弹/多实例),
+ *  仍在场则再点;点掉后调用方需补一次发码(弹窗会拦住发送按钮)。 */
+async function acceptAgreementDialog(page: Page): Promise<boolean> {
+  let clicked = false;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let acted = false;
+    for (const frame of page.frames()) {
+      const gate = frame.getByText(/服务协议及隐私|服务协议和隐私|阅读并同意.*(用户服务协议|服务协议)/).first();
+      if (!(await rendered(gate))) continue;
+      for (const label of ['同意', '同意并继续', '接受并继续']) {
+        const btn = frame.getByRole('button', { name: label }).first();
+        if (await rendered(btn)) {
+          await btn.click({ force: true, timeout: 2_000 }).catch(() => undefined);
+          acted = true;
+          break;
+        }
+        const txt = frame.getByText(label, { exact: true }).first();
+        if (await rendered(txt)) {
+          await txt.click({ force: true, timeout: 2_000 }).catch(() => undefined);
+          acted = true;
+          break;
+        }
+      }
+      if (acted) break;
+    }
+    if (!acted) return clicked;
+    clicked = true;
+    await page.waitForTimeout(600); // 关闭动画;弹窗仍在场(重弹)则下一轮再点
+  }
+  return clicked;
+}
+
+/** 人机验证检测(图形/滑块):命中常见验证 iframe 或页面提示文案。 */
+async function detectHumanCheck(page: Page): Promise<boolean> {
+  if (await visibleAcrossFrames(page, 'iframe[src*=captcha], iframe[src*=verify], iframe[src*=geetest], iframe[src*=dingxiang], iframe[title*="验证"]', 300)) return true;
+  for (const mark of ['拖动滑块', '拖动下方滑块', '安全验证', '图形验证', '完成拼图']) {
+    if (await clickableTextAcrossFrames(page, mark, 120)) return true;
+  }
+  return false;
+}
+
 /** 人工登录等待窗口:操作者扫码/验证码在此时间内完成,超时置 timeout 可重试。
  *  10 分钟起步:扫码后常要切换手机 App 再确认,窗口太短会"刚扫完就关"(可用 LOGIN_TIMEOUT_MS 覆盖)。 */
 const LOGIN_TIMEOUT_MS = envInt('LOGIN_TIMEOUT_MS', 600_000, 30_000, 1_800_000);
@@ -475,6 +517,8 @@ export class LoginManager {
     // 运营弹窗("下载豆包电脑版"等)只在打开登录入口前清扫——登录弹窗打开后
     // 不能再无差别清扫:弹窗右上角 × 会被误点,把登录框关掉(批量流程卡死根因)。
     await dismissPromos(page);
+    // 服务协议弹窗(元宝实测)会盖住登录框,先点掉
+    await acceptAgreementDialog(page);
 
 
     const loginDialogOpen = async (): Promise<boolean> => {
@@ -522,6 +566,8 @@ export class LoginManager {
       // 登录弹窗没开就先点开(deepseek 表单直出会跳过)
       await openLoginDialog();
       for (const retry of [1, 2]) {
+        // 协议弹窗可能盖住页签/输入框(元宝实测),每轮重试前先点掉
+        await acceptAgreementDialog(page);
         for (const tabText of SMS_TABS[site.engine] ?? ['手机号登录', '验证码登录']) {
           // css 选择器('[' 开头)走渲染查找 + force 直点(文心 switch-item 普通点击被遮挡);
           // 否则精确文本优先(页签常与相邻文案同容器,模糊匹配点到容器不触发)
@@ -554,7 +600,7 @@ export class LoginManager {
       // 现场诊断:失败时把各 frame URL 与页面可见文本摘要写进错误,后台状态行直接可读
       const frameUrls = page.frames().map(f => f.url().slice(0, 60)).join(' | ');
       const snippet = await page.evaluate("(() => (document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 200))()").catch(() => '(读取失败)');
-      throw new Error(`未能打开豆包手机号登录视图;frames=[${frameUrls}];页面文本:${snippet}`);
+      throw new Error(`未能打开${site.displayName}手机号登录视图;frames=[${frameUrls}];页面文本:${snippet}`);
     }
 
     for (let round = 1; round <= 6; round++) {
@@ -566,7 +612,7 @@ export class LoginManager {
       if (session.status === 'failed') throw new Error('收码站判定号码失败');
       const phone = session.phone;
       if (!phone) throw new Error('收码站未返回手机号');
-      await status(`第 ${round} 轮:手机号 ${phone},正在填入豆包并发送验证码…`);
+      await status(`第 ${round} 轮:手机号 ${phone},正在填入${site.displayName}并发送验证码…`);
 
       await page.getByText(/暂不下载|以后再说|暂不使用/).first().click({ timeout: 300 }).catch(() => undefined);
       const phoneLoc = await visibleAcrossFrames(page, exactFields.phone || 'input[type=tel], input[placeholder*=手机], input[id*=phone]', 3_000);
@@ -585,37 +631,54 @@ export class LoginManager {
       }
       // 发送验证码:文心按钮需 id 直点(文本匹配受容器影响);其余按引擎文案排序
       const sendLabels = site.engine === 'doubao' ? ['下一步', '发送验证码', '获取验证码'] : ['获取验证码', '发送验证码', '获取短信验证码', '下一步'];
-      let sent = false;
-      if (site.engine === 'wenxin') {
-        const btn = await visibleAcrossFrames(page, '[id*=smsTimer]', 2_000);
-        if (btn) { await btn.click({ force: true }).catch(() => undefined); sent = true; }
-      }
-      for (const label of sendLabels) {
-        if (sent) break;
-        const btn = await clickableTextAcrossFrames(page, label, 800);
-        if (btn) { await btn.click({ timeout: 2_000, force: true }).catch(() => undefined); sent = true; break; }
-      }
-      if (!sent) throw new Error(`${site.displayName}登录页未找到发送验证码按钮`);
+      const clickSend = async (): Promise<boolean> => {
+        if (site.engine === 'wenxin') {
+          const btn = await visibleAcrossFrames(page, '[id*=smsTimer]', 2_000);
+          if (btn) { await btn.click({ force: true }).catch(() => undefined); return true; }
+        }
+        for (const label of sendLabels) {
+          const btn = await clickableTextAcrossFrames(page, label, 800);
+          if (btn) { await btn.click({ timeout: 2_000, force: true }).catch(() => undefined); return true; }
+        }
+        return false;
+      };
+      if (!(await clickSend())) throw new Error(`${site.displayName}登录页未找到发送验证码按钮`);
+      // 元宝实测:发码瞬间弹「服务协议及隐私保护」拦住发送,点同意后补一次发送
+      if (await acceptAgreementDialog(page)) await clickSend();
 
-      // 开始收取并轮询验证码(约 90 秒,豆包码效 60 秒)
+      // 开始收取并轮询验证码:窗口 5 分钟——画面弹图形/滑块验证码时操作者在 viewer
+      // 里人工处理(DeepSeek 实测人工解验证码远超 90 秒),期间心跳同步进度到状态行。
       let slot = session.slot ?? 0;
       await sms.startCollect(slot);
       let code: string | null = null;
       let replaced = false;
-      for (let poll = 0; poll < 45; poll++) {
+      let captchaNoted = false;
+      const POLL_MAX = 150; // 150 × 2s
+      for (let poll = 0; poll < POLL_MAX; poll++) {
         await page.waitForTimeout(2_000);
         const s = await sms.poll(slot).catch(() => null);
-        if (!s) continue;
-        slot = s.slot ?? slot;
-        if (s.status === 'completed' && s.code) { code = s.code; break; }
-        if (s.status === 'replacing') { replaced = true; continue; }
-        if (s.status === 'failed') break;
+        if (s) {
+          slot = s.slot ?? slot;
+          if (s.status === 'completed' && s.code) { code = s.code; break; }
+          if (s.status === 'replacing') { replaced = true; continue; }
+          if (s.status === 'failed') break;
+        }
+        // 每 20 秒检测一次人机验证并心跳;检测到则提示操作者在画面里手动完成
+        if (poll > 0 && poll % 10 === 0) {
+          const humanCheck = await detectHumanCheck(page);
+          if (humanCheck && !captchaNoted) {
+            captchaNoted = true;
+            await status('检测到人机验证(图形/滑块),请在下方画面手动完成,完成后自动继续收取验证码…');
+          } else {
+            await status(`等待短信验证码(${poll * 2}s/${POLL_MAX * 2}s)${captchaNoted ? ',人机验证已处理' : ''}…`);
+          }
+        }
       }
       if (!code) {
         if (replaced) { await status('收码站已自动换号,用新号码重走流程…'); continue; }
-        throw new Error('90 秒内未收到验证码');
+        throw new Error(`5 分钟内未收到验证码${captchaNoted ? '(人机验证可能未完成,重试时请在画面中手动完成验证)' : ''}`);
       }
-      await status(`验证码已收到(${code}),正在回填豆包…`);
+      await status(`验证码已收到(${code}),正在回填${site.displayName}…`);
       // 回填:优先单个验证码输入框;分格输入则点击首格后逐字键入
       const codeLoc = await visibleAcrossFrames(page, exactFields.code || 'input[placeholder*=验证码], input[autocomplete=one-time-code], input[type=number], input[maxlength="4"], input[maxlength="6"]', 3_000);
       if (codeLoc) {
