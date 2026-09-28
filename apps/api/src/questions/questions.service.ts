@@ -2,8 +2,10 @@ import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Redis } from 'ioredis';
-import { brands, collectionPlans, loadPlatformSettings, monitoringQuestions, recognitionEntries, subscriptions } from '@geo/db';
-import { PLAN_LIMITS, INSIGHT_QUESTION_LAYERS, type PlanTier, type QuestionType } from '@geo/shared';
+import {
+  orders, brands, collectionPlans, loadPlatformSettings, monitoringQuestions, recognitionEntries, subscriptions } from '@geo/db';
+import {
+  BOOSTER_PACK, PLAN_LIMITS, INSIGHT_QUESTION_LAYERS, type PlanTier, type QuestionType } from '@geo/shared';
 import { InsightAgent } from '@geo/insight-agent';
 import { DB, REDIS } from '../common/infra.module';
 
@@ -50,12 +52,21 @@ export class QuestionsService {
     const expired = sub.periodEnd !== null && sub.periodEnd.getTime() <= Date.now();
     const plan: PlanTier = expired ? 'free' : (sub.plan as PlanTier);
     const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS.free;
+    // 资源包加额(docs/02 §7.3):已支付 pack 订单数 × 单包额度,叠加在套餐配额之上
+    const packs = await this.db
+      .select({ id: orders.id })
+      .from(orders)
+      .where(and(eq(orders.accountId, sub.accountId), eq(orders.status, 'paid'), eq(orders.product, 'pack')));
+    const base = (expired
+      ? { ranking: limits.rankingQuota, reputation: limits.reputationQuota }
+      : (sub.questionQuota as { ranking: number; reputation: number }));
     return {
       plan,
       limits,
-      quotas: expired
-        ? { ranking: limits.rankingQuota, reputation: limits.reputationQuota }
-        : (sub.questionQuota as { ranking: number; reputation: number }),
+      quotas: {
+        ranking: base.ranking + packs.length * BOOSTER_PACK.extraRankingQuota,
+        reputation: base.reputation + packs.length * BOOSTER_PACK.extraReputationQuota,
+      },
       brandName: (
         await this.db.select({ name: brands.name }).from(brands).where(eq(brands.id, brandId)).limit(1)
       )[0]?.name ?? '',
@@ -189,11 +200,12 @@ export class QuestionsService {
   }
 
   async quotaOf(accountId: number, brandId: number) {
-    const { plan, limits } = await this.planOf(brandId, accountId);
+    const { plan, quotas } = await this.planOf(brandId, accountId);
     return {
       plan,
-      ranking: { used: await this.used(brandId, 'ranking'), limit: limits.rankingQuota },
-      reputation: { used: await this.used(brandId, 'reputation'), limit: limits.reputationQuota },
+      // quotas 已含资源包加额(planOf 内叠加)
+      ranking: { used: await this.used(brandId, 'ranking'), limit: quotas.ranking },
+      reputation: { used: await this.used(brandId, 'reputation'), limit: quotas.reputation },
     };
   }
 

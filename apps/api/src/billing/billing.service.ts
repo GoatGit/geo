@@ -123,11 +123,22 @@ export class BillingService {
       .where(eq(creditLedger.accountId, accountId))
       .orderBy(desc(creditLedger.createdAt))
       .limit(1);
+    // 资源包汇总(已支付):数量 × 单包加额 = 可用加额池(docs/02 §7.3)
+    const packs = await this.db
+      .select({ id: orders.id, paidAt: orders.paidAt })
+      .from(orders)
+      .where(and(eq(orders.accountId, accountId), eq(orders.status, 'paid'), eq(orders.product, 'pack')));
     return {
       plan: membership.plan,
       planLabel: PLAN_LABELS[membership.plan],
       expiresAt: membership.expiresAt,
       credits: ledger[0]?.balanceAfter ?? 0,
+      packs: {
+        purchased: packs.length,
+        extraRanking: packs.length * BOOSTER_PACK.extraRankingQuota,
+        extraReputation: packs.length * BOOSTER_PACK.extraReputationQuota,
+        latestPaidAt: packs[0]?.paidAt ?? null,
+      },
       subscriptions: subs.map((s) => ({
         brandId: s.brandId,
         plan: s.plan as PlanTier,

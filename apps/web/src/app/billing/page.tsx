@@ -33,6 +33,7 @@ interface SubscriptionDto {
   planLabel: string;
   expiresAt: string | null;
   credits: number;
+  packs?: { purchased: number; extraRanking: number; extraReputation: number; latestPaidAt: string | null };
   subscriptions: Array<{ brandId: number; plan: PlanTier; periodEnd: string | null; status: string }>;
 }
 
@@ -152,6 +153,14 @@ export default function BillingPage() {
             <span className="text-xs text-slate-500">
               会员有效期至 <b className="metric-num text-slate-700">{fmt(subscription.data.expiresAt)}</b> · 积分余额{' '}
               <b className="metric-num text-slate-700">{subscription.data.credits}</b>
+              {subscription.data.packs && subscription.data.packs.purchased > 0 && (
+                <>
+                  {' '}· <span className="whitespace-nowrap text-brand-700">
+                    资源包 ×{subscription.data.packs.purchased}(加额 排名 +{subscription.data.packs.extraRanking} / 口碑 +
+                    {subscription.data.packs.extraReputation})
+                  </span>
+                </>
+              )}
             </span>
           ) : undefined
         }

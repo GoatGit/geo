@@ -397,4 +397,7 @@ export const BOOSTER_PACK = {
   plan: 'starter' as PlanTier,
   days: 30,
   perks: ['排名词 8 + 口碑词 2', '网页端 5 引擎全开', '一次性报告(报告中心随时生成)'],
+  /** 单包加额(叠加购买叠加):配额执行点在问题配置页校验时叠加 */
+  extraRankingQuota: 8,
+  extraReputationQuota: 2,
 } as const;
