@@ -577,6 +577,15 @@ export class AdminController implements OnModuleDestroy {
     return { assigned: assignments.length, unassignedCount: unassigned.length, assignments, unassigned };
   }
 
+  /** 诊断(0021):按档案查最近登录会话与状态详情(页面刷新后 sessionId 丢失时的恢复入口)。 */
+  @Get('accounts/:id/login-session')
+  async loginSessionByProfile(@Param('id', ParseIntPipe) id: number) {
+    const sessionId = await this.redis.get(loginProfileKey(id));
+    if (!sessionId) return { sessionId: null, status: null };
+    const status = await this.redis.get(loginStatusKey(sessionId));
+    return { sessionId, status: status ? JSON.parse(status) : null };
+  }
+
   /** 登录会话状态轮询(queued/running/done/timeout/error/cancelled;viewer=true 时展示实时画面)。 */
   @Get('login/:sessionId')
   async loginStatus(@Param('sessionId') sessionId: string) {
