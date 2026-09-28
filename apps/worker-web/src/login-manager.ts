@@ -464,13 +464,13 @@ export class LoginManager {
     if (!(await openPhoneInput())) {
       // 现场诊断:失败时把各 frame URL 与页面可见文本摘要写进错误,后台状态行直接可读
       const frameUrls = page.frames().map(f => f.url().slice(0, 60)).join(' | ');
-      const snippet = await page.evaluate(() => (document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 200)).catch(() => '(读取失败)');
+      const snippet = await page.evaluate("(() => (document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 200))()").catch(() => '(读取失败)');
       throw new Error(`未能打开豆包手机号登录视图;frames=[${frameUrls}];页面文本:${snippet}`);
     }
 
     for (let round = 1; round <= 6; round++) {
       if (!(await phoneInputReady()) && !(await openPhoneInput())) {
-        const snippet = await page.evaluate(() => (document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 150)).catch(() => '(读取失败)');
+        const snippet = await page.evaluate("(() => (document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 150))()").catch(() => '(读取失败)');
         throw new Error(`登录视图丢失;页面文本:${snippet}`);
       }
       const session = await sms.getSession();
