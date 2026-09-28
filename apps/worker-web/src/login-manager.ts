@@ -70,10 +70,16 @@ async function clickableTextAcrossFrames(page: Page, text: string, timeoutMs = 1
   }
 }
 
-/** React 受控输入:force 聚焦 + locator 级真实键盘(CDP)——evaluate 注入 value 会被重渲染清空(文心实测)。 */
+/** React 受控输入:force 聚焦 + locator 级真实键盘(CDP)。
+ *  重填(换号/补发重走)必须先真正清空:React 受控状态持旧值,直接补打会拼成双号
+ *  (DeepSeek 实测「手机号码格式不正确」)。注意字符串形式的 locator.evaluate
+ *  ('el => …')实测从不执行(playwright 不做元素绑定,静默返回 undefined),
+ *  清空一律走 fill('')(内部原生 setter + input 事件),再全选退格兜底。 */
 async function typeIntoField(page: Page, loc: Locator, value: string, delayMs = 60): Promise<void> {
-  await loc.evaluate("el => { el.value = ''; }").catch(() => undefined);
   await loc.click({ force: true }).catch(() => undefined);
+  await loc.fill('', { force: true }).catch(() => undefined);
+  await page.keyboard.press('ControlOrMeta+a').catch(() => undefined);
+  await page.keyboard.press('Backspace').catch(() => undefined);
   await loc.pressSequentially(value, { delay: delayMs }).catch(async () => {
     await page.keyboard.type(value, { delay: delayMs });
   });
@@ -615,28 +621,66 @@ export class LoginManager {
     // 收码站换号(replacing)后新号码重新获得补发机会。
     const autoDeadline = Date.now() + 480_000;
     const resentPhones = new Set<string>();
-    // 同一号码只调一次 startCollect:实测对同一 slot 重复 start 会触发收码站换号,
-    // 旧号收到的短信随即作废(DeepSeek 直播调试发现,轮询能看到 phone/attempt 变化)
-    const startedPhones = new Set<string>();
+    const digits = (v: string) => v.replace(/\D/g, '');
+    const stationFailed = async (st: { status: string; attempt?: number; max_attempts?: number }): Promise<boolean> => {
+      if (st.status !== 'failed') return false;
+      // 次数未用尽时站方会自动换号(实测 attempt 2→3 自轮换):等新号到手重走,
+      // 而不是直接报错;次数用尽才是真死链接
+      if ((st.attempt ?? 0) < (st.max_attempts ?? 1) && Date.now() < autoDeadline - 60_000) {
+        await status(`收码站判定号码失败(${st.attempt ?? '?'}/${st.max_attempts ?? '?'}),等待站方换号后重取…`);
+        await page.waitForTimeout(20_000);
+        return true;
+      }
+      throw new Error(`收码站判定号码失败(次数已用尽 ${st.attempt ?? '?'}/${st.max_attempts ?? '?'}),请更换收码链接`);
+    };
+    // 回填验证码并提交:号码+验证码都重填(换号/抢救旧码时表单可能不一致);
+    // 点后确认表单消失,没消失补点/回车兜底(生产实测:静默失败会停在回填后的页面)
+    const submitCode = async (phone: string, code: string): Promise<void> => {
+      await status(`验证码已收到(${code}),正在回填${site.displayName}…`);
+      const phoneLoc = await visibleAcrossFrames(page, exactFields.phone || 'input[type=tel], input[placeholder*=手机], input[id*=phone]', 3_000);
+      if (phoneLoc) await typeIntoField(page, phoneLoc, phone, 60);
+      const codeLoc = await visibleAcrossFrames(page, exactFields.code || 'input[placeholder*=验证码], input[autocomplete=one-time-code], input[type=number], input[maxlength="4"], input[maxlength="6"]', 3_000);
+      if (codeLoc) {
+        await typeIntoField(page, codeLoc, code, 80);
+      } else {
+        const anyInput = await visibleAcrossFrames(page, 'input', 2_000);
+        if (anyInput) { await anyInput.click({ force: true }).catch(() => undefined); await page.keyboard.type(code, { delay: 120 }); }
+      }
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const submit = await clickableTextAcrossFrames(page, '^登录$|^提交$|^确定$', 2_000);
+        if (submit) await submit.click({ timeout: 2_000, force: true }).catch(() => undefined);
+        let formGone = false;
+        for (let i = 0; i < 8; i++) {
+          await page.waitForTimeout(500);
+          if (!(await phoneInputReady())) { formGone = true; break; }
+        }
+        if (formGone) { await status('已提交登录,等待登录态确认…'); break; }
+        if (attempt === 1) await page.keyboard.press('Enter').catch(() => undefined);
+      }
+    };
     for (let round = 1; round <= 6 && Date.now() < autoDeadline; round++) {
       if (!(await phoneInputReady()) && !(await openPhoneInput())) {
         const snippet = await page.evaluate("(() => (document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 150))()").catch(() => '(读取失败)');
         throw new Error(`登录视图丢失;页面文本:${snippet}`);
       }
       const session = await sms.getSession();
-      if (session.status === 'failed') {
-        // 次数未用尽时站方会自动换号(实测 attempt 2→3 自轮换):等新号到手重走,
-        // 而不是直接报错;次数用尽才是真死链接
-        if ((session.attempt ?? 0) < (session.max_attempts ?? 1) && Date.now() < autoDeadline - 60_000) {
-          await status(`收码站判定号码失败(${session.attempt ?? '?'}/${session.max_attempts ?? '?'}),等待站方换号后重取…`);
-          await page.waitForTimeout(20_000);
-          round--;
-          continue;
-        }
-        throw new Error(`收码站判定号码失败(次数已用尽 ${session.attempt ?? '?'}/${session.max_attempts ?? '?'}),请更换收码链接`);
-      }
-      const phone = session.phone;
+      if (await stationFailed(session)) { round--; continue; }
+      // start 先行(发码之前):站方可能借 start 轮换号码(旧链接实测),以 start 返回的号
+      // 为准填表,短信才会发进被监控的号——先发码后 start 会让短信进旧号作废(实测)
+      const started = await sms.startCollect(session.slot ?? 0);
+      if (await stationFailed(started)) { round--; continue; }
+      const phone = [started.phone, session.phone].find(p => p && digits(p).length >= 11) ?? session.phone ?? started.phone ?? '';
       if (!phone) throw new Error('收码站未返回手机号');
+      const slot = session.slot ?? 0;
+      // 抢救已有验证码:上一轮发出、站方已收到的码(completed+code)在效期内直接回填,
+      // 不再重发(实测:发码成功但流程误判换号时,码就躺在站里白白过期)
+      if (started.status === 'completed' && started.code) {
+        await submitCode(phone, started.code);
+        const { loggedIn } = await checkLogin(page, site).catch(() => ({ loggedIn: false }));
+        if (loggedIn === true) return;
+        await status('站内已有验证码回填未通过(可能已过期),重新取号发送…');
+        continue;
+      }
       await status(`第 ${round} 轮:手机号 ${phone},正在填入${site.displayName}并发送验证码…`);
 
       await page.getByText(/暂不下载|以后再说|暂不使用/).first().click({ timeout: 300 }).catch(() => undefined);
@@ -670,17 +714,20 @@ export class LoginManager {
         }
         return false;
       };
-      if (!(await clickSend())) throw new Error(`${site.displayName}登录页未找到发送验证码按钮`);
+      if (!(await clickSend())) {
+        // 倒计时态(码已在发送中/上一轮已点过):按钮文案是「X 秒后可再次获取」,
+        // 没有可点的发送按钮——视作已发送,直接进入收码轮询
+        let counting = false;
+        for (const frame of page.frames()) {
+          if (await rendered(frame.getByText(/秒后.{0,4}(获取|发送)|重新获取|重新发送/).first())) { counting = true; break; }
+        }
+        if (!counting) throw new Error(`${site.displayName}登录页未找到发送验证码按钮`);
+      }
       // 元宝实测:发码瞬间弹「服务协议及隐私保护」拦住发送,点同意后补一次发送
       if (await acceptAgreementDialog(page)) await clickSend();
 
-      // 开始收取并轮询验证码:窗口 5 分钟——画面弹图形/滑块验证码时操作者在 viewer
-      // 里人工处理(DeepSeek 实测人工解验证码远超 90 秒),期间心跳同步进度到状态行。
-      let slot = session.slot ?? 0;
-      if (!startedPhones.has(phone)) {
-        startedPhones.add(phone);
-        await sms.startCollect(slot);
-      }
+      // 收取并轮询验证码(start 已在轮首完成):窗口 5 分钟——画面弹图形/滑块验证码时
+      // 操作者在 viewer 里人工处理(DeepSeek 实测人工解验证码远超 90 秒),心跳同步进度。
       let code: string | null = null;
       let rotated = false; // 收码站换号(replacing 或号码变化):旧号短信作废,立即换新号重走
       let captchaNoted = false;
@@ -689,11 +736,10 @@ export class LoginManager {
         await page.waitForTimeout(2_000);
         const s = await sms.poll(slot).catch(() => null);
         if (s) {
-          slot = s.slot ?? slot;
           if (s.status === 'completed' && s.code) { code = s.code; break; }
           if (s.status === 'failed') break;
           // 号码被站方轮换(轮询响应的 phone 与所填号不一致)→ 本轮作废,马上重取号
-          if (s.status === 'replacing' || (s.phone && s.phone !== phone)) { rotated = true; break; }
+          if (s.status === 'replacing' || (s.phone && digits(s.phone) !== digits(phone))) { rotated = true; break; }
         }
         // 每 20 秒检测一次人机验证并心跳;检测到则提示操作者在画面里手动完成
         if (poll > 0 && poll % 10 === 0) {
@@ -717,31 +763,7 @@ export class LoginManager {
         }
         throw new Error(`超时未收到验证码${resentPhones.has(phone) ? '(已补发过一次)' : ''}${captchaNoted ? ',人机验证可能未完成,重试时请在画面中手动完成' : ''},请更换收码链接后重试`);
       }
-      await status(`验证码已收到(${code}),正在回填${site.displayName}…`);
-      // 回填:优先单个验证码输入框;分格输入则点击首格后逐字键入
-      const codeLoc = await visibleAcrossFrames(page, exactFields.code || 'input[placeholder*=验证码], input[autocomplete=one-time-code], input[type=number], input[maxlength="4"], input[maxlength="6"]', 3_000);
-      if (codeLoc) {
-        await typeIntoField(page, codeLoc, code, 80);
-      } else {
-        const anyInput = await visibleAcrossFrames(page, 'input', 2_000);
-        if (anyInput) { await anyInput.click({ force: true }).catch(() => undefined); await page.keyboard.type(code, { delay: 120 }); }
-      }
-      // 提交登录(精确「登录」,避免误点「手机号登录」页签);点后确认表单真的消失,
-      // 没消失补点/回车兜底(生产实测:查找落空或点击未生效会静默停在回填后的页面)
-      for (let attempt = 0; attempt < 3; attempt++) {
-        const submit = await clickableTextAcrossFrames(page, '^登录$|^提交$|^确定$', 2_000);
-        if (submit) await submit.click({ timeout: 2_000, force: true }).catch(() => undefined);
-        let formGone = false;
-        for (let i = 0; i < 8; i++) {
-          await page.waitForTimeout(500);
-          if (!(await phoneInputReady())) { formGone = true; break; }
-        }
-        if (formGone) {
-          await status('已提交登录,等待登录态确认…');
-          break;
-        }
-        if (attempt === 1) await page.keyboard.press('Enter').catch(() => undefined);
-      }
+      await submitCode(phone, code);
       return; // 之后由既有登录验证轮询确认并保存
     }
     throw new Error('自动登录预算用尽(多次换号/补发)仍未收到可用验证码,请更换收码链接后重试');

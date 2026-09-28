@@ -1,0 +1,11 @@
+import { chromium } from 'playwright-core';
+const browser = await chromium.launch({ headless: false, channel: 'chrome' });
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await page.goto('https://chat.deepseek.com/sign_in', { timeout: 60000, waitUntil: 'domcontentloaded' });
+await page.waitForTimeout(5000);
+const loc = page.locator('input[type=tel]').first();
+console.log('count =', await page.locator('input[type=tel]').count());
+console.log('tag =', await loc.evaluate('el => el.tagName').catch(e => 'ERR ' + e.message.split('\n')[0]));
+console.log('value fn =', await loc.evaluate('el => el.value').catch(e => 'ERR ' + e.message.split('\n')[0]));
+console.log('html =', await loc.evaluate('el => el.outerHTML.slice(0, 160)').catch(() => 'ERR'));
+await browser.close();
