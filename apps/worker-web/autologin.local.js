@@ -12,7 +12,7 @@ const URLS = {
 };
 const SMS_TABS = {
   doubao: ['手机号登录', '手机号', '验证码登录'],
-  wenxin: ['短信登录', '验证码登录'],
+  wenxin: ['#TANGRAM__PSP_11__changeSmsCodeItem'],
   yuanbao: ['手机', '手机号登录'],
   qwen: [],
   deepseek: [],
@@ -36,7 +36,9 @@ async function visibleAcrossFrames(page, selector, timeoutMs = 1000) {
   for (;;) {
     for (const frame of page.frames()) {
       const loc = frame.locator(selector).first();
-      if (await loc.isVisible().catch(() => false)) return loc;
+      // 原生渲染判定:百度登录弹窗(transform 缩放)会被 Playwright isVisible 误判不可见
+      const rendered = await loc.evaluate(el => !!(el.offsetParent || el.getClientRects().length)).catch(() => false);
+      if (rendered) return loc;
     }
     if (Date.now() >= deadline) return null;
     await sleep(120);
@@ -81,18 +83,38 @@ async function clickableTextAcrossFrames(page, text, timeoutMs = 1000) {
     await openDialog();
     for (const tab of SMS_TABS[engine] ?? []) {
       if (await phoneReady()) break;
-      // 先精确文本(页签常与相邻文案同容器,模糊匹配会点到容器不触发切换),再模糊
+      // 先精确文本(页签常与相邻文案同容器,模糊匹配会点到容器不触发切换),再模糊;
+      // '#' 开头视为 css 选择器直点(文心 switch-item 实测)
       let loc = null;
-      for (const f of page.frames()) {
-        const exact = f.getByText(tab, { exact: true }).first();
-        if (await exact.isVisible().catch(() => false)) { loc = exact; break; }
+      let cssForce = false;
+      if (tab.startsWith('#') || tab.startsWith('[')) {
+        loc = await visibleAcrossFrames(page, tab, 1200);
+        cssForce = true; // 文心 switch-item 实测:普通 click 被遮挡,force 直点生效
+      }
+      if (!loc) {
+        for (const f of page.frames()) {
+          const exact = f.getByText(tab, { exact: true }).first();
+          if (await exact.isVisible().catch(() => false)) { loc = exact; break; }
+        }
       }
       if (!loc) loc = await clickableTextAcrossFrames(page, tab, 1500);
-      if (loc) { await loc.click().catch(() => undefined); console.log('  切页签:', tab); }
-      for (let i = 0; i < 20 && !(await phoneReady()); i++) await sleep(300);
+      if (loc) { await loc.click(cssForce ? { force: true } : {}).catch(() => undefined); console.log('  切页签:', tab); }
+      for (let i = 0; i < 45 && !(await phoneReady()); i++) await sleep(300);
     }
   }
-  if (!(await phoneReady())) { console.log('!! 手机号输入框未出现'); await sleep(20000); await browser.close(); process.exit(1); }
+  if (!(await phoneReady())) {
+    for (const sel of ['input[placeholder*=手机]', 'input[id*=Phone]', 'input[type=tel]']) {
+      const cnt = await page.locator(sel).count().catch(() => -1);
+      const vis = await page.locator(sel).first().isVisible().catch(() => 'err');
+      console.log(`  [selector调试] ${sel} count=${cnt} firstVisible=${vis}`);
+    }
+    const st = await page.evaluate(() => {
+      const vis = (id) => { const el = document.getElementById(id); return el ? !!(el.offsetParent || el.getClientRects().length) : null; };
+      return { sms: vis('TANGRAM__PSP_11__smsPhone'), tab: vis('TANGRAM__PSP_11__changeSmsCodeItem'), pwd: vis('TANGRAM__PSP_11__password') };
+    }).catch(() => null);
+    console.log('!! 手机号输入框未出现', JSON.stringify(st));
+    await sleep(20000); await browser.close(); process.exit(1);
+  }
   console.log('  手机号输入框就绪');
 
   console.log('[3] 收码站取号…');
@@ -102,8 +124,8 @@ async function clickableTextAcrossFrames(page, text, timeoutMs = 1000) {
 
   console.log('[4] 填号 + 勾协议 + 发码…');
   const phoneLoc = await visibleAcrossFrames(page, 'input[type=tel], input[placeholder*=手机], input[id*=phone], input[id*=Phone]', 3000);
-  await phoneLoc.fill('');
-  await phoneLoc.type(sess.phone, { delay: 60 });
+  await phoneLoc.evaluate(el => { el.focus(); el.value = ''; });
+  await page.keyboard.type(sess.phone, { delay: 60 });
   const agree = await visibleAcrossFrames(page, 'input[type=checkbox]', 400);
   if (agree) { await agree.check().catch(() => undefined); console.log('  勾协议(input)'); }
   else {
@@ -137,7 +159,7 @@ async function clickableTextAcrossFrames(page, text, timeoutMs = 1000) {
 
   console.log('[6] 回填 + 提交…');
   const codeLoc = await visibleAcrossFrames(page, 'input[placeholder*=验证码], input[autocomplete=one-time-code], input[type=number], input[maxlength="4"], input[maxlength="6"]', 3000);
-  if (codeLoc) { await codeLoc.fill(''); await codeLoc.type(code, { delay: 90 }); console.log('  已填验证码(input)'); }
+  if (codeLoc) { await codeLoc.evaluate(el => { el.focus(); el.value = ''; }); await page.keyboard.type(code, { delay: 90 }); console.log('  已填验证码(input)'); }
   else {
     const any = await visibleAcrossFrames(page, 'input:visible', 1500);
     if (any) { await any.click().catch(() => undefined); await page.keyboard.type(code, { delay: 130 }); console.log('  键盘输入验证码'); }

@@ -81,12 +81,13 @@ export default function BillingPage() {
   });
   const orders = useQuery({ queryKey: ['billing-orders'], queryFn: () => api<OrderRow[]>('/billing/orders') });
 
-  // 支付中订单轮询:created 状态每 2.5s 查一次,paid 后刷新会员与账单
+  // 支付中订单轮询:created 状态每 3s 查一次(sync 端点同时向渠道对账,回调丢失兜底),
+  // paid 后刷新会员与账单并自动收起支付弹窗
   const orderPoll = useQuery({
     queryKey: ['billing-order', activeOrder?.orderId],
-    queryFn: () => api<OrderDetail>(`/billing/orders/${activeOrder!.orderId}`),
+    queryFn: () => api<OrderDetail>(`/billing/orders/${activeOrder!.orderId}/sync`),
     enabled: activeOrder !== null && activeOrder.status === 'created',
-    refetchInterval: 2500,
+    refetchInterval: 3000,
   });
   useEffect(() => {
     if (orderPoll.data && orderPoll.data.status !== activeOrder?.status) {

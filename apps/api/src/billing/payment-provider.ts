@@ -45,4 +45,6 @@ export interface PaymentProvider {
   readonly configured: boolean;
   createOrder(input: ChannelOrderInput): Promise<ChannelOrderResult>;
   verifyNotify(headers: Record<string, string>, rawBody: string, body: Record<string, unknown>): Promise<NotifyVerifyResult>;
+  /** 商户单号查单(回调兜底对账);渠道不支持时抛错。 */
+  queryOrderByOutTradeNo?(outTradeNo: string): Promise<{ tradeState: string; transactionId?: string; total?: number }>;
 }

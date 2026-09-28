@@ -49,6 +49,12 @@ export class BillingController {
     return this.billing.ordersOf(currentAccount(req).accountId);
   }
 
+  /** 订单详情:created 状态主动对账(微信查单,SUCCESS 即履约)——回调丢失兜底。 */
+  @Get('orders/:id/sync')
+  async syncOrder(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
+    return this.billing.syncFromChannel(currentAccount(req).accountId, id);
+  }
+
   @Get('orders/:id')
   async order(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
     return this.billing.orderOf(currentAccount(req).accountId, id);

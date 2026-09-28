@@ -76,6 +76,23 @@ export class WechatPayProvider implements PaymentProvider {
     return { codeUrl: String(raw.code_url), channelTradeId: null, raw };
   }
 
+  /** 商户单号查单(v3 /pay/transactions/out-trade-no):回调兜底对账用。 */
+  async queryOrderByOutTradeNo(
+    outTradeNo: string,
+  ): Promise<{ tradeState: string; transactionId?: string; total?: number }> {
+    if (!this.configured || !this.privateKey) throw new Error('wechat pay not configured');
+    const path = `/v3/pay/transactions/out-trade-no/${outTradeNo}?mchid=${this.mchId}`;
+    const res = await fetch(`${this.gateway}${path}`, {
+      headers: { authorization: this.authHeader('GET', path, ''), accept: 'application/json' },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) throw new Error(`wechat query order -> ${res.status}: ${(await res.text()).slice(0, 120)}`);
+    const data = (await res.json()) as {
+      trade_state?: string; transaction_id?: string; amount?: { total?: number };
+    };
+    return { tradeState: data.trade_state ?? 'UNKNOWN', transactionId: data.transaction_id, total: data.amount?.total };
+  }
+
   async verifyNotify(
     headers: Record<string, string>,
     rawBody: string,

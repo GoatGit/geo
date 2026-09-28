@@ -227,6 +227,28 @@ export class BillingService {
     };
   }
 
+  /**
+   * 查单对账(回调兜底):created 状态的微信订单主动向微信查询,
+   * SUCCESS 则走 settle 履约——解决 Native 回调偶发丢失导致页面不跳转/掉单。
+   * 幂等:settle 内部有 status=created 认领条件。
+   */
+  async syncFromChannel(accountId: number, orderId: number) {
+    const row = await this.orderOf(accountId, orderId);
+    if (row.status !== 'created' || row.channel === 'mock' || row.channel === 'alipay') return row;
+    const order = (await this.db.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0]!;
+    try {
+      const wx = await this.wechat.queryOrderByOutTradeNo(row.outTradeNo);
+      if (wx.tradeState === 'SUCCESS') {
+        await this.settle(order, wx.transactionId ?? null, wx.total ?? null);
+        return this.orderOf(accountId, orderId);
+      }
+    } catch (err) {
+      // 查单失败不阻塞订单查询本身
+      console.warn(`[billing] sync order ${row.outTradeNo} failed:`, (err as Error).message);
+    }
+    return row;
+  }
+
   async orderOf(accountId: number, orderId: number) {
     const row = (
       await this.db
