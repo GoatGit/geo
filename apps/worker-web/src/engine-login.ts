@@ -49,17 +49,26 @@ async function main() {
     process.exit(1);
   }
 
-  // ── 1. admin token(开发短信后门)+ 档案登录上下文 ────────────────────────────
-  const adminPhone = process.env.GEO_ADMIN_PHONE ?? '13810497490';
-  const codeResp = await fetch(`${apiBase}/api/auth/sms/code`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone: adminPhone }),
-  }).then(r => r.json()) as { devCode?: string };
-  if (!codeResp?.devCode) throw new Error(`获取 admin 登录码失败: ${JSON.stringify(codeResp)}`);
-  const authResp = await fetch(`${apiBase}/api/auth/sms/verify`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone: adminPhone, code: codeResp.devCode }),
-  }).then(r => r.json()) as { accessToken?: string };
-  if (!authResp?.accessToken) throw new Error('admin 登录失败');
-  const auth = { authorization: `Bearer ${authResp.accessToken}`, 'content-type': 'application/json' };
+  // ── 1. 鉴权:优先 GEO_SKILL_API_KEY(管理后台全局配置生成的技能 Key),
+  //      未配置时回落开发短信后门取 admin token ──────────────────────────────
+  const skillKey = (process.env.GEO_SKILL_API_KEY ?? '').trim();
+  let auth: Record<string, string>;
+  if (skillKey) {
+    auth = { 'x-api-key': skillKey, 'content-type': 'application/json' };
+    console.log('[login] 鉴权:X-API-Key(GEO_SKILL_API_KEY)');
+  } else {
+    const adminPhone = process.env.GEO_ADMIN_PHONE ?? '13810497490';
+    const codeResp = await fetch(`${apiBase}/api/auth/sms/code`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone: adminPhone }),
+    }).then(r => r.json()) as { devCode?: string };
+    if (!codeResp?.devCode) throw new Error(`获取 admin 登录码失败: ${JSON.stringify(codeResp)}`);
+    const authResp = await fetch(`${apiBase}/api/auth/sms/verify`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone: adminPhone, code: codeResp.devCode }),
+    }).then(r => r.json()) as { accessToken?: string };
+    if (!authResp?.accessToken) throw new Error('admin 登录失败');
+    auth = { authorization: `Bearer ${authResp.accessToken}`, 'content-type': 'application/json' };
+    console.log('[login] 鉴权:admin JWT(未配置 GEO_SKILL_API_KEY,建议在全局配置生成技能 Key)');
+  }
 
   const ctx = await fetch(`${apiBase}/api/admin/accounts/${profileId}/login-context`, { headers: { authorization: auth.authorization } }).then(r => r.json()) as {
     id: number; engine: string; fingerprint: Record<string, unknown>; proxyServer: string | null; contextRef: string | null; status: string;

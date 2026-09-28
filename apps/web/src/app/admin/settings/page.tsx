@@ -12,6 +12,7 @@ interface SettingsDto {
   globalDailyRunCap: number;
   engineDailyCaps: Record<string, number>;
   proxyPool: { enabled: boolean; key: string };
+  skillAccess: { key: string };
   insightAgent: InsightAgentSettings;
 }
 
@@ -57,6 +58,9 @@ export default function AdminSettingsPage() {
   const [insightKeyDirty, setInsightKeyDirty] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<InsightTestResult | null>(null);
+  // 技能 API Key:新生成后本地回显(生成接口返回完整 key),复制给智能体本机配置用
+  const [skillKeyShown, setSkillKeyShown] = useState<string | null>(null);
+  const [skillKeyMsg, setSkillKeyMsg] = useState('');
 
   const poolStatus = useQuery({
     queryKey: ['admin-proxy-pool'],
@@ -103,6 +107,31 @@ export default function AdminSettingsPage() {
       setTestResult({ ok: false, latencyMs: 0, model: '', error: (e as Error).message });
     } finally {
       setTesting(false);
+    }
+  };
+
+  // 生成/重置技能 API Key:后端 crypto 随机生成并保存,旧 Key 立即失效
+  const rotateSkillKey = async () => {
+    if (form.skillAccess.key && !confirm('重新生成后,旧 Key 立即失效,使用旧 Key 的智能体将无法访问。继续?')) return;
+    setSkillKeyMsg('');
+    try {
+      const r = await api<{ key: string }>('/admin/settings/skill-key/rotate', { method: 'POST' });
+      setSkillKeyShown(r.key);
+      setForm({ ...form, skillAccess: { key: r.key } });
+      setSkillKeyMsg('已生成,请立即复制保存');
+    } catch (e) {
+      setSkillKeyMsg((e as Error).message);
+    }
+  };
+
+  const copySkillKey = async () => {
+    const key = skillKeyShown ?? form.skillAccess.key;
+    if (!key) return;
+    try {
+      await navigator.clipboard.writeText(key);
+      setSkillKeyMsg('已复制到剪贴板');
+    } catch {
+      setSkillKeyMsg('复制失败,请手动选择复制');
     }
   };
 
@@ -298,6 +327,30 @@ export default function AdminSettingsPage() {
             注意:沙箱出口 IP 需在青果白名单内;代理 IP 到期后自动提取新 IP,届时需重新登录引擎账号。
           </p>
         </div>
+      </section>
+
+      {/* 机器接口访问:智能体登录技能等,凭 X-API-Key 调用受限端点 */}
+      <section className="card rise p-6">
+        <h2 className="mb-1 font-semibold text-slate-900">技能接口 API Key</h2>
+        <p className="mb-4 text-xs leading-5 text-slate-500">
+          本地智能体(如引擎登录技能)经 <code className="rounded bg-slate-100 px-1">X-API-Key</code> 请求头访问受限接口
+          (账号登录上下文读取、登录凭证回收)。重新生成后旧 Key 立即失效。
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <code className="metric-num rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+            {skillKeyShown ?? (form.skillAccess.key || '未生成(接口将拒绝访问)')}
+          </code>
+          <button className="btn-ghost h-9" onClick={() => void copySkillKey()} disabled={!(skillKeyShown ?? form.skillAccess.key)}>
+            复制
+          </button>
+          <button className="btn-primary h-9" onClick={() => void rotateSkillKey()} disabled={saving}>
+            {form.skillAccess.key ? '重新生成' : '自动生成'}
+          </button>
+          {skillKeyMsg && <span className="text-xs text-slate-500">{skillKeyMsg}</span>}
+        </div>
+        {skillKeyShown && (
+          <p className="mt-2 text-xs text-amber-600">新 Key 已生效,旧 Key 立即失效;请复制保存到智能体本机配置(.env.debug 的 GEO_SKILL_API_KEY)。</p>
+        )}
       </section>
 
       {/* Insight Agent:LLM 判定层(连接配置三项在 shadow/llm + enabled 时为必填,客户端仅提示不阻断) */}

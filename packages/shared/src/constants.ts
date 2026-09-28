@@ -185,6 +185,8 @@ export interface PlatformSettings {
   engineDailyCaps: Record<string, number>;
   /** 代理池(青果网络长效代理,docs/07 §13 闸门 #2):登录/采集共用稳定出口 IP */
   proxyPool: { enabled: boolean; key: string };
+  /** 机器接口访问(智能体登录技能等):X-API-Key 鉴权,管理后台全局配置生成/重置 */
+  skillAccess: { key: string };
   /** Insight Agent(docs/09):LLM 判定层(识别/口碑/分类/拓写),规则引擎为降级路径 */
   insightAgent: InsightAgentSettings;
 }
@@ -194,6 +196,7 @@ export const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
   globalDailyRunCap: 0,
   engineDailyCaps: {},
   proxyPool: { enabled: false, key: '' },
+  skillAccess: { key: '' },
   insightAgent: DEFAULT_INSIGHT_AGENT_SETTINGS,
 };
 
@@ -202,6 +205,7 @@ export const PLATFORM_SETTING_KEYS = [
   'globalDailyRunCap',
   'engineDailyCaps',
   'proxyPool',
+  'skillAccess',
   'insightAgent',
 ] as const;
 export type PlatformSettingKey = (typeof PLATFORM_SETTING_KEYS)[number];
@@ -250,6 +254,14 @@ export function mergePlatformSettings(stored: Partial<Record<string, unknown>> |
         return { enabled: bool(r.enabled, false), key: typeof r.key === 'string' ? r.key : '' };
       }
       return { enabled: false, key: '' };
+    })(),
+    skillAccess: (() => {
+      const raw = byKey.get('skillAccess');
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        const r = raw as { key?: unknown };
+        return { key: typeof r.key === 'string' ? r.key : '' };
+      }
+      return { key: '' };
     })(),
     insightAgent: (() => {
       const raw = byKey.get('insightAgent');
