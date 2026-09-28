@@ -82,6 +82,11 @@ export class BillingService {
   constructor(@Inject(DB) private readonly db: NodePgDatabase) {}
 
   /** 渠道解析:优先真实渠道;dev 未配置降级 mock;生产未配置显式失败。 */
+  /** 支付宝通道开关:ALIPAY_ENABLED=off 时显式下线(未签约期;前端同步隐藏)。 */
+  private alipayDisabled(): boolean {
+    return process.env.ALIPAY_ENABLED === 'off';
+  }
+
   private providerFor(channel: Exclude<PayChannel, 'mock'>): PaymentProvider {
     const wanted: PaymentProvider = channel === 'wechat' ? this.wechat : this.alipay;
     if (wanted.configured) return wanted;
@@ -174,6 +179,9 @@ export class BillingService {
       throw new HttpException('period 或 channel 非法', HttpStatus.BAD_REQUEST);
     }
 
+    if (input.channel === 'alipay' && this.alipayDisabled()) {
+      throw new HttpException('支付宝通道暂未开放,请使用微信支付', HttpStatus.SERVICE_UNAVAILABLE);
+    }
     const provider = this.providerFor(input.channel);
     const amountCents = isPack ? BOOSTER_PACK.priceFen : PLAN_PRICING[input.plan as Exclude<PlanTier, 'free' | 'custom' | 'booster10'>][input.period];
     // 商户单号:时间戳 + 8 位随机(微信要求 6-32 位字母数字;撞唯一约束会 500 拒绝下单)

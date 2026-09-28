@@ -68,6 +68,9 @@ const yuan = (cents: number) => (cents % 100 === 0 ? `${cents / 100}` : (cents /
 const fmt = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString('zh-CN', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 
+/** 支付宝通道开关:未签约期间构建期隐藏(build-arg NEXT_PUBLIC_ALIPAY=off)。 */
+const ALIPAY_ENABLED = process.env.NEXT_PUBLIC_ALIPAY !== 'off';
+
 export default function BillingPage() {
   const queryClient = useQueryClient();
   const [period, setPeriod] = useState<BillingPeriod>('monthly');
@@ -209,7 +212,7 @@ export default function BillingPage() {
                 <li>· {p.limits.weeklyReport ? (p.limits.monthlyReport ? '周报 + 月报' : '周报') : '—'}</li>
                 <li>· 历史留存 {p.limits.historyDays} 天 · 品牌 ×{p.limits.multiBrand}</li>
               </ul>
-              <div className="mt-5 grid grid-cols-2 gap-2">
+              <div className={`mt-5 grid gap-2 ${ALIPAY_ENABLED ? 'grid-cols-2' : 'grid-cols-1'}`}>
                 <button
                   onClick={() => purchase(p.plan, 'wechat')}
                   disabled={creating !== null}
@@ -217,6 +220,7 @@ export default function BillingPage() {
                 >
                   {creating === p.plan ? '下单中…' : '微信支付'}
                 </button>
+                {ALIPAY_ENABLED && (
                 <button
                   onClick={() => purchase(p.plan, 'alipay')}
                   disabled={creating !== null}
@@ -224,6 +228,7 @@ export default function BillingPage() {
                 >
                   支付宝
                 </button>
+                )}
               </div>
             </div>
           );
