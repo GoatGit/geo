@@ -249,25 +249,29 @@ export class LoginManager {
         const token = smsTokenFromLink(req.smsLink);
         if (!token) {
           await this.setStatus(req.sessionId, {
-            state: 'running',
-            detail: '收码链接无法解析(缺少 t= 参数),请人工完成登录。',
+            state: 'error',
+            detail: '收码链接无法解析(缺少 t= 参数)',
             viewer, updatedAt: new Date().toISOString(),
           });
-        } else {
-          const sms = new SmsLinkClient(token);
-          try {
-            await this.autoPhoneLogin(page, site, sms, req.sessionId, async detail => {
-              await this.setStatus(req.sessionId, { state: 'running', detail, viewer, updatedAt: new Date().toISOString() });
-            });
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            console.warn(`[login] session=${req.sessionId} 自动验证码登录失败:${msg}`);
-            await this.setStatus(req.sessionId, {
-              state: 'running',
-              detail: `自动验证码登录未完成(${msg});请人工完成登录,或停用后重新批量发起。`,
-              viewer, updatedAt: new Date().toISOString(),
-            });
-          }
+          await releaseSession();
+          return;
+        }
+        const sms = new SmsLinkClient(token);
+        try {
+          await this.autoPhoneLogin(page, site, sms, req.sessionId, async detail => {
+            await this.setStatus(req.sessionId, { state: 'running', detail, viewer, updatedAt: new Date().toISOString() });
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`[login] session=${req.sessionId} 自动验证码登录失败:${msg}`);
+          // 自动失败 = 立即以 error 结束会话:原因完整保留在状态行,不再回落被动等待
+          await this.setStatus(req.sessionId, {
+            state: 'error',
+            detail: `自动验证码登录失败:${msg}`,
+            viewer, updatedAt: new Date().toISOString(),
+          });
+          await releaseSession();
+          return;
         }
       }
 
