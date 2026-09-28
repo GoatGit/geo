@@ -606,6 +606,54 @@ export class AdminController implements OnModuleDestroy {
     return { sessionId, status: status ? JSON.parse(status) : null };
   }
 
+  /** 智能体登录技能(0053):读取档案登录上下文——本地智能体据此用同一指纹/出口/Context 直连远程浏览器。 */
+  @Get('accounts/:id/login-context')
+  async loginContext(@Param('id', ParseIntPipe) id: number) {
+    const profile = (await this.db.select({
+      id: accountProfiles.id,
+      engine: accountProfiles.engine,
+      fingerprint: accountProfiles.fingerprint,
+      proxyServer: accountProfiles.proxyServer,
+      proxyHint: accountProfiles.proxyHint,
+      contextRef: accountProfiles.contextRef,
+      status: accountProfiles.status,
+    }).from(accountProfiles).where(eq(accountProfiles.id, id)).limit(1))[0];
+    if (!profile) throw new NotFoundException('账号档案不存在');
+    return profile;
+  }
+
+  /**
+   * 智能体登录技能(0053):回收本地智能体远程登录导出的凭证并入池。
+   * 字段与 worker 登录成功写状态完全一致(status available + cookies/storageState +
+   * Context/出口绑定);空 Cookie 拒绝入池(采集会话注入依赖完整登录 Cookie)。
+   */
+  @Post('accounts/:id/credentials')
+  async ingestCredentials(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: {
+      storageState?: { cookies?: Array<Record<string, unknown>>; origins?: unknown[] } | null;
+      cookies?: Array<Record<string, unknown>>;
+      contextId?: string;
+      proxyServer?: string | null;
+    },
+  ) {
+    const cookies = body.storageState?.cookies?.length ? body.storageState.cookies : body.cookies ?? [];
+    if (!cookies.length) throw new BadRequestException('cookies 为空,拒绝入池(采集依赖完整登录 Cookie)');
+    const storageState = body.storageState ?? { cookies, origins: [] };
+    const profile = (await this.db.select({ id: accountProfiles.id }).from(accountProfiles).where(eq(accountProfiles.id, id)).limit(1))[0];
+    if (!profile) throw new NotFoundException('账号档案不存在');
+    await this.db.update(accountProfiles).set({
+      status: 'available',
+      cookies: cookies as unknown[],
+      storageState: storageState as typeof accountProfiles.$inferInsert.storageState,
+      ...(body.contextId ? { contextRef: body.contextId } : {}),
+      ...(body.proxyServer !== undefined ? { proxyServer: body.proxyServer } : {}),
+      cooldownUntil: null,
+      healthScore: 100,
+    }).where(eq(accountProfiles.id, id));
+    return { ok: true, profileId: id, cookies: cookies.length };
+  }
+
   /** 登录会话状态轮询(queued/running/done/timeout/error/cancelled;viewer=true 时展示实时画面)。 */
   @Get('login/:sessionId')
   async loginStatus(@Param('sessionId') sessionId: string) {
