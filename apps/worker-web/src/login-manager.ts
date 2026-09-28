@@ -438,12 +438,22 @@ export class LoginManager {
     // 不能再无差别清扫:弹窗右上角 × 会被误点,把登录框关掉(批量流程卡死根因)。
     await dismissPromos(page);
 
-    const openLoginDialog = async () => {
-      for (const h of site.loginHints) {
-        const loc = page.locator(h).first();
-        if (await loc.isVisible({ timeout: 600 }).catch(() => false)) {
-          await loc.click({ timeout: 2_000 }).catch(() => undefined);
-          return true;
+    const loginDialogOpen = async (): Promise<boolean> => {
+      // 弹窗打开的标志:登录方式选择文案出现
+      return (await clickableTextAcrossFrames(page, '扫码', 400)) !== null;
+    };
+    const openLoginDialog = async (): Promise<boolean> => {
+      // 先精确文本「登录」(本地验证通过的方式),再回落 loginHints 选择器;
+      // 每次点击后等弹窗真正出现(方法选择/扫码文案可见)
+      for (let attempt = 0; attempt < 2; attempt++) {
+        for (const cand of [page.getByText('登录', { exact: true }).first(), ...site.loginHints.map(h => page.locator(h).first())]) {
+          if (await cand.isVisible({ timeout: 400 }).catch(() => false)) {
+            await cand.click({ timeout: 2_000 }).catch(() => undefined);
+            for (let i = 0; i < 8; i++) {
+              await page.waitForTimeout(400);
+              if (await loginDialogOpen()) return true;
+            }
+          }
         }
       }
       return false;
