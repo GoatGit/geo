@@ -387,3 +387,14 @@ export const PURCHASABLE_PLANS = ['starter', 'standard', 'pro'] as const;
 
 /** 积分单价(docs/02 §7.2):¥0.1/积分,充值 100 积分起。 */
 export const CREDIT_UNIT_PRICE_FEN = 10; // 分/积分
+
+/** 一次性资源包(docs/02 §7.3):¥10 尝鲜包——starter 单月等效权益(排名词8+口碑词2,5 引擎,报告可生成)。 */
+export const BOOSTER_PACK = {
+  id: 'booster10',
+  label: '尝鲜资源包',
+  priceFen: 1000,
+  /** 激活的等效档位与时长 */
+  plan: 'starter' as PlanTier,
+  days: 30,
+  perks: ['排名词 8 + 口碑词 2', '网页端 5 引擎全开', '一次性报告(报告中心随时生成)'],
+} as const;

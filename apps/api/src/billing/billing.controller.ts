@@ -6,8 +6,9 @@ import { currentAccount, Public } from '../common/auth';
 import { BillingService } from './billing.service';
 
 class CreateOrderDto {
-  @IsIn(['starter', 'standard', 'pro'])
-  plan!: PlanTier;
+  /** 档位或一次性资源包 id(booster10) */
+  @IsIn(['starter', 'standard', 'pro', 'booster10'])
+  plan!: PlanTier | 'booster10';
 
   @IsIn(BILLING_PERIODS as unknown as string[])
   period!: BillingPeriod;

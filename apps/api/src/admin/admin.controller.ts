@@ -547,14 +547,18 @@ export class AdminController implements OnModuleDestroy {
    * 未分配到档案的链接原样返回,便于补充档案后重试。
    */
   @Post('accounts/sms-login-batch')
-  async smsLoginBatch(@Req() req: Request, @Body() body: { links?: string[] }) {
+  async smsLoginBatch(@Req() req: Request, @Body() body: { links?: string[]; engine?: string }) {
     void currentAccount(req);
+    const engine = body.engine ?? 'doubao';
+    if (!['doubao', 'deepseek', 'qwen', 'wenxin', 'yuanbao'].includes(engine)) {
+      throw new BadRequestException('不支持的引擎');
+    }
     const links = (body.links ?? []).map(l => l.trim()).filter(l => /^https?:\/\/|^sms:/.test(l));
     if (!links.length) throw new BadRequestException('请提供收码链接(每行一条)');
     const free = await this.db
       .select({ id: accountProfiles.id })
       .from(accountProfiles)
-      .where(and(eq(accountProfiles.engine, 'doubao'), eq(accountProfiles.status, 'pending_login')))
+      .where(and(eq(accountProfiles.engine, engine), eq(accountProfiles.status, 'pending_login')))
       .orderBy(asc(accountProfiles.id));
     const assignments: Array<{ link: string; profileId: number; sessionId: string }> = [];
     const unassigned: string[] = [];
@@ -572,7 +576,7 @@ export class AdminController implements OnModuleDestroy {
         const payload: LoginRequest = {
           sessionId,
           profileId: candidate,
-          engine: 'doubao',
+          engine,
           profileKey: `profile:${candidate}`,
           fingerprint: profile?.fingerprint,
           proxyHint: profile?.proxyHint,

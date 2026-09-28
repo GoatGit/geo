@@ -257,7 +257,7 @@ export class LoginManager {
       // 收码链接自动登录(0019 豆包批量登录):smsLink 存在时系统自动完成
       // 取号 → 填手机号 → 发验证码 → 收码 → 回填,完成后由下方既有轮询验证并保存。
       // 任一步失败不阻断:状态说明原因,viewer/人工通道仍在,可接管完成。
-      if (req.smsLink && req.engine === 'doubao') {
+      if (req.smsLink) {
         const token = smsTokenFromLink(req.smsLink);
         if (!token) {
           await this.setStatus(req.sessionId, {
@@ -450,9 +450,14 @@ export class LoginManager {
     // 不能再无差别清扫:弹窗右上角 × 会被误点,把登录框关掉(批量流程卡死根因)。
     await dismissPromos(page);
 
+
     const loginDialogOpen = async (): Promise<boolean> => {
-      // 弹窗打开的标志:登录方式选择文案出现
-      return (await clickableTextAcrossFrames(page, '扫码', 400)) !== null;
+      // 弹窗打开标志(引擎通用):登录方式类文案或手机号输入框出现任一即算
+      if (await phoneInputReady()) return true;
+      for (const mark of ['扫码', '短信登录', '验证码登录', '微信\\n手机']) {
+        if (await clickableTextAcrossFrames(page, mark, 300)) return true;
+      }
+      return false;
     };
     const openLoginDialog = async (): Promise<boolean> => {
       // 先精确文本「登录」(本地验证通过的方式),再回落 loginHints 选择器;
@@ -474,14 +479,21 @@ export class LoginManager {
     const phoneInputReady = async (): Promise<boolean> => {
       return (await visibleAcrossFrames(page, 'input[type=tel], input[placeholder*=手机], input[id*=phone]', 400)) !== null;
     };
+    // 引擎 → 切到手机号登录视图需点的页签文案(本地 DOM 校准,0021):
+    // deepseek /sign_in 直接是表单;qwen passport 直接呈现短信表单;doubao/wenxin/yuanbao 需切页签
+    const SMS_TABS: Record<string, string[]> = {
+      doubao: ['手机号登录', '手机号', '验证码登录'],
+      wenxin: ['短信登录', '验证码登录'],
+      yuanbao: ['手机', '手机号登录'],
+      qwen: [],
+      deepseek: [],
+    };
     const openPhoneInput = async () => {
       if (await phoneInputReady()) return true;
-      // 登录弹窗没开就先点开,再切「手机号登录」
-      if (!(await openLoginDialog())) return false;
-      // 页签匹配放宽:「手机号登录」可能是带图标的 div(非 button role),文本包含即可;
-      // 失败时再试「验证码登录」;仍失败则重开一次登录弹窗重试
+      // 登录弹窗没开就先点开(deepseek 表单直出会跳过)
+      await openLoginDialog();
       for (const retry of [1, 2]) {
-        for (const tabText of ['手机号', '验证码登录']) {
+        for (const tabText of SMS_TABS[site.engine] ?? ['手机号登录', '验证码登录']) {
           const tabLoc = await clickableTextAcrossFrames(page, tabText, 2_000);
           if (tabLoc) {
             await tabLoc.click({ timeout: 2_000 }).catch(() => undefined);
@@ -529,9 +541,10 @@ export class LoginManager {
           if (box) await page.mouse.click(box.x - 14, box.y + box.height / 2).catch(() => undefined);
         }
       }
-      // 发送验证码:豆包手机号视图先点「下一步」触发发码
+      // 发送验证码:按钮文案按引擎排序(豆包=下一步;其余=获取/发送验证码)
+      const sendLabels = site.engine === 'doubao' ? ['下一步', '发送验证码', '获取验证码'] : ['获取验证码', '发送验证码', '获取短信验证码', '下一步'];
       let sent = false;
-      for (const label of ['下一步', '发送验证码', '获取验证码']) {
+      for (const label of sendLabels) {
         const btn = await clickableTextAcrossFrames(page, label, 500);
         if (btn) { await btn.click({ timeout: 2_000 }).catch(() => undefined); sent = true; break; }
       }
@@ -557,7 +570,7 @@ export class LoginManager {
       }
       await status(`验证码已收到(${code}),正在回填豆包…`);
       // 回填:优先单个验证码输入框;分格输入则点击首格后逐字键入
-      const codeLoc = await visibleAcrossFrames(page, 'input[placeholder*=验证码], input[autocomplete=one-time-code], input[maxlength="4"], input[maxlength="6"]', 3_000);
+      const codeLoc = await visibleAcrossFrames(page, 'input[placeholder*=验证码], input[autocomplete=one-time-code], input[type=number], input[maxlength="4"], input[maxlength="6"]', 3_000);
       if (codeLoc) {
         await codeLoc.fill('');
         await codeLoc.type(code, { delay: 80 });

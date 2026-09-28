@@ -6,6 +6,7 @@ import QRCode from 'qrcode';
 import { creditLedger, collectionPlans, orders, subscriptions } from '@geo/db';
 import {
   BILLING_PERIODS,
+  BOOSTER_PACK,
   PLAN_LABELS,
   PLAN_LIMITS,
   PLAN_PRICING,
@@ -152,17 +153,18 @@ export class BillingService {
 
   async createOrder(
     accountId: number,
-    input: { plan: PlanTier; period: BillingPeriod; channel: Exclude<PayChannel, 'mock'> },
+    input: { plan: PlanTier | (typeof BOOSTER_PACK)['id']; period: BillingPeriod; channel: Exclude<PayChannel, 'mock'> },
   ) {
-    if (!PURCHASABLE_PLANS.includes(input.plan as (typeof PURCHASABLE_PLANS)[number])) {
+    const isPack = input.plan === BOOSTER_PACK.id;
+    if (!isPack && !PURCHASABLE_PLANS.includes(input.plan as (typeof PURCHASABLE_PLANS)[number])) {
       throw new HttpException(`档位不可购买: ${input.plan}`, HttpStatus.BAD_REQUEST);
     }
-    if (!BILLING_PERIODS.includes(input.period) || (input.channel as string) === 'mock') {
+    if ((input.channel as string) === 'mock' || (!isPack && !BILLING_PERIODS.includes(input.period))) {
       throw new HttpException('period 或 channel 非法', HttpStatus.BAD_REQUEST);
     }
 
     const provider = this.providerFor(input.channel);
-    const amountCents = PLAN_PRICING[input.plan as Exclude<PlanTier, 'free' | 'custom'>][input.period];
+    const amountCents = isPack ? BOOSTER_PACK.priceFen : PLAN_PRICING[input.plan as Exclude<PlanTier, 'free' | 'custom' | 'booster10'>][input.period];
     // 商户单号:时间戳 + 8 位随机(微信要求 6-32 位字母数字;撞唯一约束会 500 拒绝下单)
     const outTradeNo = `GL${Date.now()}${randomUUID().replace(/-/g, '').slice(0, 8)}`;
     const expireAt = new Date(Date.now() + 2 * 3600 * 1000);
@@ -172,7 +174,9 @@ export class BillingService {
     const channelOrder = await provider.createOrder({
       outTradeNo,
       amountCents,
-      subject: `格尺GEO ${PLAN_LABELS[input.plan]}会员 · ${input.period === 'yearly' ? '年付' : '月付'}`,
+      subject: isPack
+        ? `格尺GEO ${BOOSTER_PACK.label}`
+        : `格尺GEO ${PLAN_LABELS[input.plan as PlanTier]}会员 · ${input.period === 'yearly' ? '年付' : '月付'}`,
       notifyUrl: provider.channel === 'mock' || !notifyBase ? undefined : `${notifyBase}/${provider.channel}`,
       returnUrl:
         input.channel === 'alipay' && notifyBase
@@ -188,9 +192,9 @@ export class BillingService {
         .values({
           outTradeNo,
           accountId,
-          product: 'plan',
-          plan: input.plan,
-          period: input.period,
+          product: isPack ? 'pack' : 'plan',
+          plan: isPack ? BOOSTER_PACK.plan : input.plan,
+          period: isPack ? 'monthly' : input.period,
           channel: provider.channel,
           amountCents,
           status: 'created',
@@ -208,8 +212,9 @@ export class BillingService {
     return {
       orderId: row.id,
       outTradeNo,
-      plan: input.plan,
-      planLabel: PLAN_LABELS[input.plan] ?? input.plan,
+      plan: row.plan,
+      ...(isPack ? { pack: BOOSTER_PACK.id, packLabel: BOOSTER_PACK.label } : {}),
+      planLabel: isPack ? BOOSTER_PACK.label : (PLAN_LABELS[input.plan as PlanTier] ?? input.plan),
       period: input.period,
       channel: provider.channel,
       amountCents,
@@ -349,6 +354,33 @@ export class BillingService {
         .where(and(eq(orders.id, order.id), eq(orders.status, 'created')))
         .returning({ id: orders.id });
       if (claimed.length === 0) return; // 已被并发/上次回调认领
+
+      // 资源包(pack):一次性激活 30 天 starter 等效权益——与会员共用"取高档"口径,
+      // 已购更高档会员的账号购买资源包仅顺延已过期场景;对 free 用户即刻升到 starter 30 天
+      const subs0 = await tx.select().from(subscriptions).where(eq(subscriptions.accountId, order.accountId));
+      if (order.product === 'pack') {
+        for (const s0 of subs0) {
+          if (s0.status !== 'active') continue;
+          const packEnd = new Date(now.getTime() + BOOSTER_PACK.days * 24 * 3600 * 1000);
+          const effLimits = PLAN_LIMITS[BOOSTER_PACK.plan];
+          const better = (PLAN_RANK[s0.plan as PlanTier] ?? 0) < (PLAN_RANK[BOOSTER_PACK.plan] ?? 0);
+          await tx
+            .update(subscriptions)
+            .set({
+              plan: better ? BOOSTER_PACK.plan : (s0.plan as PlanTier),
+              questionQuota: better
+                ? { ranking: effLimits.rankingQuota, reputation: effLimits.reputationQuota }
+                : (s0.questionQuota as Record<string, number>),
+              engineQuota: better
+                ? { web: effLimits.webEngines, app: effLimits.appEngines }
+                : (s0.engineQuota as Record<string, number>),
+              // 已有会员未过期则不动到期;free/过期则给 30 天窗口
+              periodEnd: s0.periodEnd && s0.periodEnd.getTime() > now.getTime() ? s0.periodEnd : packEnd,
+            })
+            .where(eq(subscriptions.id, s0.id));
+        }
+        return;
+      }
 
       // 会员为账号级:名下全部活跃品牌订阅统一刷新(配额执行点在 subscriptions 行)。
       // 档位只升不降:为另一品牌买低档不得把已购高档订阅降级(已付费权益缩水),

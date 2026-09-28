@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Badge, EmptyState, PageHeader, Skeleton } from '@/components/ui';
 import { api } from '@/lib/queries';
 import type { BillingPeriod, PlanTier } from '@geo/shared';
+import { BOOSTER_PACK } from '@geo/shared';
 
 /**
  * 套餐与账单(docs/01 §3.10 ⑦ 账户与套餐):
@@ -71,7 +72,7 @@ export default function BillingPage() {
   const [period, setPeriod] = useState<BillingPeriod>('monthly');
   const [activeOrder, setActiveOrder] = useState<OrderDetail | null>(null);
   const [payError, setPayError] = useState<string | null>(null);
-  const [creating, setCreating] = useState<PlanTier | null>(null);
+  const [creating, setCreating] = useState<PlanTier | 'booster10' | null>(null);
 
   const plans = useQuery({ queryKey: ['billing-plans'], queryFn: () => api<PlanCatalogItem[]>('/billing/plans') });
   const subscription = useQuery({
@@ -99,7 +100,7 @@ export default function BillingPage() {
 
   // 落地页 /billing?plan=xxx 进入时无需预选:每张档位卡自带支付按钮,周期默认月付
 
-  const purchase = async (plan: PlanTier, channel: 'wechat' | 'alipay') => {
+  const purchase = async (plan: PlanTier | 'booster10', channel: 'wechat' | 'alipay') => {
     setPayError(null);
     setCreating(plan);
     try {
@@ -217,6 +218,34 @@ export default function BillingPage() {
             </div>
           );
         })}
+      </section>
+
+      {/* 一次性资源包 */}
+      <section className="card flex flex-col items-start gap-4 border-brand-200 bg-gradient-to-br from-brand-50/60 to-white p-6 sm:flex-row sm:items-center">
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-slate-900">{BOOSTER_PACK.label}</h3>
+            <Badge label="一次性" tone="brand" />
+          </div>
+          <p className="mt-1 text-xs text-slate-500">无需订阅,买一次用一次:30 天窗口内完成一轮完整监测。</p>
+          <ul className="mt-3 space-y-1 text-[13px] leading-5 text-slate-600">
+            {BOOSTER_PACK.perks.map((perk) => (
+              <li key={perk}>· {perk}</li>
+            ))}
+          </ul>
+        </div>
+        <div className="flex shrink-0 flex-col items-stretch gap-2 sm:w-36">
+          <p className="text-center">
+            <span className="metric-num text-2xl font-semibold text-slate-900">¥{BOOSTER_PACK.priceFen / 100}</span>
+          </p>
+          <button
+            onClick={() => purchase(BOOSTER_PACK.id, 'wechat')}
+            disabled={creating !== null}
+            className="btn-primary w-full disabled:opacity-50"
+          >
+            {creating === BOOSTER_PACK.id ? '下单中…' : '微信支付'}
+          </button>
+        </div>
       </section>
 
       {/* 账单 */}
