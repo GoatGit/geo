@@ -134,10 +134,10 @@ async function acceptAgreementDialog(page: Page): Promise<boolean> {
   return clicked;
 }
 
-/** 人机验证检测(图形/滑块):命中常见验证 iframe 或页面提示文案。 */
+/** 人机验证检测(图形/滑块/3D 点选):命中常见验证 iframe 或页面提示文案。 */
 async function detectHumanCheck(page: Page): Promise<boolean> {
   if (await visibleAcrossFrames(page, 'iframe[src*=captcha], iframe[src*=verify], iframe[src*=geetest], iframe[src*=dingxiang], iframe[title*="验证"]', 300)) return true;
-  for (const mark of ['拖动滑块', '拖动下方滑块', '安全验证', '图形验证', '完成拼图']) {
+  for (const mark of ['拖动滑块', '拖动下方滑块', '安全验证', '图形验证', '完成拼图', '点击图中', '请点击']) {
     if (await clickableTextAcrossFrames(page, mark, 120)) return true;
   }
   return false;
@@ -518,8 +518,9 @@ export class LoginManager {
   /**
    * 豆包手机号验证码自动登录(0019):收码站 API 取号 → 远程页填手机号并发送 →
    * start 收取 → 轮询验证码 → 回填提交。换号(replacing)自动重走;60 秒码效期内完成。
+   * public:本地直连调试入口(debug-auto-login.ts)复用同一份实现,不依赖实例状态。
    */
-  private async autoPhoneLogin(page: Page, site: ReturnType<typeof siteConfigOf>, sms: SmsLinkClient, sessionId: string, status: (detail: string) => Promise<void>): Promise<void> {
+  async autoPhoneLogin(page: Page, site: ReturnType<typeof siteConfigOf>, sms: SmsLinkClient, sessionId: string, status: (detail: string) => Promise<void>): Promise<void> {
     // 运营弹窗("下载豆包电脑版"等)只在打开登录入口前清扫——登录弹窗打开后
     // 不能再无差别清扫:弹窗右上角 × 会被误点,把登录框关掉(批量流程卡死根因)。
     await dismissPromos(page);
@@ -614,13 +615,26 @@ export class LoginManager {
     // 收码站换号(replacing)后新号码重新获得补发机会。
     const autoDeadline = Date.now() + 480_000;
     const resentPhones = new Set<string>();
+    // 同一号码只调一次 startCollect:实测对同一 slot 重复 start 会触发收码站换号,
+    // 旧号收到的短信随即作废(DeepSeek 直播调试发现,轮询能看到 phone/attempt 变化)
+    const startedPhones = new Set<string>();
     for (let round = 1; round <= 6 && Date.now() < autoDeadline; round++) {
       if (!(await phoneInputReady()) && !(await openPhoneInput())) {
         const snippet = await page.evaluate("(() => (document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 150))()").catch(() => '(读取失败)');
         throw new Error(`登录视图丢失;页面文本:${snippet}`);
       }
       const session = await sms.getSession();
-      if (session.status === 'failed') throw new Error('收码站判定号码失败');
+      if (session.status === 'failed') {
+        // 次数未用尽时站方会自动换号(实测 attempt 2→3 自轮换):等新号到手重走,
+        // 而不是直接报错;次数用尽才是真死链接
+        if ((session.attempt ?? 0) < (session.max_attempts ?? 1) && Date.now() < autoDeadline - 60_000) {
+          await status(`收码站判定号码失败(${session.attempt ?? '?'}/${session.max_attempts ?? '?'}),等待站方换号后重取…`);
+          await page.waitForTimeout(20_000);
+          round--;
+          continue;
+        }
+        throw new Error(`收码站判定号码失败(次数已用尽 ${session.attempt ?? '?'}/${session.max_attempts ?? '?'}),请更换收码链接`);
+      }
       const phone = session.phone;
       if (!phone) throw new Error('收码站未返回手机号');
       await status(`第 ${round} 轮:手机号 ${phone},正在填入${site.displayName}并发送验证码…`);
@@ -663,9 +677,12 @@ export class LoginManager {
       // 开始收取并轮询验证码:窗口 5 分钟——画面弹图形/滑块验证码时操作者在 viewer
       // 里人工处理(DeepSeek 实测人工解验证码远超 90 秒),期间心跳同步进度到状态行。
       let slot = session.slot ?? 0;
-      await sms.startCollect(slot);
+      if (!startedPhones.has(phone)) {
+        startedPhones.add(phone);
+        await sms.startCollect(slot);
+      }
       let code: string | null = null;
-      let replaced = false;
+      let rotated = false; // 收码站换号(replacing 或号码变化):旧号短信作废,立即换新号重走
       let captchaNoted = false;
       const POLL_MAX = 150; // 150 × 2s
       for (let poll = 0; poll < POLL_MAX && Date.now() < autoDeadline; poll++) {
@@ -674,8 +691,9 @@ export class LoginManager {
         if (s) {
           slot = s.slot ?? slot;
           if (s.status === 'completed' && s.code) { code = s.code; break; }
-          if (s.status === 'replacing') { replaced = true; continue; }
           if (s.status === 'failed') break;
+          // 号码被站方轮换(轮询响应的 phone 与所填号不一致)→ 本轮作废,马上重取号
+          if (s.status === 'replacing' || (s.phone && s.phone !== phone)) { rotated = true; break; }
         }
         // 每 20 秒检测一次人机验证并心跳;检测到则提示操作者在画面里手动完成
         if (poll > 0 && poll % 10 === 0) {
@@ -689,7 +707,7 @@ export class LoginManager {
         }
       }
       if (!code) {
-        if (replaced) { await status('收码站已自动换号,用新号码重走流程…'); continue; }
+        if (rotated) { await status('收码站已换号(旧号短信作废),用新号重走流程…'); continue; }
         // 同号补发:每个号码一次——重走一轮(重新填号/发码/轮询),发码按钮文案已含「重新发送」
         if (!resentPhones.has(phone) && Date.now() < autoDeadline - 60_000) {
           resentPhones.add(phone);
