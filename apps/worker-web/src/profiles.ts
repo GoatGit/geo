@@ -47,6 +47,15 @@ export class AccountPoolService {
    */
   async capacityByEngine(engines: readonly string[]): Promise<Map<string, number>> {
     if (engines.length === 0) return new Map();
+    // 冷却自愈前置到容量统计:调度器据此筛引擎,若只在 acquire() 懒触发,
+    // 而 cooldown 档案让引擎长期零可用 → 调度不再入队 → acquire 永不被调 → 死锁
+    // (千问 #23 冷却过期 6 天未回池的根因)。全引擎一次性批量回收。
+    await (this.db.$client as Pool).query(
+      `update account_profiles
+       set status = 'available', cooldown_until = null
+       where surface = 'web' and status = 'cooldown'
+         and cooldown_until is not null and cooldown_until < now()`,
+    );
     const res = await (this.db.$client as Pool).query<{ engine: string; left: number }>(
       `select engine,
               sum(case when daily_date is distinct from current_date then $1
