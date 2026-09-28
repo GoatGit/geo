@@ -49,15 +49,21 @@ async function visibleAcrossFrames(page: Page, selector: string, timeoutMs = 1_0
   }
 }
 
-/** 跨 frame 按文本/角色查找可点击元素(按钮/页签),同样用原生渲染判定。 */
+/** 跨 frame 按文本/角色查找可点击元素(按钮/页签),同样用原生渲染判定。
+ *  遍历全部匹配取首个渲染可见的:.first()+isVisible 在远程沙箱(transform 缩放/CDP 高延迟)
+ *  会误判或 2s 内查不到 → 提交按钮静默跳过(DeepSeek 实测:码回填后停在登录页)。 */
 async function clickableTextAcrossFrames(page: Page, text: string, timeoutMs = 1_000): Promise<Locator | null> {
+  const re = new RegExp(text);
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     for (const frame of page.frames()) {
-      const byRole = frame.getByRole('button', { name: new RegExp(text) }).first();
-      if (await rendered(byRole)) return byRole;
-      const byText = frame.getByText(text, { exact: false }).first();
-      if (await rendered(byText)) return byText;
+      for (const cand of [frame.getByRole('button', { name: re }), frame.getByText(re)]) {
+        const n = await cand.count().catch(() => 0);
+        for (let i = 0; i < Math.min(n, 6); i++) {
+          const loc = cand.nth(i);
+          if (await rendered(loc)) return loc;
+        }
+      }
     }
     if (Date.now() >= deadline) return null;
     await page.waitForTimeout(120).catch(() => undefined);
@@ -687,9 +693,22 @@ export class LoginManager {
         const anyInput = await visibleAcrossFrames(page, 'input', 2_000);
         if (anyInput) { await anyInput.click({ force: true }).catch(() => undefined); await page.keyboard.type(code, { delay: 120 }); }
       }
-      // 提交登录(精确「登录」,避免误点「手机号登录」页签)
-      const submit = await clickableTextAcrossFrames(page, '^登录$|^提交$|^确定$', 2_000);
-      if (submit) await submit.click({ timeout: 2_000, force: true }).catch(() => undefined);
+      // 提交登录(精确「登录」,避免误点「手机号登录」页签);点后确认表单真的消失,
+      // 没消失补点/回车兜底(生产实测:查找落空或点击未生效会静默停在回填后的页面)
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const submit = await clickableTextAcrossFrames(page, '^登录$|^提交$|^确定$', 2_000);
+        if (submit) await submit.click({ timeout: 2_000, force: true }).catch(() => undefined);
+        let formGone = false;
+        for (let i = 0; i < 8; i++) {
+          await page.waitForTimeout(500);
+          if (!(await phoneInputReady())) { formGone = true; break; }
+        }
+        if (formGone) {
+          await status('已提交登录,等待登录态确认…');
+          break;
+        }
+        if (attempt === 1) await page.keyboard.press('Enter').catch(() => undefined);
+      }
       return; // 之后由既有登录验证轮询确认并保存
     }
     throw new Error('收码站多次换号仍未成功,请更换收码链接后重试');
