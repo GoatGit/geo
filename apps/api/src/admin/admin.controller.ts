@@ -117,6 +117,22 @@ export class AdminController implements OnModuleDestroy {
     return row;
   }
 
+  /** 清空登录队列(排障):积压的旧登录请求逐个 10 分钟超时会堵住后续所有登录。 */
+  @Post('login-queue/purge')
+  async purgeLoginQueue() {
+    const drained = await this.redis.llen(LOGIN_REQ_QUEUE);
+    if (drained > 0) await this.redis.del(LOGIN_REQ_QUEUE);
+    // 释放豆包待登录档案的会话锁,允许重新入队
+    const rows = await this.db
+      .select({ id: accountProfiles.id })
+      .from(accountProfiles)
+      .where(and(eq(accountProfiles.engine, 'doubao'), eq(accountProfiles.status, 'pending_login')));
+    for (const r of rows) {
+      await this.redis.del(loginProfileKey(r.id)).catch(() => undefined);
+    }
+    return { purged: drained, released: rows.length };
+  }
+
   /** 示例案例打标(0020):品牌/问卷标记为 is_demo,对全部新账号只读可见。 */
   @Post('demo/seed')
   async demoSeed(@Body() body: { brandId?: number; surveyId?: number }) {
