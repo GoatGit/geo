@@ -454,7 +454,12 @@ export class LoginManager {
       if (!(await openLoginDialog())) return false;
       const tabLoc = await clickableTextAcrossFrames(page, '手机号登录', 3_000);
       if (tabLoc) { await tabLoc.click({ timeout: 2_000 }).catch(() => undefined); }
-      return phoneInputReady();
+      // 输入视图异步渲染(AgentBay 远程浏览器更慢),轮询等待
+      for (let i = 0; i < 20; i++) {
+        await page.waitForTimeout(250);
+        if (await phoneInputReady()) return true;
+      }
+      return false;
     };
     if (!(await openPhoneInput())) throw new Error('未能打开豆包手机号登录视图');
 
