@@ -456,12 +456,20 @@ export class LoginManager {
       if (await phoneInputReady()) return true;
       // 登录弹窗没开就先点开,再切「手机号登录」
       if (!(await openLoginDialog())) return false;
-      const tabLoc = await clickableTextAcrossFrames(page, '手机号登录', 3_000);
-      if (tabLoc) { await tabLoc.click({ timeout: 2_000 }).catch(() => undefined); }
-      // 输入视图异步渲染(AgentBay 远程浏览器更慢),轮询等待
-      for (let i = 0; i < 20; i++) {
-        await page.waitForTimeout(250);
-        if (await phoneInputReady()) return true;
+      // 页签匹配放宽:「手机号登录」可能是带图标的 div(非 button role),文本包含即可;
+      // 失败时再试「验证码登录」;仍失败则重开一次登录弹窗重试
+      for (const retry of [1, 2]) {
+        for (const tabText of ['手机号', '验证码登录']) {
+          const tabLoc = await clickableTextAcrossFrames(page, tabText, 2_000);
+          if (tabLoc) {
+            await tabLoc.click({ timeout: 2_000 }).catch(() => undefined);
+            for (let i = 0; i < 16; i++) {
+              await page.waitForTimeout(300);
+              if (await phoneInputReady()) return true;
+            }
+          }
+        }
+        if (retry === 1) await openLoginDialog();
       }
       return false;
     };
