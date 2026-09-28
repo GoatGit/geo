@@ -609,7 +609,12 @@ export class LoginManager {
       throw new Error(`未能打开${site.displayName}手机号登录视图;frames=[${frameUrls}];页面文本:${snippet}`);
     }
 
-    for (let round = 1; round <= 6; round++) {
+    // 自动登录总预算(8 分钟):外层 LOGIN_TIMEOUT(10 分钟)需留出导航与登录确认时间。
+    // 轮询超时不再直接报错——同一号码补发一次再收一轮(运营商丢包/发送被拦的兜底);
+    // 收码站换号(replacing)后新号码重新获得补发机会。
+    const autoDeadline = Date.now() + 480_000;
+    const resentPhones = new Set<string>();
+    for (let round = 1; round <= 6 && Date.now() < autoDeadline; round++) {
       if (!(await phoneInputReady()) && !(await openPhoneInput())) {
         const snippet = await page.evaluate("(() => (document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 150))()").catch(() => '(读取失败)');
         throw new Error(`登录视图丢失;页面文本:${snippet}`);
@@ -635,8 +640,11 @@ export class LoginManager {
           if (box) await page.mouse.click(box.x - 14, box.y + box.height / 2).catch(() => undefined);
         }
       }
-      // 发送验证码:文心按钮需 id 直点(文本匹配受容器影响);其余按引擎文案排序
-      const sendLabels = site.engine === 'doubao' ? ['下一步', '发送验证码', '获取验证码'] : ['获取验证码', '发送验证码', '获取短信验证码', '下一步'];
+      // 发送验证码:文心按钮需 id 直点(文本匹配受容器影响);其余按引擎文案排序。
+      // 重新发送/重新获取兜底:超时补发时按钮文案已从「获取验证码」变为「重新发送」
+      const sendLabels = site.engine === 'doubao'
+        ? ['下一步', '发送验证码', '获取验证码', '重新发送', '重新获取']
+        : ['获取验证码', '发送验证码', '获取短信验证码', '重新发送', '重新获取', '下一步'];
       const clickSend = async (): Promise<boolean> => {
         if (site.engine === 'wenxin') {
           const btn = await visibleAcrossFrames(page, '[id*=smsTimer]', 2_000);
@@ -660,7 +668,7 @@ export class LoginManager {
       let replaced = false;
       let captchaNoted = false;
       const POLL_MAX = 150; // 150 × 2s
-      for (let poll = 0; poll < POLL_MAX; poll++) {
+      for (let poll = 0; poll < POLL_MAX && Date.now() < autoDeadline; poll++) {
         await page.waitForTimeout(2_000);
         const s = await sms.poll(slot).catch(() => null);
         if (s) {
@@ -682,7 +690,14 @@ export class LoginManager {
       }
       if (!code) {
         if (replaced) { await status('收码站已自动换号,用新号码重走流程…'); continue; }
-        throw new Error(`5 分钟内未收到验证码${captchaNoted ? '(人机验证可能未完成,重试时请在画面中手动完成验证)' : ''}`);
+        // 同号补发:每个号码一次——重走一轮(重新填号/发码/轮询),发码按钮文案已含「重新发送」
+        if (!resentPhones.has(phone) && Date.now() < autoDeadline - 60_000) {
+          resentPhones.add(phone);
+          await status(`验证码超时未收到,对 ${phone} 补发一次…`);
+          round--;
+          continue;
+        }
+        throw new Error(`超时未收到验证码${resentPhones.has(phone) ? '(已补发过一次)' : ''}${captchaNoted ? ',人机验证可能未完成,重试时请在画面中手动完成' : ''},请更换收码链接后重试`);
       }
       await status(`验证码已收到(${code}),正在回填${site.displayName}…`);
       // 回填:优先单个验证码输入框;分格输入则点击首格后逐字键入
@@ -711,7 +726,7 @@ export class LoginManager {
       }
       return; // 之后由既有登录验证轮询确认并保存
     }
-    throw new Error('收码站多次换号仍未成功,请更换收码链接后重试');
+    throw new Error('自动登录预算用尽(多次换号/补发)仍未收到可用验证码,请更换收码链接后重试');
   }
 
   /** 截帧循环:远程页面 JPEG → Redis frame key(后台轮询展示)。 */
