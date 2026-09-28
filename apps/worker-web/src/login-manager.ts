@@ -223,17 +223,29 @@ export class LoginManager {
         // 之后采集经同一代理注入 Cookie,引擎才会认(docs/07 §13 闸门 #2)
         const { lease } = await this.proxyPool.acquireForProfile(profRow?.proxyServer ?? null);
         loginLease = lease;
+        // 五引擎统一:登录 context 一律走代理出口(无租约时新建,不回退已存在的直连 context)——
+        // AgentBay 直连豆包实测 30s 超时,登录态与出口 IP 必须绑定(docs/07 §13 闸门 #2)
         const context = req.engine === 'deepseek'
           ? await cdpBrowser.newContext(browserContextOptions(req.fingerprint, lease?.server ?? null))
-          : lease
-            ? await cdpBrowser.newContext({ proxy: { server: `http://${lease.server}` } })
-            : cdpBrowser.contexts()[0] ?? await cdpBrowser.newContext();
+          : await cdpBrowser.newContext(
+              lease ? { proxy: { server: `http://${lease.server}` } } : {},
+            );
         if (lease) console.log(`[login] session=${req.sessionId} 经代理 ${lease.server} 登录(出口 ${lease.egressIp})`);
         page = context.pages()[0] ?? (await context.newPage());
       }
       if (!page) throw new Error('broker 未提供可用页面');
 
-      await page.goto(site.chatUrl, { waitUntil: 'domcontentloaded', timeout: site.navigationTimeoutMs });
+      // 远程浏览器 + 代理链路慢:导航放宽到 90s,失败刷新一次再试
+      let navigated = false;
+      for (let nav = 0; nav < 2 && !navigated; nav++) {
+        try {
+          await page.goto(site.chatUrl, { waitUntil: 'domcontentloaded', timeout: Math.max(site.navigationTimeoutMs, 90_000) });
+          navigated = true;
+        } catch (navErr) {
+          console.warn(`[login] session=${req.sessionId} 导航失败(第 ${nav + 1} 次):${(navErr as Error).message.slice(0, 80)}`);
+          if (nav === 1) throw navErr;
+        }
+      }
       console.log(`[login] session=${req.sessionId} engine=${req.engine} 浏览器已就绪(${site.displayName}),等待操作者登录…`);
 
       // viewer 模式:截帧 + 指令分发两个后台任务,随登录轮询一起跑
