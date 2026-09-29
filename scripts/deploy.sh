@@ -47,7 +47,7 @@ if [ -n "$(git status --porcelain)" ]; then
   fi
 fi
 docker buildx build --platform linux/amd64 --provenance=false --sbom=false \
-  --build-arg API_ORIGIN="$API_ORIGIN" --build-arg NEXT_PUBLIC_SMS_LOGIN="${NEXT_PUBLIC_SMS_LOGIN:-on}" -t "$IMAGE" .
+  --build-arg API_ORIGIN="$API_ORIGIN" --build-arg NEXT_PUBLIC_SMS_LOGIN="${NEXT_PUBLIC_SMS_LOGIN:-off}" -t "$IMAGE" .
 
 echo "== ② 推送 ACR =="
 docker push "$IMAGE"
