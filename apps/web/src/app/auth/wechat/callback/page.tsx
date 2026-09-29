@@ -7,7 +7,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, accountStore, tokenStore, type SessionAccount } from '@/lib/api';
+import { accountStore, tokenStore, type SessionAccount } from '@/lib/api';
 
 export default function WechatCallbackPage() {
   const router = useRouter();

@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm';
 import { createStorageFromEnv } from '@geo/evidence';
 import { REPUTATION_QUEUE, REPORTS_QUEUE, bullConnection } from './queue';
 import { extractReputation } from './reputation';
+import { rebuildReputation } from './reputation-rebuild';
 import { buildReportPayload } from './report-builder';
 
 /** 口碑异步抽取消费器(docs/05 §1 管道②):判定层 = Insight Agent(docs/09 §6),redis 供调用统计。 */
@@ -13,6 +14,10 @@ export function startReputationWorker(db: Db, redis?: Redis | null, concurrency 
   const worker = new Worker(
     REPUTATION_QUEUE,
     async (job) => {
+      if ((job.name ?? '') === 'rebuild') {
+        await rebuildReputation(db, Math.min(Math.max(Number(job.data?.days) || 7, 1), 90), redis ?? null);
+        return;
+      }
       await extractReputation(
         db,
         job.data as { runId: number; brandId: number; answerText: string; ranAt: string },

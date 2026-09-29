@@ -697,6 +697,16 @@ export class AdminController implements OnModuleDestroy {
     return { ok: true };
   }
 
+  /** 口碑事实重建:采集清洗升级后的历史修复(读存证原文→清洗→重算派生事实)。 */
+  @Post('reputation/rebuild')
+  async rebuildReputation(@Req() req: Request, @Body() body: { days?: number }) {
+    void currentAccount(req);
+    const days = Math.min(Math.max(Math.floor(Number(body?.days) || 7), 1), 90);
+    const q = this.queues[1]!;
+    await q.add('rebuild', { days }, { attempts: 1, removeOnComplete: 100, jobId: `rebuild-${Date.now()}` });
+    return { queued: true, days };
+  }
+
   @Post('accounts/:id/disable')
   async disableAccount(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
     void currentAccount(req);

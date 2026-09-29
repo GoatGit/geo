@@ -28,6 +28,7 @@ import { SurveyWorker } from './survey-worker';
 /** 告警去重用的 Redis(与采集连接隔离,lazyConnect 断连互不影响)。 */
 function collectRedisForAlerts() {
   // ioredis CJS 互操作:运行时 default 才是构造器,类型上双断言
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const Mod = require('ioredis') as { default?: unknown } & Record<string, unknown>;
   const Ctor = (Mod.default ?? Mod) as new (url: string, opts?: Record<string, unknown>) => import('ioredis').default;
   return new Ctor(process.env.REDIS_URL ?? 'redis://localhost:6379', { lazyConnect: true, maxRetriesPerRequest: 1 });

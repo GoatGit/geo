@@ -775,21 +775,34 @@ function pushNetCitation(
 
 
 /** 站点噪声清理(纯函数,便于单测):行级噪声模式 + 引导块连续剥离(仅开头)。 */
+/** 通用 UI 噪声行(所有引擎):功能标签栏(≥5 个 ≤4 字短词以空格分隔)与引号回显标题。 */
+function isGenericUINoiseLine(t: string): boolean {
+  // 「快速回答 AI 生图 写作 解题 深度研究 PPT 生成 …」式的产品功能栏
+  const parts = t.split(/[ \t]+/).filter(Boolean);
+  if (parts.length >= 5 && parts.filter((w) => w.length <= 6).length / parts.length >= 0.8 && !/[。;;!?]/.test(t)) {
+    return true;
+  }
+  // 「"理想L9车主真实评价"」——问题标题整行引号回显(千问实测)
+  if (/^["'“「【].{2,24}["'”」】]$/.test(t)) return true;
+  return false;
+}
+
 export function stripAnswerNoise(
   site: { engine: string; answerNoisePatterns: string[]; leadingNoiseLineRe?: string },
   text: string,
 ): string {
   let out = text;
-  if (site.answerNoisePatterns.length > 0) {
-    const patterns = site.answerNoisePatterns.map((p) => new RegExp(p));
-    out = out
-      .split('\n')
-      .filter((line) => {
-        const t = line.trim();
-        return t.length > 0 && !patterns.some((re) => re.test(t));
-      })
-      .join('\n');
-  }
+  // 尾部截断:「引用来源(N)」之后的引用列表/推荐区不是回答正文(实测元宝把整页捕获)
+  const cutAt = out.search(/^引用来源\s*[(（]/m);
+  if (cutAt > 0) out = out.slice(0, cutAt);
+  const patterns = site.answerNoisePatterns.map((p) => new RegExp(p));
+  out = out
+    .split('\n')
+    .filter((line) => {
+      const t = line.trim();
+      return t.length > 0 && !patterns.some((re) => re.test(t)) && !isGenericUINoiseLine(t);
+    })
+    .join('\n');
   if (site.leadingNoiseLineRe) {
     // 引导块定界剥离(wenxin 深度搜索):开头为「状态行(搜索N个关键词/全球搜/使用工具)」
     // + 引用条目编号列表。条目有两种渲染:「N. 标题-站点」同行,或「N.」与标题各自成行。

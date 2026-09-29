@@ -36,7 +36,9 @@ function ruleSentiment(
  * 取第一句真实内容;全被跳过时退回首条印象短语摘要。
  */
 function pickExcerpt(answerText: string, questionText: string | undefined, terms: Array<{ excerpt: string }>): string | null {
-  const noise = /^搜索|^已搜索|^已完成分析|^共参考|篇资料[。]?$/;
+  // 页面 UI 噪声(实测元宝 banner/功能栏会混入正文):采集侧已过滤,此处兜底
+  const noise =
+    /^搜索|^已搜索|^已完成分析|^共参考|篇资料[。]?$|^一站式|^安装|^下载|电脑版$|preview模型|信源更准更全|^[0-9]{2}:[0-9]{2}$/;
   const q = (questionText ?? '').replace(/\s+/g, '');
   for (const raw of answerText.split(/[。;;\n!?]/)) {
     const s = raw.trim();

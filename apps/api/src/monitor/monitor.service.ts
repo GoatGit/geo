@@ -21,7 +21,7 @@ import {
   type MetricCard,
   type MetricSource,
 } from '@geo/shared';
-import { classifyDomain, evaluateHealth, generateActionList, isAuthoritativeCategory, sentimentScore as sentimentScoreOf } from '@geo/metrics';
+import { classifyDomain, evaluateHealth, generateActionList, isAuthoritativeCategory } from '@geo/metrics';
 import Redis from 'ioredis';
 import { chatCompletion, InsightAgent } from '@geo/insight-agent';
 import { createStorageFromEnv } from '@geo/evidence';

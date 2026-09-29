@@ -107,7 +107,7 @@ async function main() {
   // 实时帧(覆盖写)+ 命令文件通道:智能体对 live.jpg 观察后写 cmd.json 即注入远程页面
   // {"type":"click","x":..,"y":..} | {"type":"type","text":..} | {"type":"key","key":..} | {"type":"drag",fromX,fromY,toX,toY}
   const stop = { value: false };
-  const frameLoop = (async () => {
+  void (async () => {
     while (!stop.value) {
       const buf = await page.screenshot({ type: 'jpeg', quality: 60, timeout: 5_000 }).catch(() => null);
       if (buf) writeFileSync(`${dir}/live.jpg`, buf);

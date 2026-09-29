@@ -179,8 +179,15 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     answerSelectors: ['div[class*="agent-dialogue"]', 'div[class*="agent-chat"]', 'div[class*="markdown"]'],
     stopSelectors: ['button:has-text("停止")'],
     // 实测:搜索阶段的状态行("正在搜索资料")会与问题回显粘在同一容器,
-    // 不过滤会绕过回声判定被当成回答收录
-    answerNoisePatterns: ['^正在搜索.*$', '^已搜索.*$', '^搜索中.*$', '^思考中.*$', '^正在思考.*$'],
+    // 不过滤会绕过回声判定被当成回答收录。
+    // 页面 UI 混入(实测 2026-09-29,run#7280+):顶部 banner(一站式解决办公学习需求/
+    // Hy4 preview模型/安装元宝电脑版)、尾部推荐与功能栏会被整轮对话容器一并捕获
+    answerNoisePatterns: [
+      '^正在搜索.*$', '^已搜索.*$', '^搜索中.*$', '^思考中.*$', '^正在思考.*$',
+      '^一站式解决办公学习需求$', 'Hy4\\s*preview模型', 'AI搜索信源更准更全',
+      '安装元宝电脑版', '下载元宝电脑版', '下载电脑版', '体验高效\\s*AI\\s*助手',
+      '^相关视频$', '安装电脑版',
+    ],
     completionStableMs: BASE_COMPLETION_STABLE_MS,
     navigationTimeoutMs: BASE_NAV_TIMEOUT_MS,
   },
