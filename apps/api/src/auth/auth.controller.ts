@@ -83,7 +83,7 @@ export class AuthController {
   @Public()
   @UseGuards(RateLimitGuard)
   @RateLimit(30, 60, 'token-refresh')
-  @Post('token:refresh')
+  @Post('token/refresh')
   async refresh(@Body() dto: RefreshDto) {
     const env = loadEnv();
     const principal = verifyRefreshToken(env, dto.refreshToken);

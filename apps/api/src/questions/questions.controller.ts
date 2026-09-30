@@ -32,7 +32,7 @@ export class QuestionsController {
   ) {}
 
   /** AI 推荐监控问题(冷启动/扩池):品牌档案+竞品+已有问题 → 差异化新问题候选。 */
-  @Post('brands/:id/questions:suggest')
+  @Post('brands/:id/questions/suggest')
   @UseGuards(RateLimitGuard)
   @RateLimit(6, 60, 'questions-suggest')
   suggest(
@@ -44,7 +44,7 @@ export class QuestionsController {
     return this.questionsService.suggestForAccount(currentAccount(req).accountId, brandId, count);
   }
 
-  @Post('brands/:id/questions:batch')
+  @Post('brands/:id/questions/batch')
   async batch(
     @Req() req: Request,
     @Param('id', ParseIntPipe) brandId: number,

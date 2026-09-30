@@ -39,7 +39,7 @@ export default function QuestionsPage() {
     setSuggestions(null);
     try {
       const r = await api<Array<{ text: string; type: string }>>(
-        `/brands/${brandId}/questions:suggest`,
+        `/brands/${brandId}/questions/suggest`,
         { method: 'POST', json: { count: 12 } },
       );
       setSuggestions(r.map((x) => ({ ...x, picked: true })));
@@ -80,7 +80,7 @@ export default function QuestionsPage() {
   const batch = useMutation({
     mutationFn: (items: Array<{ text: string }>) =>
       api<{ created: unknown[]; rejected: Array<{ reason: string }>; quota: QuotaDto['ranking'] | unknown }>(
-        `/brands/${brandId}/questions:batch`,
+        `/brands/${brandId}/questions/batch`,
         { method: 'POST', json: { items } },
       ),
     onSuccess: (r) => {
