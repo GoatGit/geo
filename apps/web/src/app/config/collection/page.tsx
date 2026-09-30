@@ -9,7 +9,13 @@ import { EmptyState, PageHeader, Skeleton } from '@/components/ui';
 interface StatusDto {
   plan: { engines: string[]; surfaces: string[]; freq: number; nextRunAt: string | null; active: boolean } | null;
   engines: Array<{ engine: string; paused: boolean; recent: number; ok: number; failed: number; successRate: number | null }>;
-  rounds: Array<{ id: number; startedAt: string; finishedAt: string | null; totals: { total?: number; done?: number; ok?: number; failed?: number; quota_blocked?: number } | null }>;
+  rounds: Array<{
+    id: number;
+    startedAt: string;
+    finishedAt: string | null;
+    totals: { total?: number; done?: number; ok?: number; failed?: number; quota_blocked?: number } | null;
+    failReasons?: Array<{ engine: string; reason: string; count: number }>;
+  }>;
   lastRuns: Array<{ status: string; engine: string; ranAt: string }>;
 }
 
@@ -116,12 +122,21 @@ export default function CollectionPage() {
               const blocked = t.quota_blocked ?? 0;
               const ok = t.ok ?? Math.max((t.done ?? 0) - failed - blocked, 0);
               const pctOf = (n: number) => (total ? `${(n / total) * 100}%` : 0);
+              // 悬停 ✗ 的失败原因提示:按引擎+原因聚合,次数降序
+              const failTip = (r.failReasons ?? [])
+                .map((f) => `${f.engine}:${f.reason} ×${f.count}`)
+                .join('\n') || `本轮 ${failed} 个失败,暂无原因明细`;
               return (
                 <li key={r.id} className="flex items-center justify-between gap-2">
                   <span>轮次 #{r.id}</span>
                   <span className="metric-num text-xs">
                     <span className={ok > 0 ? 'text-good' : 'text-slate-300'}>{ok}✓</span>
-                    {failed > 0 && <span className="text-bad"> · {failed}✗</span>}
+                    {failed > 0 && (
+                      <span className="cursor-help border-b border-dotted border-bad/60" title={failTip}>
+                        {' · '}
+                        {failed}✗
+                      </span>
+                    )}
                     {blocked > 0 && <span className="text-warn"> · {blocked} 被拦截</span>}
                     <span className="text-slate-400"> / {total}</span>
                     {r.finishedAt ? ' · 已完成' : ' · 进行中'}

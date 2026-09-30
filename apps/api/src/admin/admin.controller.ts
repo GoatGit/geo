@@ -397,7 +397,24 @@ export class AdminController implements OnModuleDestroy {
       .innerJoin(brands, eq(brands.id, collectionRounds.brandId))
       .orderBy(desc(collectionRounds.startedAt))
       .limit(n);
-    return { rounds: rows };
+    // 失败原因聚合(按轮):悬停 ✗ 数字的提示数据源(meta.error 为采集失败原因)
+    const ids = rows.map((r) => r.id);
+    const failReasons: Record<number, Array<{ engine: string; reason: string; count: number }>> = {};
+    if (ids.length) {
+      const res = await this.db.execute(sql`
+        select round_id, engine, left(coalesce(meta->>'error', '未知原因'), 90) as reason, count(*)::int as cnt
+        from query_runs
+        where round_id = any(${ids}::bigint[]) and status = 'failed'
+        group by round_id, engine, reason
+        order by round_id, cnt desc`);
+      const rrows = (res as unknown as { rows: Array<{ round_id: string; engine: string; reason: string; cnt: number }> }).rows ?? [];
+      void rowsOf;
+      for (const r of rrows) {
+        const rid = Number(r.round_id);
+        (failReasons[rid] ??= []).push({ engine: r.engine, reason: r.reason, count: Number(r.cnt) });
+      }
+    }
+    return { rounds: rows.map((r) => ({ ...r, failReasons: (failReasons[r.id] ?? []).slice(0, 8) })) };
   }
 
   /** 手动暂停引擎(与自动熔断独立:manual 位不过期,自动位保持 5 分钟半开节奏)。 */
