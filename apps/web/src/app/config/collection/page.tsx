@@ -33,6 +33,8 @@ export default function CollectionPage() {
   });
 
   const [triggering, setTriggering] = useState(false);
+  // 轮次失败明细:点击 ✗ 展开/收起(悬停 title 仅作辅助)
+  const [expandedRound, setExpandedRound] = useState<number | null>(null);
   const triggerNow = async () => {
     setMsg(null);
     setTriggering(true);
@@ -127,12 +129,16 @@ export default function CollectionPage() {
                 .map((f) => `${f.engine}:${f.reason} ×${f.count}`)
                 .join('\n') || `本轮 ${failed} 个失败,暂无原因明细`;
               return (
-                <li key={r.id} className="flex items-center justify-between gap-2">
+                <li key={r.id} className="flex flex-wrap items-center justify-between gap-2">
                   <span>轮次 #{r.id}</span>
                   <span className="metric-num text-xs">
                     <span className={ok > 0 ? 'text-good' : 'text-slate-300'}>{ok}✓</span>
                     {failed > 0 && (
-                      <span className="cursor-help border-b border-dotted border-bad/60" title={failTip}>
+                      <span
+                        className="cursor-pointer border-b border-dotted border-bad/60"
+                        title={failTip}
+                        onClick={() => setExpandedRound(expandedRound === r.id ? null : r.id)}
+                      >
                         {' · '}
                         {failed}✗
                       </span>
@@ -146,6 +152,15 @@ export default function CollectionPage() {
                     <div className="h-1.5 bg-bad" style={{ width: pctOf(failed) }} />
                     <div className="h-1.5 bg-warn" style={{ width: pctOf(blocked) }} />
                   </div>
+                  {expandedRound === r.id && (r.failReasons?.length ?? 0) > 0 && (
+                    <div className="w-full rounded border border-slate-200 bg-slate-50 p-2 text-xs leading-5 text-slate-600">
+                      {(r.failReasons ?? []).map((f, i) => (
+                        <div key={i} className="truncate" title={f.reason}>
+                          <span className="mr-1 font-medium text-slate-700">{f.engine}</span>×{f.count} · {f.reason}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {r.finishedAt && failed > 0 && (
                     <button
                       onClick={() => retryFailed(r.id)}

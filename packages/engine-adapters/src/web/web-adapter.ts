@@ -203,6 +203,14 @@ export class DomWebAdapter implements EngineAdapter {
       }
       const asGuest = login.loggedIn === false;
 
+      // 会话恢复型落地页(豆包登录后常自动回到上次对话 /chat/local_xxx):该形态
+      // 输入框定位实测失败 ×3——提问前先回新会话页
+      if (/local_\d+/.test(page.url())) {
+        await page
+          .goto(this.site.chatUrl, { waitUntil: 'domcontentloaded', timeout: this.site.navigationTimeoutMs })
+          .catch(() => undefined);
+        await page.waitForTimeout(1_500);
+      }
       const asked = await this.submitQuestion(page, question);
       if (!asked) {
         const bodyHead = (await page.locator('body').innerText({ timeout: 1_000 }).catch(() => '')).slice(0, 80);

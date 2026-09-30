@@ -152,6 +152,8 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     answerSelectors: ['div[class*="answer"]', 'div[class*="markdown"]'],
     stopSelectors: ['button:has-text("停止")'],
     answerNoisePatterns: [],
+    // 实测(2026-09-30):千问深度回答常超 120s 基线 → 完成判定超时且无答案文本 ×10/轮
+    minAskTimeoutMs: 240_000,
     completionStableMs: BASE_COMPLETION_STABLE_MS,
     navigationTimeoutMs: BASE_NAV_TIMEOUT_MS,
   },
