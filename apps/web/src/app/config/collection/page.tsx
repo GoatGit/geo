@@ -143,7 +143,15 @@ export default function CollectionPage() {
                         {failed}✗
                       </span>
                     )}
-                    {blocked > 0 && <span className="text-warn"> · {blocked} 被拦截</span>}
+                    {blocked > 0 && (
+                      <span
+                        className="cursor-help border-b border-dotted border-warn/60"
+                        title={`被拦截 = 执行前检查发现该引擎无可用采集容量(账号全部冷却/当日配额用完/无已登录账号),任务未发起、不消耗失败,后续轮次自动补跑`}
+                      >
+                        {' · '}
+                        {blocked} 被拦截
+                      </span>
+                    )}
                     <span className="text-slate-400"> / {total}</span>
                     {r.finishedAt ? ' · 已完成' : ' · 进行中'}
                   </span>
