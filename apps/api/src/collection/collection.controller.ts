@@ -72,12 +72,27 @@ export class CollectionController {
       });
     }
 
+    // 失败原因聚合(按轮):✗ 悬停提示的数据源(recent 500 条已含每 run 的 error)
+    const failReasons: Record<number, Array<{ engine: string; reason: string; count: number }>> = {};
+    for (const r of recent) {
+      if (r.status !== 'failed' || !r.roundId) continue;
+      const rid = Number(r.roundId);
+      const reason = (r.error as string) || '未知原因';
+      const arr = (failReasons[rid] ??= []);
+      const found = arr.find((f) => f.engine === r.engine && f.reason === reason);
+      if (found) found.count += 1;
+      else arr.push({ engine: r.engine, reason, count: 1 });
+    }
+    for (const k of Object.keys(failReasons)) {
+      failReasons[Number(k)] = failReasons[Number(k)].sort((a, b) => b.count - a.count).slice(0, 8);
+    }
+
     return {
       plan: plan
         ? { engines: plan.engines, surfaces: plan.surfaces, freq: plan.freq, nextRunAt: plan.nextRunAt, active: plan.active }
         : null,
       engines: byEngine,
-      rounds,
+      rounds: rounds.map((r) => ({ ...r, failReasons: failReasons[Number(r.id)] ?? [] })),
       lastRuns: recent.slice(0, 50).map((r) => ({
         status: r.status,
         engine: r.engine,
