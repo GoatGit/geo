@@ -1,8 +1,9 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Req, UseGuards } from '@nestjs/common';
 import { IsArray, IsIn, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import type { Request } from 'express';
 import { currentAccount } from '../common/auth';
+import { RateLimit, RateLimitGuard } from '../common/rate-limit.guard';
 import { BrandsService } from '../brands/brands.service';
 import { QuestionsService } from './questions.service';
 
@@ -29,6 +30,19 @@ export class QuestionsController {
     private readonly questionsService: QuestionsService,
     private readonly brandsService: BrandsService,
   ) {}
+
+  /** AI 推荐监控问题(冷启动/扩池):品牌档案+竞品+已有问题 → 差异化新问题候选。 */
+  @Post('brands/:id/questions:suggest')
+  @UseGuards(RateLimitGuard)
+  @RateLimit(6, 60, 'questions-suggest')
+  suggest(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) brandId: number,
+    @Body() dto: { count?: number },
+  ) {
+    const count = Math.min(Math.max(Math.floor(Number(dto?.count) || 12), 4), 20);
+    return this.questionsService.suggestForAccount(currentAccount(req).accountId, brandId, count);
+  }
 
   @Post('brands/:id/questions:batch')
   async batch(

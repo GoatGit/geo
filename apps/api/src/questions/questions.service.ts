@@ -6,7 +6,7 @@ import {
   orders, brands, collectionPlans, loadPlatformSettings, monitoringQuestions, recognitionEntries, subscriptions } from '@geo/db';
 import {
   BOOSTER_PACK, PLAN_LIMITS, INSIGHT_QUESTION_LAYERS, type PlanTier, type QuestionType } from '@geo/shared';
-import { InsightAgent } from '@geo/insight-agent';
+import { InsightAgent, chatCompletion } from '@geo/insight-agent';
 import { DB, REDIS } from '../common/infra.module';
 
 /** 问题分类与拓写的确定性基线(Insight Agent 的降级路径,docs/09 §1.2)。 */
@@ -74,6 +74,75 @@ export class QuestionsService {
   }
 
   /** 配额按类型分池(docs/00 教训 #4 对策),超额明确报错并给出升档指引。 */
+  /**
+   * AI 推荐监控问题(docs/01 §3.2 冷启动):品牌档案 + 竞品 + 已有问题喂给 LLM,
+   * 生成差异化新问题(去重已有,覆盖六层语义层);LLM 未启用/失败时抛 503 引导开启。
+   */
+  async suggestForAccount(accountId: number, brandId: number, count = 12) {
+    await this.planOf(brandId, accountId); // 归属校验(非本人品牌 404)
+    return this.suggest(brandId, count);
+  }
+
+  async suggest(brandId: number, count = 12) {
+    const brand = (
+      await this.db.select().from(brands).where(eq(brands.id, brandId)).limit(1)
+    )[0];
+    if (!brand) throw new HttpException('品牌不存在', HttpStatus.NOT_FOUND);
+    const { insightAgent: cfg } = await loadPlatformSettings(this.db);
+    if (!cfg.enabled || !cfg.endpoint || !cfg.apiKey || !cfg.model) {
+      throw new HttpException('需先在「全局配置 → Insight Agent」启用 LLM 后使用 AI 推荐问题', HttpStatus.BAD_REQUEST);
+    }
+    const competitors = (
+      await this.db
+        .select({ name: recognitionEntries.name, aliases: recognitionEntries.aliases })
+        .from(recognitionEntries)
+        .where(and(eq(recognitionEntries.brandId, brandId), eq(recognitionEntries.kind, 'competitor')))
+    ).map((r) => [r.name, ...(r.aliases ?? [])].join('/')).slice(0, 10);
+    const existing = (
+      await this.db
+        .select({ t: monitoringQuestions.textRaw })
+        .from(monitoringQuestions)
+        .where(and(eq(monitoringQuestions.brandId, brandId), eq(monitoringQuestions.status, 'active')))
+    ).map((r) => r.t).slice(0, 150);
+
+    const system =
+      '你是 AI 搜索监测专家。为品牌生成"用户会在 AI 助手里真实提出"的监控问题。只输出一个 JSON 对象。' +
+      'schema: {"questions":[{"text":"问题(5-24字,不含品牌自夸语气)","type":"ranking|reputation"}]}。' +
+      '要求:排名词=品类/场景/竞品对比/价格预算等推荐类问法,口碑词=质量/售后/口碑/安全等评价类问法;' +
+      '覆盖多个语义层(品类行业/场景人群/竞品对比/消费功能/价格决策/风险信任);' +
+      '必须与已有问题语义不同(不要换个说法重复);不含品牌名时确保该品牌是自然答案候选;总数 ' + count + ' 条。';
+    const raw = await chatCompletion(
+      { protocol: cfg.protocol as 'openai' | 'anthropic', endpoint: cfg.endpoint, apiKey: cfg.apiKey, model: cfg.model, timeoutMs: 60_000 },
+      {
+        system,
+        user: JSON.stringify({
+          品牌: brand.name,
+          行业: brand.industry,
+          定位描述: (brand.intro ?? '').slice(0, 300),
+          竞品: competitors,
+          已有问题: existing,
+        }),
+        maxTokens: 1600,
+      },
+    );
+    const m = raw.text.match(/\{[\s\S]*\}/);
+    if (!m) throw new HttpException('AI 返回格式异常,请重试', HttpStatus.BAD_GATEWAY);
+    let parsed: { questions?: Array<{ text?: string; type?: string }> };
+    try {
+      parsed = JSON.parse(m[0]);
+    } catch {
+      throw new HttpException('AI 返回格式异常,请重试', HttpStatus.BAD_GATEWAY);
+    }
+    const seen = new Set(existing.map((t) => t.replace(/\s+/g, '')));
+    return (parsed.questions ?? [])
+      .map((q) => ({
+        text: String(q.text ?? '').trim().slice(0, 60),
+        type: q.type === 'reputation' ? ('reputation' as const) : ('ranking' as const),
+      }))
+      .filter((q) => q.text.length >= 4 && !seen.has(q.text.replace(/\s+/g, '')))
+      .slice(0, count);
+  }
+
   async batchCreate(input: {
     accountId: number;
     brandId: number;

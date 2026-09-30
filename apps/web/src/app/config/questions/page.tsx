@@ -28,6 +28,36 @@ export default function QuestionsPage() {
   const brandId = useBrandId();
   const [input, setInput] = useState('');
   const [message, setMessage] = useState('');
+  // AI 推荐问题:候选展示 → 勾选 → 加入输入框走既有批量链路(分类/拓写/配额校验一致)
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestions, setSuggestions] = useState<Array<{ text: string; type: string; picked: boolean }> | null>(null);
+  const [suggestErr, setSuggestErr] = useState('');
+
+  const runSuggest = async () => {
+    setSuggesting(true);
+    setSuggestErr('');
+    setSuggestions(null);
+    try {
+      const r = await api<Array<{ text: string; type: string }>>(
+        `/brands/${brandId}/questions:suggest`,
+        { method: 'POST', json: { count: 12 } },
+      );
+      setSuggestions(r.map((x) => ({ ...x, picked: true })));
+      if (r.length === 0) setSuggestErr('AI 未产出新问题(可能已有问题覆盖较全),可补充品牌档案后重试');
+    } catch (e) {
+      setSuggestErr((e as Error).message);
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
+  const adoptPicked = () => {
+    const picked = (suggestions ?? []).filter((x) => x.picked).map((x) => x.text);
+    if (picked.length === 0) return;
+    setInput((prev) => [...prev.split('\n').filter(Boolean), ...picked].join('\n'));
+    setSuggestions(null);
+    toast(`已加入 ${picked.length} 条到输入框,确认后点「添加问题」`);
+  };
 
   const questions = useQuery({
     queryKey: ['questions', brandId],
@@ -102,7 +132,44 @@ export default function QuestionsPage() {
       />
 
       <section className="card rise-1 p-6">
-        <h2 className="mb-2 text-sm font-medium">批量添加(每行一条,AI 自动分类排名词/口碑词并拓写为自然问法)</h2>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-medium">批量添加(每行一条,AI 自动分类排名词/口碑词并拓写为自然问法)</h2>
+          <button
+            className="rounded-lg border border-brand/30 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 transition-colors hover:border-brand/50 disabled:opacity-50"
+            disabled={suggesting}
+            onClick={() => void runSuggest()}
+            title="基于品牌档案、竞品清单与已有问题,AI 生成差异化的新监控问题"
+          >
+            {suggesting ? 'AI 生成中…(约 10-20s)' : '✦ AI 推荐问题'}
+          </button>
+        </div>
+        {suggestErr && <p className="mb-2 text-xs text-bad">{suggestErr}</p>}
+        {suggestions && (
+          <div className="mb-3 rounded-xl border border-brand/20 bg-brand-50/40 p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs font-semibold text-slate-700">AI 推荐({suggestions.filter((x) => x.picked).length}/{suggestions.length} 已选,取消勾选可排除)</p>
+              <div className="flex gap-2">
+                <button className="btn-primary h-7 px-3 text-xs" onClick={adoptPicked}>加入输入框</button>
+                <button className="h-7 px-2 text-xs text-slate-500 hover:text-slate-800" onClick={() => setSuggestions(null)}>关闭</button>
+              </div>
+            </div>
+            <div className="grid gap-1.5 sm:grid-cols-2">
+              {suggestions.map((x, i) => (
+                <label key={i} className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-100 bg-white px-2.5 py-1.5 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={x.picked}
+                    onChange={() => setSuggestions((prev) => (prev ?? []).map((y, j) => (j === i ? { ...y, picked: !y.picked } : y)))}
+                  />
+                  <span className={x.type === 'reputation' ? 'text-teal-700' : 'text-brand-700'}>
+                    {x.type === 'reputation' ? '口碑' : '排名'}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-slate-700" title={x.text}>{x.text}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
         <textarea
           className="h-32 w-full rounded border p-3 text-sm"
           placeholder={'20万预算纯电轿车推荐\n小米汽车的口碑怎么样?'}
