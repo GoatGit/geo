@@ -107,6 +107,35 @@ async function dismissPromos(page: Page): Promise<void> {
   await page.keyboard.press('Escape').catch(() => undefined);
 }
 
+/** 等待期安全清扫「下载电脑版/免费领订阅」类运营浮层(豆包登录后弹「下载豆包电脑版
+ *  免费领取 30 天订阅」,盖住整页 → 登录入口/表单点不到,批量流程与 viewer 操作者都被挡)。
+ *  与 dismissPromos 的关键区别:文案锚定 + 容器限定,登录弹窗打开时也安全——
+ *  只在浮层自己的推广文案(电脑版/免费领取/立即下载…)在场时才动手,关闭钮只在该
+ *  浮层的容器内找,绝不无差别清扫(误点登录框 × 把它关掉是此前批量卡死的根因)。 */
+async function dismissOverlayPromo(page: Page): Promise<void> {
+  for (const frame of page.frames()) {
+    const anchor = frame.getByText(/电脑版|免费领取|限时领取|新人礼包|立即下载/).first();
+    if (!(await rendered(anchor))) continue;
+    // 浮层容器 = 锚文案最近的 modal/dialog/popup 祖先;「暂不下载/以后再说」是运营
+    // 浮层专属文案(登录弹窗没有),找不到容器时也允许按文案直点;×/关闭类必须容器内。
+    const container = anchor.locator(
+      'xpath=ancestor-or-self::div[contains(@class,"modal") or contains(@class,"dialog") or contains(@class,"popup") or contains(@class,"overlay") or contains(@class,"drawer") or @role="dialog"][1]',
+    );
+    const scoped = await rendered(container);
+    const closers = scoped
+      ? [
+          container.locator('[class*="close" i]:visible, [aria-label*="关闭" i]:visible, [aria-label*="close" i]:visible').first(),
+          container.getByText(/^(×|x|X|关闭|跳过|暂不下载|暂不使用|以后再说|暂不)$/, { exact: true }).first(),
+        ]
+      : [frame.getByText(/^(暂不下载|暂不使用|以后再说|跳过)$/, { exact: true }).first()];
+    for (const c of closers) {
+      if (!(await rendered(c))) continue;
+      await c.click({ timeout: 800, force: true }).catch(() => undefined);
+      return; // 一轮只关一个浮层(可能连环弹),交给下一次轮询
+    }
+  }
+}
+
 /** 服务协议确认弹窗(元宝「服务协议及隐私保护」等):只有弹窗文案在场时才点「同意」,
  *  避免误点登录表单里同名的协议链接;点击后复核弹窗真的关闭(实测可能重弹/多实例),
  *  仍在场则再点;点掉后调用方需补一次发码(弹窗会拦住发送按钮)。 */
@@ -388,6 +417,8 @@ export class LoginManager {
             viewer,
             updatedAt: new Date().toISOString(),
           });
+          // 运营浮层(豆包「下载电脑版领订阅」)登录前后都可能弹出盖住整页,每轮安全清扫
+          await dismissOverlayPromo(page);
           const { loggedIn } = await checkLogin(page, site);
           // 人工登录必须有正向凭证;游客可提问仅影响采集,不能让账号进入可用池。
           let usable = loggedIn === true && (await hasVisibleInput(page, site));
@@ -527,7 +558,8 @@ export class LoginManager {
    * public:本地直连调试入口(debug-auto-login.ts)复用同一份实现,不依赖实例状态。
    */
   async autoPhoneLogin(page: Page, site: ReturnType<typeof siteConfigOf>, sms: SmsLinkClient, sessionId: string, status: (detail: string) => Promise<void>): Promise<void> {
-    // 运营弹窗("下载豆包电脑版"等)只在打开登录入口前清扫——登录弹窗打开后
+    // 运营弹窗("下载豆包电脑版"等)先无差别清扫一次(此时登录弹窗必然未开,安全);
+    // 之后登录流程中的浮层由 dismissOverlayPromo 文案锚定安全清扫——登录弹窗打开后
     // 不能再无差别清扫:弹窗右上角 × 会被误点,把登录框关掉(批量流程卡死根因)。
     await dismissPromos(page);
     // 服务协议弹窗(元宝实测)会盖住登录框,先点掉
@@ -579,8 +611,10 @@ export class LoginManager {
       // 登录弹窗没开就先点开(deepseek 表单直出会跳过)
       await openLoginDialog();
       for (const retry of [1, 2]) {
-        // 协议弹窗可能盖住页签/输入框(元宝实测),每轮重试前先点掉
+        // 协议弹窗可能盖住页签/输入框(元宝实测),每轮重试前先点掉;
+        // 运营浮层(豆包「下载电脑版」)同样会拦住页签点击,一并安全清扫
         await acceptAgreementDialog(page);
+        await dismissOverlayPromo(page);
         for (const tabText of SMS_TABS[site.engine] ?? ['手机号登录', '验证码登录']) {
           // css 选择器('[' 开头)走渲染查找 + force 直点(文心 switch-item 普通点击被遮挡);
           // 否则精确文本优先(页签常与相邻文案同容器,模糊匹配点到容器不触发)
@@ -692,6 +726,8 @@ export class LoginManager {
       }
       await status(`第 ${round} 轮:手机号 ${phone},正在填入${site.displayName}并发送验证码…`);
 
+      // 填号前清扫运营浮层(截图实测:豆包此阶段弹「下载电脑版」只有 × 没有「暂不」文案)
+      await dismissOverlayPromo(page);
       await page.getByText(/暂不下载|以后再说|暂不使用/).first().click({ timeout: 300 }).catch(() => undefined);
       const phoneLoc = await visibleAcrossFrames(page, exactFields.phone || 'input[type=tel], input[placeholder*=手机], input[id*=phone]', 3_000);
       if (!phoneLoc) throw new Error('手机号输入框未找到(可能被弹窗遮挡)');
