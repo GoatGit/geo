@@ -111,8 +111,10 @@ export class QuestionsService {
       '要求:排名词=品类/场景/竞品对比/价格预算等推荐类问法,口碑词=质量/售后/口碑/安全等评价类问法;' +
       '覆盖多个语义层(品类行业/场景人群/竞品对比/消费功能/价格决策/风险信任);' +
       '必须与已有问题语义不同(不要换个说法重复);不含品牌名时确保该品牌是自然答案候选;总数 ' + count + ' 条。';
-    const raw = await chatCompletion(
-      { protocol: cfg.protocol as 'openai' | 'anthropic', endpoint: cfg.endpoint, apiKey: cfg.apiKey, model: cfg.model, timeoutMs: 60_000 },
+    let raw;
+    try {
+      raw = await chatCompletion(
+        { protocol: cfg.protocol as 'openai' | 'anthropic', endpoint: cfg.endpoint, apiKey: cfg.apiKey, model: cfg.model, timeoutMs: 60_000 },
       {
         system,
         user: JSON.stringify({
@@ -122,9 +124,14 @@ export class QuestionsService {
           竞品: competitors,
           已有问题: existing,
         }),
-        maxTokens: 1600,
-      },
-    );
+          maxTokens: 1600,
+        },
+      );
+    } catch (err) {
+      // LLM 瞬断/超时的裸异常会变成无信息的 HTTP 500(用户实测);包成可重试的 502 并落日志
+      console.error('[questions:suggest] LLM 调用失败:', (err as Error).message?.split('\n')[0]);
+      throw new HttpException('AI 服务暂时不可用,请稍后重试', HttpStatus.BAD_GATEWAY);
+    }
     const m = raw.text.match(/\{[\s\S]*\}/);
     if (!m) throw new HttpException('AI 返回格式异常,请重试', HttpStatus.BAD_GATEWAY);
     let parsed: { questions?: Array<{ text?: string; type?: string }> };
