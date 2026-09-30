@@ -2,7 +2,6 @@ import 'reflect-metadata';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import express from 'express';
 import { AppModule } from './app.module';
 import { AppExceptionFilter } from './common/app-exception.filter';
 import { loadEnv } from './config/env';
@@ -22,9 +21,9 @@ async function bootstrap() {
 
   // rawBody:微信支付回调需对原始报文验签(docs/07 §9 STS/验签语义)
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
-  // 登录凭证回收(credentials:storageState 含全站 Cookie+origins)可达数百 KB,默认 100kb 会 413/500
-  app.use(express.json({ limit: '5mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '5mb' }));
+  // 登录凭证回收(credentials:storageState 含全站 Cookie+origins)可达数百 KB,默认 100kb 会 413/500。
+  // 必须用 Nest 自带 useBodyParser 替换默认解析器(rawBody 下再挂 express.json 会双重解析,曾触发 SAE 健康检查回滚)
+  app.useBodyParser('json', { limit: '5mb' });
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
   app.useGlobalFilters(new AppExceptionFilter());
   // CORS:生产仅放行显式配置的站点域名(ALLOWED_ORIGIN,逗号分隔);未配置则关闭跨域
