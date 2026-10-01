@@ -11,8 +11,14 @@ export * from './types';
 export type BrowserMode = 'mock' | 'agentbay' | 'local';
 
 export function browserModeFromEnv(env: NodeJS.ProcessEnv = process.env): BrowserMode {
-  const mode = (env.BROWSER_MODE ?? 'mock') as BrowserMode;
-  return mode === 'agentbay' || mode === 'local' ? mode : 'mock';
+  const raw = env.BROWSER_MODE?.trim() ?? '';
+  if (raw === 'agentbay' || raw === 'local') return raw;
+  // 生产缺省/无效值报错:漏配时静默回落 mock 会向生产库种假档案、用假引擎数据污染真实表。
+  // fail-safe 方向必须是"缺配置即停",由部署平台显式注入 BROWSER_MODE 再拉起
+  if (env.NODE_ENV === 'production' && raw !== 'mock') {
+    throw new Error(`BROWSER_MODE=${raw || '(未配置)'} 无效:生产必须显式配置 agentbay|local|mock(mock 仅限演练环境)`);
+  }
+  return 'mock';
 }
 
 /** 按 env 组装(docs/07 §1:BROWSER_MODE=mock|agentbay|local)。 */

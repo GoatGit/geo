@@ -1298,6 +1298,16 @@ export async function runInsightBuild(db: Db, job: InsightBuildJob): Promise<voi
     .update(industryInsights)
     .set({ buildStatus: 'running', buildError: null })
     .where(eq(industryInsights.id, job.insightId));
+  // 心跳(复用 updated_at,无需加列):构建含重 SQL + LLM 组稿可跑数分钟,无心跳则
+  // 崩溃后 running 永久卡死,每周 cron 对该行业永久跳过(对比 survey/persona 均有心跳)
+  const heartbeat = setInterval(() => {
+    void db
+      .update(industryInsights)
+      .set({ updatedAt: new Date() })
+      .where(eq(industryInsights.id, job.insightId))
+      .catch(() => undefined);
+  }, 60_000);
+  heartbeat.unref();
 
   try {
     // 分层补齐(构建时一次性):历史问题创建于分层功能前,group_name 为空 →
@@ -1359,7 +1369,23 @@ export async function runInsightBuild(db: Db, job: InsightBuildJob): Promise<voi
       .set({ buildStatus: 'failed', buildError: (err as Error).message.slice(0, 500) })
       .where(eq(industryInsights.id, job.insightId));
     throw err;
+  } finally {
+    clearInterval(heartbeat);
   }
+}
+
+/**
+ * 僵死构建回收:running 且心跳(updated_at)超时 = 构建进程已死(崩溃/OOM 被杀/实例缩容),
+ * 置 failed 允许重跑。weekly 循环与 worker 启动时各扫一遍,不再永久跳过该行业。
+ */
+export async function reclaimStaleInsightBuilds(db: Db, staleMinutes = 5): Promise<number> {
+  const res = await db.execute(sql`
+    update industry_insights set build_status = 'failed',
+      build_error = '构建中断(心跳超时自动回收),可重新运行', updated_at = now()
+    where build_status = 'running'
+      and updated_at < now() - (${staleMinutes} || ' minutes')::interval
+    returning id`);
+  return res.rows.length;
 }
 
 /** 行业事实摘要(供 LLM 撰稿;紧凑 JSON,控制输入规模)。 */

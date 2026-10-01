@@ -1,9 +1,6 @@
-import { Queue, Worker } from 'bullmq';
 import Redis from 'ioredis';
-import { sql } from 'drizzle-orm';
-import { createDb, ensurePartitions, reports, runMigrations } from '@geo/db';
-import { PLAN_LIMITS, type PlanTier } from '@geo/shared';
-import { REPORTS_QUEUE, REPUTATION_QUEUE, bullConnection } from './queue';
+import { createDb, ensurePartitions, runMigrations } from '@geo/db';
+import { REPUTATION_QUEUE, REPORTS_QUEUE, bullConnection } from './queue';
 import { envInt } from './config';
 import { CollectProcessor } from './processor';
 import { LoginManager } from './login-manager';
@@ -15,7 +12,7 @@ import { AccountPoolService } from './profiles';
 import { ProxyPoolManager } from './qg-proxy';
 import { startReportsWorker, startReputationWorker, scheduleWeeklyReports } from './report-worker';
 import { startInsightsWorker, scheduleWeeklyInsights } from './insights-worker';
-import { createBrokerFromEnv } from '@geo/browser-session';
+import { browserModeFromEnv, createBrokerFromEnv } from '@geo/browser-session';
 import { PersonaLibraryWorker } from './persona-library-worker';
 import { SurveyWorker } from './survey-worker';
 
@@ -48,8 +45,10 @@ async function bootstrap() {
   scheduler.start(undefined, concurrency); // 间隔经 SCHEDULER_INTERVAL_MS 配置(默认 60s);并发数随心跳上报
 
   // mock 采集模式下确保账号池非空:池空会导致任务无限延迟重排、采集静默空转。
-  // 补种失败(如 DB 缺列且迁移未跑)不阻塞启动——采集与登录主链路不依赖它
-  if ((process.env.BROWSER_MODE ?? 'mock') === 'mock') {
+  // 补种失败(如 DB 缺列且迁移未跑)不阻塞启动——采集与登录主链路不依赖它。
+  // browserModeFromEnv 在生产缺省/无效 BROWSER_MODE 时直接抛错退出(fail-safe,防假数据入库)
+  const browserMode = browserModeFromEnv();
+  if (browserMode === 'mock') {
     await new AccountPoolService(db)
       .ensureMockProfiles(2)
       .catch((err) => logger.error('[worker-web] mock 档案补种失败(不阻塞启动):', (err as Error).message));
@@ -74,6 +73,12 @@ async function bootstrap() {
   );
   const reportsWorker = startReportsWorker(db);
   const insightsWorker = startInsightsWorker(db);
+  // 启动即回收僵死的行业洞察构建(实例缩容/崩溃遗留的 running 行,不回收则该行业永久跳过)
+  void import('./insight-builder')
+    .then(({ reclaimStaleInsightBuilds }) =>
+      reclaimStaleInsightBuilds(db).then((n) => n > 0 && console.warn(`[insights] 启动回收 ${n} 个僵死构建`)),
+    )
+    .catch(() => undefined);
   const surveyWorker = new SurveyWorker(db).start();
   const personaLibraryWorker = new PersonaLibraryWorker(db).start();
   await scheduleWeeklyReports();
@@ -105,54 +110,12 @@ async function bootstrap() {
         if ((counts.delayed ?? 0) > 200) await alerter.queueBacklog(counts.delayed ?? 0);
       } catch { /* 巡检失败静默 */ }
     })();
-  }, 10 * 60_000); // 行业洞察每周一 09:00 自动生成(docs/01 §3.10 市场化)
+  }, 10 * 60_000);
 
-  // 周报 cron 触发时,给每个活跃品牌入队报告;同一品牌同一周期幂等(failed 除外,可重生成)
-  const cronQueue = new Queue(REPORTS_QUEUE, { connection: bullConnection() });
-  const cronConsumer = new Worker(
-    REPORTS_QUEUE,
-    async (job) => {
-      if (job.name !== 'cron-weekly') return;
-      // 只给未过期订阅的品牌入队:订阅行无自动到期降档,status 停在 active 不可信;
-      // 档位是否含周报由 PLAN_LIMITS.weeklyReport 判定(与用户侧生成入口同口径)
-      const res = await db.execute(sql`
-        select cp.brand_id::bigint as brand_id, s.plan as plan, to_char(now(), 'IYYY-MM-DD') as period
-        from collection_plans cp
-        join subscriptions s on s.brand_id = cp.brand_id
-        where cp.active
-          and s.status = 'active'
-          and s.account_id is not null
-          and (s.period_end is null or s.period_end > now())
-          and not exists (
-            select 1 from reports r
-            where r.brand_id = cp.brand_id and r.type = 'weekly'
-              and r.period = to_char(now(), 'IYYY-MM-DD')
-              and r.status <> 'failed'
-          )
-      `);
-      const rows = (res as unknown as { rows: Array<{ brand_id: string; plan: string; period: string }> }).rows;
-      for (const r of rows) {
-        if (!PLAN_LIMITS[r.plan as PlanTier]?.weeklyReport) continue;
-        const brandId = Number(r.brand_id);
-        const inserted = (
-          await db
-            .insert(reports)
-            .values({ brandId, type: 'weekly', period: r.period })
-            .returning({ id: reports.id })
-        )[0]!;
-        await cronQueue.add(
-          'generate',
-          { reportId: inserted.id, brandId, type: 'weekly', period: r.period },
-          { attempts: 3, removeOnComplete: 100 },
-        );
-      }
-    },
-    { connection: bullConnection(), concurrency: 1 },
-  );
-  cronConsumer.on('error', (err) => console.error('[reports-cron] consumer error', err));
-
+  // 周报 cron 由 reportsWorker 统一消费(见 report-worker.ts):REPORTS_QUEUE 只允许一个
+  // consumer,历史上第二个 cronConsumer 与其互相误吞过对方的 job 名。
   logger.log(
-    `[worker-web] started: concurrency=${concurrency}, queues=[collect,${REPUTATION_QUEUE},${REPORTS_QUEUE},insights], browser=${process.env.BROWSER_MODE ?? 'mock'}`,
+    `[worker-web] started: concurrency=${concurrency}, queues=[collect,${REPUTATION_QUEUE},${REPORTS_QUEUE},insights], browser=${browserMode}`,
   );
 
   const shutdown = async (signal: string) => {
@@ -166,8 +129,6 @@ async function bootstrap() {
       insightsWorker.close(),
       surveyWorker.stop(),
       personaLibraryWorker.stop(),
-      cronConsumer.close(),
-      cronQueue.close(),
       collect.shutdown(),
       loginRedis.quit(),
     ]);

@@ -8,10 +8,13 @@ describe('queue 配置(docs/04 §5 优先级队列)', () => {
     }
   });
 
-  it('档位优先级:免费 < 入门 < 标准 < 专业 < 定制(快速体检加急另计)', () => {
-    const order = ['free', 'starter', 'standard', 'pro', 'custom'].map(priorityOf);
-    for (let i = 1; i < order.length; i++) {
-      expect(order[i]!).toBeGreaterThan(order[i - 1]!);
-    }
+  it('档位优先级:数值越小越优先 —— 定制 < 专业 < 标准 < 入门 < 免费(BullMQ 语义)', () => {
+    // BullMQ priority: 数值小的先被调度。付费越高档数值必须越小。
+    expect(priorityOf('custom')).toBeLessThan(priorityOf('pro'));
+    expect(priorityOf('pro')).toBeLessThan(priorityOf('standard'));
+    expect(priorityOf('standard')).toBeLessThan(priorityOf('starter'));
+    expect(priorityOf('starter')).toBeLessThan(priorityOf('free'));
+    // 未知档位按免费兜底(数值最大 = 最不优先),不得反向抢占付费档
+    expect(priorityOf('unknown-plan')).toBe(priorityOf('free'));
   });
 });

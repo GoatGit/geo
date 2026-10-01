@@ -30,6 +30,8 @@ function fixture() {
   const storageState = vi.fn(async () => state);
   const page = {
     evaluate: async () => ({ ua: 'local-chrome', locale: 'zh-CN', viewport: '1366x850' }),
+    // dismissOverlayPromo 逐 frame 扫浮层:无 frame 即空扫描
+    frames: () => [],
     goto: vi.fn(async () => undefined), url: () => 'https://www.doubao.com/chat/',
     waitForTimeout: vi.fn(async (ms: number) => { now += ms; }),
     context: () => ({ cookies: async () => state.cookies, storageState, browser: () => ({}) }),

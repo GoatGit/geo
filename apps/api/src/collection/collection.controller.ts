@@ -238,19 +238,19 @@ export class CollectionController {
     return { retried: failedRuns.length, roundId: newRound.id };
   }
 
-  /** BullMQ 优先级:数值越大越优先(与 worker 侧 priorityOf 同口径)。 */
+  /** BullMQ 优先级:数值越小越优先(与 worker 侧 priorityOf 同口径);docs/04 §5 定制 > 专业 > 标准 > 入门 > 免费 */
   private priorityOf(plan: string): number {
     switch (plan) {
       case 'custom':
-        return 50;
+        return 10;
       case 'pro':
-        return 40;
+        return 20;
       case 'standard':
         return 30;
       case 'starter':
-        return 20;
+        return 40;
       default:
-        return 10;
+        return 50;
     }
   }
 }

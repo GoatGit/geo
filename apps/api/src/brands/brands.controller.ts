@@ -128,7 +128,10 @@ export class BrandsController {
 
   /** 挖掘进行中?(同一品牌并发去重 + 前端轮询判定) */
   @Get(':id/dig/status')
-  digStatus(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
+  async digStatus(@Req() req: Request, @Param('id', ParseIntPipe) id: number) {
+    // 归属校验:lastError 可能含内部错误细节,不能让任意登录用户横向探测
+    const accountId = currentAccount(req).accountId;
+    await this.brandsService.getOwned(accountId, id);
     return { running: this.brandsService.isDigging(id), lastError: this.brandsService.lastDigError(id) };
   }
 }

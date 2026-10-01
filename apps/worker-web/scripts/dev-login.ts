@@ -9,7 +9,7 @@
  */
 import { createDb, ensurePartitions } from '@geo/db';
 import Redis from 'ioredis';
-import { LoginManager } from './login-manager';
+import { LoginManager } from '../src/login-manager';
 import { createBrokerFromEnv } from '@geo/browser-session';
 
 async function main() {

@@ -5,6 +5,7 @@ import type { Request } from 'express';
 import { eq } from 'drizzle-orm';
 import { accountProfiles } from '@geo/db';
 import { loadPlatformSettings } from '@geo/db';
+import { SecretBox } from '@geo/shared';
 import { DB } from '../common/infra.module';
 import { Public } from '../common/auth';
 
@@ -76,10 +77,12 @@ export class SkillAccessController {
     const storageState = body.storageState ?? { cookies, origins: [] };
     const profile = (await this.db.select({ id: accountProfiles.id }).from(accountProfiles).where(eq(accountProfiles.id, id)).limit(1))[0];
     if (!profile) throw new NotFoundException('账号档案不存在');
+    // 登录态入库前密封(AES-256-GCM,docs/04 §3.1);生产未配 CREDENTIAL_ENC_KEY 时此处抛错拒绝明文落库
+    const box = SecretBox.fromEnv();
     await this.db.update(accountProfiles).set({
       status: 'available',
-      cookies: cookies as unknown[],
-      storageState: storageState as typeof accountProfiles.$inferInsert.storageState,
+      cookies: box.seal(cookies) as unknown[],
+      storageState: box.seal(storageState) as typeof accountProfiles.$inferInsert.storageState,
       ...(body.contextId ? { contextRef: body.contextId } : {}),
       ...(body.proxyServer !== undefined ? { proxyServer: body.proxyServer } : {}),
       cooldownUntil: null,

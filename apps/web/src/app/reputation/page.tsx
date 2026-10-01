@@ -258,8 +258,8 @@ function ScoreRing({ value }: { value: number | null }) {
   const r = 40;
   const c = 2 * Math.PI * r;
   const v = value ?? 0;
-  // 环形进度只表达 0..100;负分以数字与本档位色呈现
-  const progress = Math.max(0, Math.min(100, v)) / 100;
+  // 值域 −100..+100(docs/02 §4):环映射到半环=中性(50%),数字与档位色表达正负
+  const progress = Math.max(0, Math.min(1, (v + 100) / 200));
   const tone = value == null ? '#3f453e' : value < 60 ? '#a05252' : '#3f453e';
   return (
     <svg width="112" height="112" viewBox="0 0 100 100" className="shrink-0">

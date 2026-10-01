@@ -110,43 +110,49 @@ export async function runInstantExtraction(input: {
     }
   }
 
-  for (const f of facts) {
-    await db.insert(mentionFacts).values({
-      runId,
-      brandId,
-      subjectKind: f.subjectKind,
-      subjectKey: f.subjectKey,
-      subjectName: f.subjectName,
-      mentioned: f.mentioned,
-      rank: f.rank,
-      coRanked: f.coRanked,
-      ranAt,
-      engine,
-      surface: 'web',
-      questionId,
-      evidence: f.evidence as unknown as Record<string, unknown> | null,
-      parserVersion: f.parserVersion,
-      confidence: f.confidence,
-    });
+  // 批量落库:逐条 await 是每事实一次 RTT,高吞吐下拖慢 worker 且放大半写窗口
+  if (facts.length > 0) {
+    await db.insert(mentionFacts).values(
+      facts.map((f) => ({
+        runId,
+        brandId,
+        subjectKind: f.subjectKind,
+        subjectKey: f.subjectKey,
+        subjectName: f.subjectName,
+        mentioned: f.mentioned,
+        rank: f.rank,
+        coRanked: f.coRanked,
+        ranAt,
+        engine,
+        surface: 'web' as const,
+        questionId,
+        evidence: f.evidence as unknown as Record<string, unknown> | null,
+        parserVersion: f.parserVersion,
+        confidence: f.confidence,
+      })),
+    );
   }
 
   // 引用即时抽取(教训 A6 对策:引用卡同步通路,只把"正文散落链接"留给异步管道)
-  for (const c of citations) {
-    const { url, domain } = normalizeUrl(c.url);
-    const cls = classifyDomain(domain, mergedDomainDict());
-    await db.insert(citationFacts).values({
-      runId,
-      brandId,
-      rawUrl: url,
-      domain,
-      platformCategory: cls.category,
-      title: c.title ?? null,
-      isOwned: isOwnedDomain(domain, ownedDomains),
-      engine,
-      questionId,
-      extractedAt: ranAt,
-      parserVersion: PARSER_VERSION,
+  const citationRows = citations
+    .map((c) => {
+      const { url, domain } = normalizeUrl(c.url);
+      return {
+        runId,
+        brandId,
+        rawUrl: url,
+        domain,
+        platformCategory: classifyDomain(domain, mergedDomainDict()).category,
+        title: c.title ?? null,
+        isOwned: isOwnedDomain(domain, ownedDomains),
+        engine,
+        questionId,
+        extractedAt: ranAt,
+        parserVersion: PARSER_VERSION,
+      };
     });
+  if (citationRows.length > 0) {
+    await db.insert(citationFacts).values(citationRows);
   }
 
   return { facts };

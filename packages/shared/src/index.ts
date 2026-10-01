@@ -7,3 +7,4 @@ export * from './surveys';
 export * from './calibration';
 export * from './persona-license';
 export * from './population-benchmark';
+export * from './secret-box';

@@ -58,6 +58,7 @@ describe('平台配置净化(管理后台 ↔ 调度器契约)', () => {
       'insightAgent',
       'proxyPool',
       'schedulerEnabled',
+      'skillAccess',
     ]);
   });
 

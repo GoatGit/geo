@@ -27,9 +27,9 @@ import { DEFAULT_DOMAIN_DICT } from '@geo/metrics';
 import { buildEvidencePack, createStorageFromEnv } from '@geo/evidence';
 import { fingerprintHash } from '@geo/browser-session';
 import { eq, sql } from 'drizzle-orm';
-import { runInstantExtraction, toSubjects, type SubjectRow } from './extraction';
-import { extractReputation } from './reputation';
-import { buildReportPayload } from './report-builder';
+import { runInstantExtraction, toSubjects, type SubjectRow } from '../src/extraction';
+import { extractReputation } from '../src/reputation';
+import { buildReportPayload } from '../src/report-builder';
 
 /**
  * dev mock 数据灌入(docs/01 全链路演示用):

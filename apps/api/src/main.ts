@@ -35,6 +35,20 @@ async function bootstrap() {
     credentials: true,
   });
   app.set('trust proxy', 1);
+  // 安全响应头(helmet 同款核心子集,零依赖):公开分享报告页直出 text/html,
+  // 必须有 nosniff/防点击劫持/防 MIME 嗅探;CSP 由各渲染方自行控制故不在此统一下发
+  app.use((_req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    next();
+  });
+  // 健康探针(SAE/容器无业务语义检查点,此前只能打 TCP):无鉴权、不触 DB,仅证明进程可服务
+  app.use('/health', (_req: import('express').Request, res: import('express').Response) => {
+    res.status(200).json({ ok: true, ts: new Date().toISOString() });
+  });
   // SIGTERM/SIGINT 触发 Nest 生命周期(onModuleDestroy 关闭 Queue/Redis),SAE 滚动发布时干净退出
   app.enableShutdownHooks();
 

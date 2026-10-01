@@ -12,9 +12,9 @@ import { chromium } from 'playwright-core';
 import { createBrokerFromEnv } from '@geo/browser-session';
 import { checkLogin, siteConfigOf } from '@geo/engine-adapters';
 import type { EngineId } from '@geo/shared';
-import { SmsLinkClient, smsTokenFromLink } from './sms-client';
-import { browserContextOptions } from './browser-context';
-import { LoginManager } from './login-manager';
+import { SmsLinkClient, smsTokenFromLink } from '../src/sms-client';
+import { browserContextOptions } from '../src/browser-context';
+import { LoginManager } from '../src/login-manager';
 
 const arg = (name: string, fallback = '') => {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));

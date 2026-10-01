@@ -39,7 +39,15 @@ const MAX_ATTEMPTS = envInt('COLLECT_ATTEMPTS', 3, 1, 5);
 const MAX_DEFERRED = envInt('COLLECT_MAX_DEFERRED', 15, 1, 100);
 /** 单次 ask 超时:挂死的会话不能永久占用 worker 并发槽(视为 failed,进熔断/健康分)。 */
 const ASK_TIMEOUT_MS = envInt('ASK_TIMEOUT_MS', 120_000, 10_000, 600_000);
+/**
+ * ask 硬超时余量:适配器内部的 timeoutMs 只覆盖 waitForAnswer 轮询,goto/每选择器
+ * 最多 30s 的挂载等待/提交重试/引用收割都不计入——CDP 半死挂住时 job 永不返回、
+ * stalled 检测不触发(进程活着续锁),并发槽被逐个钉死。硬墙兜住整条链路。
+ */
+const ASK_HARD_MARGIN_MS = envInt('ASK_HARD_MARGIN_MS', 120_000, 10_000, 600_000);
 const RETRY_BACKOFF_MS = envInt('COLLECT_RETRY_BACKOFF_MS', 3_000, 0, 60_000);
+/** 档案互斥 advisory lock 的 class key(pg 两段式 key 的固定段,与业务 id 空间隔离)。 */
+const PROFILE_LOCK_CLASS = 0x67_65_6f;
 
 /**
  * 采集执行链(docs/04 §1 总体结构):
@@ -70,6 +78,7 @@ export class CollectProcessor {
     alerter?: Alerter,
   ) {
     this.alerter = alerter ?? null;
+    this.redis = redis;
     this.breaker = new EngineBreaker(redis);
     this.pool = new AccountPoolService(db);
     // 代理池全进程单例(main 注入):登录与采集共用同一租约表,IP 亲和才能成立
@@ -85,8 +94,8 @@ export class CollectProcessor {
 
   private readonly realBrowser: boolean;
   private readonly proxyPool: ProxyPoolManager;
-  /** Count misses per credential version; a successful re-login starts fresh. */
-  private readonly cookieMisses = new Map<number, { version: string; count: number }>();
+  /** cookie 2-strike 计数走 Redis(带版本绑定):多实例部署下判定一致,不再各记各的。 */
+  private readonly redis: Redis;
 
   start(concurrency: number): Worker<CollectJobData> {
     const worker = new Worker<CollectJobData>(COLLECT_QUEUE, (job) => this.process(job), {
@@ -140,8 +149,25 @@ export class CollectProcessor {
       return { status: 'deferred' };
     }
     // 过期重排僵尸:延迟重排超过 2 小时仍未执行的任务,其采集窗口已失真且会长期占坑,
-    // 拾起即弃(轮次进度由其余任务或下次轮次覆盖)。新入队任务不受影响
-    if (deferredCount > 0 && Date.now() - job.timestamp > 2 * 3600_000) {
+    // 拾起即弃并给轮次回写 failed 计数——totals.total 已计入本任务,不回写则 done 永远
+    // 追不上 total,轮次卡 running 且 retry-failed 对未完结轮次 409,用户无法重试。
+    // firstQueuedAt 在每次延迟重排时透传原始入队时间(requeue 会新建 job 重置 timestamp)
+    if (deferredCount > 0 && Date.now() - (data.firstQueuedAt ?? job.timestamp) > 2 * 3600_000) {
+      console.error(`[collect] zombie job round=${data.roundId} engine=${engine} question=${data.questionId} 超过 2 小时未执行,落 failed 收口`);
+      await this.db
+        .insert(queryRuns)
+        .values({
+          brandId: data.brandId,
+          questionId: data.questionId,
+          engine,
+          surface: 'web',
+          roundId: data.roundId,
+          status: 'failed',
+          ranAt: new Date(),
+          meta: { zombie: true, firstQueuedAt: new Date(data.firstQueuedAt ?? job.timestamp).toISOString(), deferredCount },
+        })
+        .catch((err) => console.error('[collect] record zombie failed:', err));
+      await this.bumpRound(data.roundId, 'failed').catch(() => undefined);
       return { status: 'deferred' };
     }
 
@@ -158,7 +184,7 @@ export class CollectProcessor {
 
     // 熔断(docs/04 §5):该引擎通道维护中 → 延迟重排,不产生 failed 污染口径
     if (await this.breaker.isTripped(engine)) {
-      await this.requeue.add('collect', { ...data, deferredCount: deferredCount + 1 }, { delay: 60_000, priority: data.priority });
+      await this.requeue.add('collect', { ...data, deferredCount: deferredCount + 1, firstQueuedAt: data.firstQueuedAt ?? job.timestamp }, { delay: 60_000, priority: data.priority });
       void this.alerter?.breakerTripped(engine, -1, -1);
       return { status: 'deferred' };
     }
@@ -171,21 +197,39 @@ export class CollectProcessor {
     let profile = await this.pool.acquire(engine);
     if (!profile) {
       // 账号池耗尽(docs/04 §3.2):延迟重排,扩容与冗余由运营策略解决
-      await this.requeue.add('collect', { ...data, deferredCount: deferredCount + 1 }, { delay: 120_000, priority: data.priority });
+      await this.requeue.add('collect', { ...data, deferredCount: deferredCount + 1, firstQueuedAt: data.firstQueuedAt ?? job.timestamp }, { delay: 120_000, priority: data.priority });
       void this.alerter?.poolExhausted(engine);
       return { status: 'deferred' };
     }
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       triedProfileIds.add(profile.id);
-      ({ ask, leaseServer, rotated } = await this.askWithTimeout(engine, profile, data.questionText));
+      // 同档案互斥(pg advisory lock,跨实例):acquire 只记日配额不置 in-use,两个 job
+      // 并发领到同一档案会在同一 Page/Context 上互踩(local 共享 Page;agentbay 同 Context
+      // 并发绑定触发风控)。拿不到锁立即换号,不消耗 attempt
+      const releaseLock = await this.tryProfileLock(profile.id);
+      if (!releaseLock) {
+        console.error(`[collect] engine=${engine} profile=${profile.id} 并发采集中,换号`);
+        const next = await this.pool.acquire(engine, triedProfileIds);
+        if (next) {
+          profile = next;
+          continue;
+        }
+        await this.requeue.add('collect', { ...data, deferredCount: deferredCount + 1, firstQueuedAt: data.firstQueuedAt ?? job.timestamp }, { delay: 60_000, priority: data.priority });
+        return { status: 'deferred' };
+      }
+      try {
+        ({ ask, leaseServer, rotated } = await this.askWithTimeout(engine, profile, data.questionText));
+      } finally {
+        await releaseLock();
+      }
       await this.breaker.record(engine, ask.status !== 'failed');
       if (needsLoginOf(ask)) {
         if (profile.cookies?.length || profile.storageState?.origins.length) {
           if (rotated && leaseServer) {
             // 出口租约已切换:Cookie 是绑旧 IP 的,被判未登录不代表死——重绑新出口 + 短冷却,
             // 不计入 2-strike(不 experge Cookie);引擎若仍拒绝,冷却后自然再试
-            this.cookieMisses.delete(profile.id);
+            await this.cookieMissReset(profile.id);
             await this.pool.bindProxy(profile.id, leaseServer);
             await this.pool.markTransientLoginMiss(profile);
             console.error(
@@ -193,11 +237,9 @@ export class CollectProcessor {
             );
           } else {
             const version = createHash('sha256').update(JSON.stringify(profile.storageState ?? profile.cookies)).digest('hex');
-            const previous = this.cookieMisses.get(profile.id);
-            const misses = (previous?.version === version ? previous.count : 0) + 1;
-            this.cookieMisses.set(profile.id, { version, count: misses });
+            const misses = await this.cookieMissBump(profile.id, version);
             if (misses >= 2) {
-              this.cookieMisses.delete(profile.id);
+              await this.cookieMissReset(profile.id);
               await this.pool.markLoginRequired(profile);
               console.error(
                 `[collect] engine=${engine} profile=${profile.id} 登录态连续 ${misses} 次未通过,保留凭证并转人工核验`,
@@ -212,7 +254,7 @@ export class CollectProcessor {
             }
           }
         } else {
-          this.cookieMisses.delete(profile.id);
+          await this.cookieMissReset(profile.id);
           // 真正未登录过的档案才要求人工重登
           await this.pool.markLoginRequired(profile);
           console.error(
@@ -228,7 +270,7 @@ export class CollectProcessor {
         if (ask.status !== 'failed' && leaseServer && leaseServer !== profile.proxyServer) {
           await this.pool.bindProxy(profile.id, leaseServer).catch(() => undefined);
         }
-        if (ask.status !== 'failed') this.cookieMisses.delete(profile.id);
+        if (ask.status !== 'failed') await this.cookieMissReset(profile.id);
         await this.pool.report(engine, profile.id, ask.status !== 'failed');
       }
       if (ask.status !== 'failed') break;
@@ -315,11 +357,25 @@ export class CollectProcessor {
         .where(eq(queryRuns.id, runId));
 
       // ===== 即时抽取(ok_* 才进口径)=====
-      // 抽取失败不回改 run 状态:事实缺失只是样本损失,状态与事实互相矛盾更伤口径
+      // 抽取失败不回改 run 状态:状态与事实互相矛盾更伤口径;但必须留下可见标记,
+      // 否则该引擎静默漏出矩阵分母,违反"失败/拦截永不静默为 0"(enums 四态承诺)
       if (ask.status !== 'failed') {
-        await this.extractAndEnqueue(data, runId, engine, ranAt, ask, adapter.strategy).catch((err) =>
-          console.error(`[collect] extract failed run=${runId} engine=${engine}:`, err),
+        const extracted = await this.extractAndEnqueue(data, runId, engine, ranAt, ask, adapter.strategy).then(
+          () => true,
+          (err) => {
+            console.error(`[collect] extract failed run=${runId} engine=${engine}:`, err);
+            return false;
+          },
         );
+        if (!extracted) {
+          await this.db
+            .update(queryRuns)
+            .set({
+              meta: sql`coalesce(query_runs.meta, '{}'::jsonb) || ${JSON.stringify({ extractionFailed: true })}::jsonb`,
+            })
+            .where(eq(queryRuns.id, runId))
+            .catch(() => undefined);
+        }
       }
 
       // 状态已定格:进度推送/轮次计数失败只记日志,成功 run 不因旁路故障降级为 failed
@@ -353,7 +409,8 @@ export class CollectProcessor {
     return { status: ask.status };
   }
 
-  /** 单次 ask,带超时护栏:超时按 failed 处理并释放会话,不占用并发槽。
+  /** 单次 ask,带超时护栏:适配器内部 timeoutMs 只覆盖 waitForAnswer,这里加整链路硬墙。
+   *  硬超时后强制断开 CDP 连接并释放会话——被挂死的 ask 不能永久占用 worker 并发槽。
    *  代理按档案绑定取用(IP 亲和,采集事故复盘):返回本次实际使用的租约 server 与
    *  是否发生了出口切换(rotated),供调用方区分"Cookie 真死"与"换 IP 误杀"。 */
   private async askWithTimeout(
@@ -363,75 +420,108 @@ export class CollectProcessor {
   ): Promise<{ ask: AskResult; leaseServer: string | null; rotated: boolean }> {
     const queuedAt = new Date();
     let cdpBrowser: Browser | null = null;
-    try {
-      const session = await this.broker.acquire({
-        profileKey: profile.profileKey,
-        contextRef: profile.contextRef ?? undefined,
-        fingerprint: profile.fingerprint,
-        proxyHint: profile.proxyHint ?? undefined,
-        purpose: 'collect',
-      });
+    /** forceCleaned:正常 finally 与硬超时强拆只做一次,避免双重 release */
+    let forceCleaned = false;
+    let releaseSession: (() => Promise<void>) | null = null;
+    const hardMs = ASK_TIMEOUT_MS + ASK_HARD_MARGIN_MS;
+    let hardTimer: NodeJS.Timeout | undefined;
+    const hardTimeout = new Promise<never>((_, reject) => {
+      hardTimer = setTimeout(
+        () => reject(new Error(`ask hard timeout after ${hardMs}ms(含导航/选择器挂载/提交重试/引用收割)`)),
+        hardMs,
+      );
+    });
+    hardTimer?.unref?.();
+    const cleanupOnce = async (): Promise<void> => {
+      if (forceCleaned) return;
+      forceCleaned = true;
       try {
-        // 本地代理直接注入 Page;远程代理(AgentBay)经 CDP 连接拿页面
-        let page = session.page as Page | undefined;
-        let lease: import('./qg-proxy').QgProxyLease | null = null;
-        let rotated = false;
-        if (!page && /^wss?:\/\//.test(session.cdpUrl)) {
-          cdpBrowser = await chromium.connectOverCDP(session.cdpUrl);
-          // 代理出口(docs/07 §13 闸门 #2):AgentBay BrowserOption.proxy 被静默忽略,
-          // 改用 Playwright context 级代理。按档案绑定取同一出口——登录 Cookie 与
-          // 出口 IP 绑定一致;租约消失时代理池会分配新出口并标 rotated
-          ({ lease, rotated } = await this.proxyPool.acquireForProfile(profile.proxyServer ?? null));
-          const contextOptions = engine === 'deepseek'
-            ? browserContextOptions(profile.fingerprint, lease?.server ?? null, profile.storageState)
-            : {
-              ...(lease ? { proxy: { server: `http://${lease.server}` } } : {}),
-              ...(profile.storageState ? { storageState: profile.storageState } : {}),
-            };
-          const context = lease || profile.storageState
-            ? await cdpBrowser.newContext(contextOptions)
-            : cdpBrowser.contexts()[0] ?? await cdpBrowser.newContext(contextOptions);
-          // 注入持久化 Cookie(docs/04 §3.1):登录导出的引擎会话态先于导航生效
-          if (!profile.storageState && profile.cookies?.length) {
-            try {
-              await context.addCookies(profile.cookies as never[]);
-              console.log(`[collect] engine=${engine} profile=${profile.id} 注入 Cookie ${profile.cookies.length} 条${lease ? ` + 代理出口 ${lease.egressIp}${rotated ? '(已切换)' : ''}` : '(直连)'}`);
-            } catch (err) {
-              console.error(`[collect] engine=${engine} profile=${profile.id} Cookie 注入失败:`, (err as Error).message);
-            }
-          }
-          page = context.pages()[0] ?? (await context.newPage());
-        }
-        const adapter = this.registry.get(engine as never, 'web');
-        const ask = await adapter.ask(
-          {
-            mode: this.realBrowser ? 'browser' : 'mock',
-            page,
-            fingerprint: profile.fingerprint,
-            proxyHint: profile.proxyHint ?? undefined,
-            profileKey: profile.profileKey,
-          },
-          questionText,
-          { timeoutMs: ASK_TIMEOUT_MS },
-        );
-        if (page && profile.storageState && ask.status !== 'failed' && !needsLoginOf(ask)) {
-          try {
-            if ((await checkLogin(page, siteConfigOf(engine as never))).loggedIn === true) {
-              await this.pool.saveStorageState(profile, await page.context().storageState());
-            }
-          } catch {
-            // Keep a valid answer; preserve the previous credentials if export/save failed.
-            console.warn(`[collect] engine=${engine} profile=${profile.id} 登录态刷新保存失败,保留上次凭证`);
-          }
-        }
-        return { ask, leaseServer: lease?.server ?? null, rotated };
-      } finally {
-        if (cdpBrowser) await cdpBrowser.close().catch(() => undefined); // CDP 连接的 close 只断连,不关远端浏览器
-        await session.release();
+        await cdpBrowser?.close(); // CDP close 只断连,不关远端浏览器
+      } catch {
+        /* 已断开 */
       }
+      try {
+        await releaseSession?.();
+      } catch {
+        /* 会话已释放/不可达:依赖 broker 侧空闲回收 */
+      }
+    };
+    try {
+      const work = (async () => {
+        const session = await this.broker.acquire({
+          profileKey: profile.profileKey,
+          contextRef: profile.contextRef ?? undefined,
+          fingerprint: profile.fingerprint,
+          proxyHint: profile.proxyHint ?? undefined,
+          purpose: 'collect',
+        });
+        releaseSession = () => session.release();
+        try {
+          // 本地代理直接注入 Page;远程代理(AgentBay)经 CDP 连接拿页面
+          let page = session.page as Page | undefined;
+          let lease: import('./qg-proxy').QgProxyLease | null = null;
+          let rotated = false;
+          if (!page && /^wss?:\/\//.test(session.cdpUrl)) {
+            cdpBrowser = await chromium.connectOverCDP(session.cdpUrl);
+            // 代理出口(docs/07 §13 闸门 #2):AgentBay BrowserOption.proxy 被静默忽略,
+            // 改用 Playwright context 级代理。按档案绑定取同一出口——登录 Cookie 与
+            // 出口 IP 绑定一致;租约消失时代理池会分配新出口并标 rotated
+            ({ lease, rotated } = await this.proxyPool.acquireForProfile(profile.proxyServer ?? null));
+            const contextOptions = engine === 'deepseek'
+              ? browserContextOptions(profile.fingerprint, lease?.server ?? null, profile.storageState)
+              : {
+                ...(lease ? { proxy: { server: `http://${lease.server}` } } : {}),
+                ...(profile.storageState ? { storageState: profile.storageState } : {}),
+              };
+            const context = lease || profile.storageState
+              ? await cdpBrowser.newContext(contextOptions)
+              : cdpBrowser.contexts()[0] ?? await cdpBrowser.newContext(contextOptions);
+            // 注入持久化 Cookie(docs/04 §3.1):登录导出的引擎会话态先于导航生效
+            if (!profile.storageState && profile.cookies?.length) {
+              try {
+                await context.addCookies(profile.cookies as never[]);
+                console.log(`[collect] engine=${engine} profile=${profile.id} 注入 Cookie ${profile.cookies.length} 条${lease ? ` + 代理出口 ${lease.egressIp}${rotated ? '(已切换)' : ''}` : '(直连)'}`);
+              } catch (err) {
+                console.error(`[collect] engine=${engine} profile=${profile.id} Cookie 注入失败:`, (err as Error).message);
+              }
+            }
+            page = context.pages()[0] ?? (await context.newPage());
+          }
+          const adapter = this.registry.get(engine as never, 'web');
+          const ask = await adapter.ask(
+            {
+              mode: this.realBrowser ? 'browser' : 'mock',
+              page,
+              fingerprint: profile.fingerprint,
+              proxyHint: profile.proxyHint ?? undefined,
+              profileKey: profile.profileKey,
+            },
+            questionText,
+            { timeoutMs: ASK_TIMEOUT_MS },
+          );
+          if (page && profile.storageState && ask.status !== 'failed' && !needsLoginOf(ask)) {
+            try {
+              if ((await checkLogin(page, siteConfigOf(engine as never))).loggedIn === true) {
+                await this.pool.saveStorageState(profile, await page.context().storageState());
+              }
+            } catch {
+              // Keep a valid answer; preserve the previous credentials if export/save failed.
+              console.warn(`[collect] engine=${engine} profile=${profile.id} 登录态刷新保存失败,保留上次凭证`);
+            }
+          }
+          return { ask, leaseServer: lease?.server ?? null, rotated };
+        } finally {
+          await cleanupOnce();
+        }
+      })();
+      return await Promise.race([work, hardTimeout]);
     } catch (err) {
-      // 超时/会话异常/无适配器统一按 failed 定格(docs/04 §7 失败模式手册)
+      // 硬超时/会话异常/无适配器统一按 failed 定格(docs/04 §7 失败模式手册);
+      // work 可能仍挂在 CDP 等待上——强拆连接与会话,让 worker 并发槽立即回收
+      await cleanupOnce();
       return { ask: this.failedAsk(queuedAt, (err as Error).message), leaseServer: null, rotated: false };
+    } finally {
+      clearTimeout(hardTimer);
     }
   }
 
@@ -445,6 +535,53 @@ export class CollectProcessor {
       timing: { queuedAt: queuedAt.toISOString(), firstTokenAt: now, completedAt: now },
       engineMeta: { error },
     };
+  }
+
+  /**
+   * 同档案采集互斥:pg 会话级 advisory lock(跨实例)。锁持有期间独占该专用连接,
+   * release 时先解锁再归还连接;拿不到锁返回 null(档案正被其他 job/实例使用)。
+   */
+  private async tryProfileLock(profileId: number): Promise<(() => Promise<void>) | null> {
+    const client = await (this.db.$client as import('pg').Pool).connect();
+    try {
+      const res = await client.query<{ ok: boolean }>('select pg_try_advisory_lock($1, $2) as ok', [
+        PROFILE_LOCK_CLASS,
+        profileId,
+      ]);
+      if (!res.rows[0]?.ok) {
+        client.release();
+        return null;
+      }
+      return async () => {
+        try {
+          await client.query('select pg_advisory_unlock($1, $2)', [PROFILE_LOCK_CLASS, profileId]);
+        } finally {
+          client.release();
+        }
+      };
+    } catch (err) {
+      client.release(err instanceof Error ? err : undefined);
+      throw err;
+    }
+  }
+
+  /** cookie miss 计数 +1(Redis,绑定凭证版本;成功重登/换出口即重置)。失败按 1 计,不阻塞采集。 */
+  private async cookieMissBump(profileId: number, version: string): Promise<number> {
+    const key = `cookie-miss:${profileId}`;
+    try {
+      const raw = await this.redis.get(key);
+      const cur = raw ? (JSON.parse(raw) as { version: string; count: number }) : null;
+      const misses = cur?.version === version ? cur.count + 1 : 1;
+      await this.redis.set(key, JSON.stringify({ version, count: misses }), 'EX', 24 * 3600);
+      return misses;
+    } catch (err) {
+      console.error('[collect] cookie-miss redis unavailable,按首计:', (err as Error).message);
+      return 1;
+    }
+  }
+
+  private async cookieMissReset(profileId: number): Promise<void> {
+    await this.redis.del(`cookie-miss:${profileId}`).catch(() => undefined);
   }
 
   private async extractAndEnqueue(

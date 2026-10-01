@@ -11,7 +11,6 @@ import {
 } from '@geo/shared';
 import {
   collectionPlans,
-  collectionRounds,
   monitoringQuestions,
   subscriptions,
 } from '@geo/db';
@@ -191,13 +190,17 @@ export class RoundScheduler {
           .limit(50);
 
         for (const plan of due) {
-          const canContinue = await this.dispatchRound(plan.brandId, plan.engines as string[], budget);
-          // 次日白天随机(品牌时区,docs/04 §3.4:每日总量按地域时区白天重、夜间轻)
+          // 次日白天随机(品牌时区,docs/04 §3.4:每日总量按地域时区白天重、夜间轻)。
+          // 与轮次创建同事务提交:两步分离时中间崩溃会在下个 tick 对同一品牌重复建轮
+          // (同题重复采集、配额双扣);原子化的失败模式是"当日少采一轮",危害更小且可见
           const nextRunAt = nextRunAtFrom(new Date(), plan.timezone);
-          await this.db
-            .update(collectionPlans)
-            .set({ nextRunAt })
-            .where(eq(collectionPlans.id, plan.id));
+          const canContinue = await this.dispatchRound(
+            plan.brandId,
+            plan.engines as string[],
+            budget,
+            plan.id,
+            nextRunAt,
+          );
           if (!canContinue) {
             console.warn('[scheduler] 全局每日预算耗尽,剩余计划明日续派');
             break;
@@ -256,8 +259,15 @@ export class RoundScheduler {
     return new Map(rows.map((r) => [r.engine, r.count]));
   }
 
-  /** 返回 false = 全局预算耗尽,调用方应停止处理后续计划。 */
-  private async dispatchRound(brandId: number, engines: string[], budget: Budget): Promise<boolean> {
+  /** 返回 false = 全局预算耗尽,调用方应停止处理后续计划。
+   *  planId/nextRunAt:轮次创建与 next_run_at 推进在同一事务原子提交(见 tick 内注释)。 */
+  private async dispatchRound(
+    brandId: number,
+    engines: string[],
+    budget: Budget,
+    planId: number,
+    nextRunAt: Date,
+  ): Promise<boolean> {
     const questions = await this.db
       .select()
       .from(monitoringQuestions)
@@ -347,15 +357,11 @@ export class RoundScheduler {
     // 入队计划:每任务复查全局/引擎额度(纯函数,预算账本被就地扣减)
     const jobs = planRoundJobs(ordered, engineList, budget);
     if (jobs.length === 0) return true;
-    const round = (
-      await this.db.insert(collectionRounds).values({ brandId }).returning()
-    )[0]!;
 
-    // totals 先行写入(only-total):避免与 processor 的 done 增量发生"先增后覆盖"竞态
-    await this.db
-      .update(collectionRounds)
-      .set({ totals: { total: jobs.length, enqueued: 0, done: 0, ok: 0, failed: 0 } })
-      .where(eq(collectionRounds.id, round.id));
+    // 原子提交:建轮次(totals 先行,防与 processor 的 done 增量"先增后覆盖"竞态)
+    // + 推进 next_run_at。commit 后入队;若 commit 后崩溃则当日少采一轮(enqueued=0 可见),
+    // 而不是旧顺序下"建轮次成功、next_run_at 未推进"导致的整轮重复采集
+    const roundId = await this.createRoundAtomically(brandId, planId, nextRunAt, jobs.length);
 
     let enqueued = 0;
     for (const job of jobs) {
@@ -365,7 +371,7 @@ export class RoundScheduler {
           runId: 0, // 执行时落库获得真实 id
           brandId,
           accountId,
-          roundId: round.id,
+          roundId,
           questionId: job.question.id,
           questionType: job.question.type as 'ranking' | 'reputation',
           questionText: job.question.textExpanded,
@@ -374,7 +380,7 @@ export class RoundScheduler {
           priority,
         },
         {
-          jobId: `round${round.id}-q${job.question.id}-${job.engine}`,
+          jobId: `round${roundId}-q${job.question.id}-${job.engine}`,
           priority,
           // 执行前段(熔断检查/账号池/延迟重排)依赖 DB/Redis,抛错默认 1 次即终态:
           // 样本静默丢失且轮次进度永久卡死——给一次快速重试让瞬时抖动自愈
@@ -394,10 +400,36 @@ export class RoundScheduler {
       await this.db.execute(sql`
         update collection_rounds
         set totals = jsonb_set(totals, '{enqueued}', ${enqueued}::text::jsonb)
-        where id = ${round.id}
+        where id = ${roundId}
       `);
     }
 
     return budget.globalRemaining > 0;
+  }
+
+  /** 轮次创建 + 计划推进单事务(崩溃窗口见调用方注释)。返回新轮次 id。 */
+  private async createRoundAtomically(
+    brandId: number,
+    planId: number,
+    nextRunAt: Date,
+    total: number,
+  ): Promise<number> {
+    const client = await (this.db.$client as import('pg').Pool).connect();
+    try {
+      await client.query('begin');
+      const round = await client.query<{ id: number }>(
+        `insert into collection_rounds (brand_id, totals)
+         values ($1, $2::jsonb) returning id`,
+        [brandId, JSON.stringify({ total, enqueued: 0, done: 0, ok: 0, failed: 0 })],
+      );
+      await client.query(`update collection_plans set next_run_at = $2 where id = $1`, [planId, nextRunAt]);
+      await client.query('commit');
+      return round.rows[0]!.id;
+    } catch (err) {
+      await client.query('rollback').catch(() => undefined);
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 }

@@ -3,7 +3,7 @@ import { desc, eq, sql } from 'drizzle-orm';
 import type { Db } from '@geo/db';
 import { industryInsights, insightIndustries } from '@geo/db';
 import { INSIGHTS_QUEUE, bullConnection } from './queue';
-import { runInsightBuild, type InsightBuildJob } from './insight-builder';
+import { runInsightBuild, reclaimStaleInsightBuilds, type InsightBuildJob } from './insight-builder';
 
 /**
  * 行业洞察聚合消费器(docs/01 §3.10「运行」):
@@ -41,6 +41,9 @@ export async function scheduleWeeklyInsights(): Promise<void> {
 
 /** cron 实现:活跃行业 × 有监测品牌 → 报告行(无则建)→ 串行聚合(30 天窗口)。 */
 async function runWeeklyInsights(db: Db): Promise<void> {
+  // 先回收僵死构建:上次 cron 中途崩溃的行业若不回收,running 永久跳过
+  const reclaimed = await reclaimStaleInsightBuilds(db).catch(() => 0);
+  if (reclaimed > 0) console.warn(`[insights] 回收 ${reclaimed} 个僵死构建(心跳超时)`);
   const industries = await db.select().from(insightIndustries).where(eq(insightIndustries.active, true));
   for (const industry of industries) {
     // 无监测品牌的行业跳过(聚合会抛错,不值得记录 failed)

@@ -1,8 +1,8 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
-import type { Pool } from 'pg';
+import { eq } from 'drizzle-orm';
+import type { Pool, PoolClient } from 'pg';
 import type { Db } from '@geo/db';
 import { accountProfiles } from '@geo/db';
-import { WEB_ENGINES, type BrowserStorageState } from '@geo/shared';
+import { WEB_ENGINES, SecretBox, type BrowserStorageState } from '@geo/shared';
 
 export interface AcquiredProfile {
   id: number;
@@ -12,7 +12,7 @@ export interface AcquiredProfile {
   /** 出口租约绑定(IP 亲和):档案上次成功登录/采集所用的代理 server,采集时按此复用同一出口 */
   proxyServer: string | null;
   contextRef: string | null;
-  /** 登录成功导出的 Cookie(采集会话注入,登录态留存不依赖平台 Context 能力) */
+  /** 登录成功导出的 Cookie(采集会话注入,登录态留存不依赖平台 Context 能力)。已解封,仅进程内明文 */
   cookies: Array<Record<string, unknown>> | null;
   storageState: BrowserStorageState | null;
 }
@@ -37,7 +37,11 @@ export function nextHealthAction(score: number): 'retire' | 'cooldown' | 'keep' 
  * 健康分:连续成功 +1(封顶 100),失败 −2。
  */
 export class AccountPoolService {
-  constructor(private readonly db: Db) {}
+  constructor(
+    private readonly db: Db,
+    /** 登录态静态加密(docs/04 §3.1):入库密封/出库解封;缺省从环境变量构造 */
+    private readonly box: SecretBox = SecretBox.fromEnv(),
+  ) {}
 
   /**
    * 各引擎当日可承接的任务数(容量):∑ 每个可领账号的剩余日额度
@@ -119,8 +123,8 @@ export class AccountPoolService {
       proxyHint: row.proxy_hint,
       proxyServer: row.proxy_server,
       contextRef: row.context_ref,
-      cookies: row.cookies,
-      storageState: row.storage_state,
+      cookies: this.box.open<Array<Record<string, unknown>>>(row.cookies),
+      storageState: this.box.open<BrowserStorageState>(row.storage_state),
     };
   }
 
@@ -132,44 +136,79 @@ export class AccountPoolService {
       .where(eq(accountProfiles.id, profileId));
   }
 
-  /** A collection result must not invalidate credentials from a newer manual login. */
-  private loginVersion(profile: AcquiredProfile) {
-    return and(
-      eq(accountProfiles.id, profile.id),
-      inArray(accountProfiles.status, ['available', 'cooldown']),
-      sql`${accountProfiles.storageState} is not distinct from ${profile.storageState === null ? null : JSON.stringify(profile.storageState)}::jsonb`,
-      sql`${accountProfiles.cookies} is not distinct from ${profile.cookies === null ? null : JSON.stringify(profile.cookies)}::jsonb`,
-    );
+  /**
+   * loginVersion 防覆盖(采集侧结果不得覆盖并发人工重登的新凭证)。
+   * 加密后存储的是随机 IV 密文,无法再用 SQL `is not distinct from` 比较,
+   * 改为行锁事务内解密比对:语义等价的原子 check-and-update,且天然兼容历史明文行。
+   */
+  private async withUnchangedCredentials(
+    profile: AcquiredProfile,
+    statuses: readonly string[],
+    update: (client: PoolClient) => Promise<unknown>,
+  ): Promise<boolean> {
+    const client = await (this.db.$client as Pool).connect();
+    try {
+      await client.query('begin');
+      const cur = await client.query<{ status: string; storage_state: unknown; cookies: unknown }>(
+        'select status, storage_state, cookies from account_profiles where id = $1 for update',
+        [profile.id],
+      );
+      const row = cur.rows[0];
+      const unchanged =
+        row !== undefined &&
+        statuses.includes(row.status) &&
+        JSON.stringify(this.box.open(row.storage_state)) === JSON.stringify(profile.storageState) &&
+        JSON.stringify(this.box.open(row.cookies)) === JSON.stringify(profile.cookies);
+      if (!unchanged) {
+        await client.query('rollback');
+        return false;
+      }
+      await update(client);
+      await client.query('commit');
+      return true;
+    } catch (err) {
+      await client.query('rollback').catch(() => undefined);
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   /** Save rotating tokens/device state without overwriting a concurrent re-login. */
   async saveStorageState(profile: AcquiredProfile, storageState: BrowserStorageState): Promise<void> {
-    await (this.db.$client as Pool).query(
-      `update account_profiles set storage_state = $1::jsonb, cookies = $2::jsonb
-       where id = $3 and status = 'available'
-         and storage_state is not distinct from $4::jsonb
-         and cookies is not distinct from $5::jsonb`,
-      [JSON.stringify(storageState), JSON.stringify(storageState.cookies), profile.id,
-        profile.storageState === null ? null : JSON.stringify(profile.storageState),
-        profile.cookies === null ? null : JSON.stringify(profile.cookies)],
+    await this.withUnchangedCredentials(profile, ['available'], (client) =>
+      client.query(
+        `update account_profiles set storage_state = $1::jsonb, cookies = $2::jsonb
+         where id = $3`,
+        [
+          JSON.stringify(this.box.seal(storageState)),
+          JSON.stringify(this.box.seal(storageState.cookies)),
+          profile.id,
+        ],
+      ),
     );
   }
 
   /** 有持久化 Cookie 但被引擎判未登录(多为出口 IP 变化):短冷却自动重试,不要求人工重登。 */
   async markTransientLoginMiss(profile: AcquiredProfile, minutes = 10): Promise<void> {
-    await this.db
-      .update(accountProfiles)
-      .set({ status: 'cooldown', cooldownUntil: new Date(Date.now() + minutes * 60 * 1000) })
-      .where(this.loginVersion(profile));
+    await this.withUnchangedCredentials(profile, ['available', 'cooldown'], (client) =>
+      client.query(
+        `update account_profiles set status = 'cooldown', cooldown_until = now() + ($1 || ' minutes')::interval
+         where id = $2`,
+        [minutes, profile.id],
+      ),
+    );
   }
 
   /** 登录态失效(docs/04 §3.1 生命周期):不扣健康分,摘出可用池等人工重登。 */
   async markLoginRequired(profile: AcquiredProfile): Promise<void> {
-    await this.db
-      .update(accountProfiles)
-      // A redirect or temporary challenge is not proof that stored credentials are dead.
-      .set({ status: 'login_required', cooldownUntil: null })
-      .where(this.loginVersion(profile));
+    await this.withUnchangedCredentials(profile, ['available', 'cooldown'], (client) =>
+      client.query(
+        // A redirect or temporary challenge is not proof that stored credentials are dead.
+        `update account_profiles set status = 'login_required', cooldown_until = null where id = $1`,
+        [profile.id],
+      ),
+    );
   }
 
   async report(engine: string, profileId: number, ok: boolean): Promise<void> {

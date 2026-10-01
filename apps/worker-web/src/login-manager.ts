@@ -5,6 +5,7 @@ import type { Db } from '@geo/db';
 import { accountProfiles } from '@geo/db';
 import type { Redis } from 'ioredis';
 import type { BrowserStorageState, EngineId } from '@geo/shared';
+import { SecretBox } from '@geo/shared';
 import {
   LOGIN_FRAME_TTL_SEC,
   LOGIN_REQ_QUEUE,
@@ -197,6 +198,8 @@ const LOGIN_CONCURRENCY = envInt('LOGIN_CONCURRENCY', 3, 1, 10);
  */
 export class LoginManager {
   private readonly proxyPool: ProxyPoolManager;
+  /** 登录态入库密封(docs/04 §3.1 静态加密) */
+  private readonly box = SecretBox.fromEnv();
   private stopped = false;
   private consumerRedis?: Redis;
   private loopTask?: Promise<void>;
@@ -515,8 +518,9 @@ export class LoginManager {
             .set({
               status: 'available',
               contextRef: session.contextId ?? `local:${req.profileKey}`,
-              cookies: exported,
-              storageState,
+              // 登录态入库前密封(AES-256-GCM);进程内仍为明文供本次日志计数
+              cookies: this.box.seal(exported) as typeof exported,
+              storageState: this.box.seal(storageState) as typeof storageState,
               cooldownUntil: null,
               proxyServer: loginLease?.server ?? null,
             })
@@ -555,7 +559,7 @@ export class LoginManager {
   /**
    * 豆包手机号验证码自动登录(0019):收码站 API 取号 → 远程页填手机号并发送 →
    * start 收取 → 轮询验证码 → 回填提交。换号(replacing)自动重走;60 秒码效期内完成。
-   * public:本地直连调试入口(debug-auto-login.ts)复用同一份实现,不依赖实例状态。
+   * public:本地直连调试入口(scripts/debug-auto-login.ts)复用同一份实现,不依赖实例状态。
    */
   async autoPhoneLogin(page: Page, site: ReturnType<typeof siteConfigOf>, sms: SmsLinkClient, sessionId: string, status: (detail: string) => Promise<void>): Promise<void> {
     // 运营弹窗("下载豆包电脑版"等)先无差别清扫一次(此时登录弹窗必然未开,安全);

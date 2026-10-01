@@ -9,8 +9,8 @@
     "test": "vitest run",
     "dev": "node --env-file=../../.env --import tsx --watch src/main.ts",
     "start": "node dist/main.js",
-    "seed:profiles": "tsx src/seed.ts",
-    "seed:mock": "tsx src/seed-mock.ts",
+    "seed:profiles": "tsx scripts/seed.ts",
+    "seed:mock": "tsx scripts/seed-mock.ts",
     "calibrate": "tsx scripts/calibrate.ts",
     "doubao-live": "tsx scripts/doubao-live.ts"
   },

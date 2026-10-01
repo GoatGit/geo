@@ -1,6 +1,10 @@
-/** 文本归一:别名/实体匹配前的清洗(全角半角、空白、装饰符号)。 */
+/**
+ * 文本归一:别名/实体匹配前的清洗(全角半角、空白、装饰符号)。
+ * NFKC 先行:引擎输出常见全角字母数字(SU７、ｑｗｅｎ、ＡＩ),不归一到半角则匹配不到。
+ */
 export function normalizeText(s: string): string {
   return s
+    .normalize('NFKC')
     .toLowerCase()
     .replace(/\s+/g, '')
     .replace(/[·・\-–—_]/g, '')
@@ -16,6 +20,7 @@ export function normalizeText(s: string): string {
  */
 export function normalizeKeepSeparators(s: string): string {
   return s
+    .normalize('NFKC')
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .replace(/[·・\-–—_]/g, ' ')

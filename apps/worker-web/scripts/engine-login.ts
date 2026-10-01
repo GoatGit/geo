@@ -1,6 +1,6 @@
 /**
- * 智能体登录技能·本地驱动端(不进生产镜像):
- *   pnpm exec tsx src/engine-login.ts --engine=deepseek --sms-link=<收码链接> --profile-id=21 [--manual] [--keep=60]
+ * 智能体登录技能·本地驱动端(dev 工具,位于 scripts/ 不进 tsc 构建与生产镜像):
+ *   pnpm exec tsx scripts/engine-login.ts --engine=deepseek --sms-link=<收码链接> --profile-id=21 [--manual] [--keep=60]
  *
  * 与生产采集同构:按档案的指纹/出口代理/AgentBay Context 直连远程浏览器(autoPhoneLogin
  * 机械流 + cmd.json 人工解验证码通道),登录成功后导出 Cookie/storageState 经 admin API
@@ -13,9 +13,9 @@ import { chromium } from 'playwright-core';
 import { createBrokerFromEnv } from '@geo/browser-session';
 import { checkLogin, siteConfigOf } from '@geo/engine-adapters';
 import type { EngineId } from '@geo/shared';
-import { SmsLinkClient, smsTokenFromLink } from './sms-client';
-import { browserContextOptions } from './browser-context';
-import { LoginManager } from './login-manager';
+import { SmsLinkClient, smsTokenFromLink } from '../src/sms-client';
+import { browserContextOptions } from '../src/browser-context';
+import { LoginManager } from '../src/login-manager';
 
 const arg = (name: string, fallback = '') => {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));

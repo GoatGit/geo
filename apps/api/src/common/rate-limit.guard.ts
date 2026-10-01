@@ -21,10 +21,9 @@ export const RateLimit = (max: number, windowSec: number, name: string) =>
   SetMetadata(RATE_LIMIT_KEY, { max, windowSec, name } satisfies RateLimitRule);
 
 function clientIp(req: { headers: Record<string, unknown>; ip?: string; socket?: { remoteAddress?: string } }): string {
-  // 反代(SAE/SLB)场景取转发链首地址,无则回退直连地址
-  const xff = req.headers['x-forwarded-for'];
-  const first = typeof xff === 'string' ? xff.split(',')[0]?.trim() : undefined;
-  return first || req.ip || req.socket?.remoteAddress || 'unknown';
+  // main.ts 已设 trust proxy=1:express 从转发链剥离可信代理后归一 req.ip。
+  // 不得手取 x-forwarded-for 首段——该段由客户端控制,伪造一次即换一个限流配额
+  return req.ip || req.socket?.remoteAddress || 'unknown';
 }
 
 /** 限流主体:登录请求优先按账号(同办公网 NAT 不互相误伤),匿名按 IP。 */

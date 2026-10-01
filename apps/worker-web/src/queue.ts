@@ -21,6 +21,8 @@ export interface CollectJobData {
   priority: number;
   /** 延迟重排次数(熔断/账号池耗尽);超过 MAX_DEFERRED 落 quota_blocked 收口,防无限自我复制 */
   deferredCount?: number;
+  /** 首次入队时间(ms):延迟重排会新建 job 重置 timestamp,透传原始值保住"超 2 小时僵尸"判定 */
+  firstQueuedAt?: number;
 }
 
 export interface ReputationJobData {
@@ -37,17 +39,17 @@ export function bullConnection() {
 }
 
 export function priorityOf(plan: string): number {
-  // BullMQ: 数值越大越优先
+  // BullMQ: 数值越小越优先(1 最高);docs/04 §5 快速体检 > 专业 > 标准 > 入门 > 免费
   switch (plan) {
+    case 'custom':
+      return 10;
     case 'pro':
-      return 40;
+      return 20;
     case 'standard':
       return 30;
-    case 'custom':
-      return 50;
     case 'starter':
-      return 20;
+      return 40;
     default:
-      return 10;
+      return 50;
   }
 }
