@@ -39,13 +39,23 @@ export default function RankingsPage() {
     (r) => questionFilter === 'all' || String(r.questionId) === questionFilter,
   );
   const exportMatrix = (rows: typeof data.matrix, engines: string[]) => {
-    const header = ['监控问题', ...engines, '综合名次', '提及率', 'Top3 率', '首推率'];
+    const header = ['监控问题', ...engines, '综合名次', '提及率', 'Top3 率', '首推率', '最近采集(天)'];
     const lines = rows.map((r) => {
       const cells = engines.map((eng) => {
         const c = r.cells.find((x) => x.engine === eng);
-        return c ? (c.rank !== null ? `#${c.rank}` : c.mentioned ? '提及·无排名' : '未提及') : '—';
+        if (!c) return '—';
+        const base = c.rank !== null ? `#${c.rank}` : c.mentioned ? '提及·无排名' : '未提及';
+        return c.stale ? `${base}·${staleLabel(c.asOf)}` : base;
       });
-      return [r.questionText, ...cells, r.compositeRank ?? '', pct(r.mentionRate), pct(r.top3Rate), pct(r.top1Rate)];
+      return [
+        r.questionText,
+        ...cells,
+        r.compositeRank ?? '',
+        pct(r.mentionRate),
+        pct(r.top3Rate),
+        pct(r.top1Rate),
+        r.lastCollectedAt ? String(calendarDaysAgo(r.lastCollectedAt)) : '—',
+      ];
     });
     const csv = [header, ...lines].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
@@ -114,14 +124,23 @@ export default function RankingsPage() {
             <div key={e.engine} className="flex items-center gap-3">
               <span className="w-20 shrink-0 truncate text-xs font-semibold text-slate-700">{engineLabel(e.engine)}</span>
               <div className="grid flex-1 gap-1">
-                {RATE_BARS.map((b) => (
-                  <div key={b.key} className="flex items-center gap-2">
-                    <div className="h-1.5 flex-1 rounded-full bg-slate-100">
-                      <div className={`h-1.5 rounded-full ${b.tone}`} style={{ width: `${Math.round(e[b.key] * 100)}%` }} />
+                {RATE_BARS.map((b) => {
+                  const v = e[b.key];
+                  return (
+                    <div key={b.key} className="flex items-center gap-2">
+                      <div className="h-1.5 flex-1 rounded-full bg-slate-100">
+                        <div
+                          className={`h-1.5 rounded-full ${b.tone}`}
+                          style={{ width: v != null ? `${Math.round(v * 100)}%` : 0 }}
+                          title={v == null ? '该引擎窗口内无有效回答(非 0%)' : undefined}
+                        />
+                      </div>
+                      <span className="metric-num w-10 text-right text-[11px] text-slate-500">
+                        {v != null ? pct2(v) : '—'}
+                      </span>
                     </div>
-                    <span className="metric-num w-10 text-right text-[11px] text-slate-500">{pct2(e[b.key])}</span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -198,7 +217,8 @@ export default function RankingsPage() {
             <span className="metric-num ml-1 rounded bg-slate-100 px-1.5 py-0.5">#4+</span>靠后
             <span className="ml-1 rounded bg-slate-50 px-1.5 py-0.5 text-slate-400">提及·无排名</span>
             <span className="ml-1 rounded bg-bad-50 px-1.5 py-0.5 text-bad">未提及</span>
-            <span className="ml-1.5 border-l border-slate-100 pl-1.5 text-slate-400">综合名次 = 未提及记 N+1 取中位数;位次 = 榜单位次,或品牌评述题中的首位评述</span>
+            <span className="ml-1 rounded bg-slate-50 px-1.5 py-0.5 text-slate-400">#3·3天前</span>窗口内未采集,沿用最近一次有效结果(≤30 天)
+            <span className="ml-1.5 border-l border-slate-100 pl-1.5 text-slate-400">综合名次 = 未提及记 N+1 取中位数;位次 = 榜单位次,或品牌评述题中的首位评述;最近采集 = 距最近一次有效采集的自然日(0=今天)</span>
           </span>
         </span>
       </div>
@@ -217,6 +237,12 @@ export default function RankingsPage() {
               <th className="border-b border-slate-200 px-3 py-2.5 text-center">提及率</th>
               <th className="border-b border-slate-200 px-3 py-2.5 text-center">Top3 率</th>
               <th className="border-b border-slate-200 px-3 py-2.5 text-center">首推率</th>
+              <th
+                className="border-b border-slate-200 px-3 py-2.5 text-center"
+                title="距最近一次有效采集的自然日:0=今天、1=昨天、2=前天……;—=30 天内无有效采集"
+              >
+                最近采集
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -238,7 +264,10 @@ export default function RankingsPage() {
                         <button
                           disabled={!cell.runId}
                           onClick={() => cell.runId && setEvidenceRun(cell.runId)}
-                          title={cell.runId ? '点击查看该引擎的 AI 回答原文与存证' : '该单元格暂无可回溯的采集记录'}
+                          title={
+                            (cell.runId ? '点击查看该引擎的 AI 回答原文与存证' : '该单元格暂无可回溯的采集记录') +
+                            (cell.stale ? `(窗口内未采集,数据截至 ${new Date(cell.asOf ?? Date.now()).toLocaleString('zh-CN')})` : '')
+                          }
                           className={`rounded transition-transform ${
                             cell.runId ? 'hover:-translate-y-px hover:shadow-sm' : 'cursor-default'
                           }`}
@@ -251,21 +280,29 @@ export default function RankingsPage() {
                                   : cell.rank <= 3
                                     ? 'bg-brand-50 text-brand'
                                     : 'bg-slate-100 text-slate-600'
-                              }`}
+                              } ${cell.stale ? 'opacity-70' : ''}`}
                             >
                               #{cell.rank}
-                              {cell.prevRank != null && cell.rank !== cell.prevRank && (
+                              {cell.prevRank != null && cell.rank !== cell.prevRank && !cell.stale && (
                                 <span className={cell.rank < cell.prevRank ? 'text-good' : 'text-bad'}>
                                   {cell.rank < cell.prevRank ? '▲' : '▼'}
                                 </span>
                               )}
+                              {cell.stale && <span className="text-[9px] font-normal text-slate-400">{staleLabel(cell.asOf)}</span>}
                             </span>
                           ) : cell.mentioned ? (
                             <span
-                              className="block cursor-help px-1 py-0.5 text-xs text-slate-400"
+                              className={`block cursor-help px-1 py-0.5 text-xs ${cell.stale ? 'text-slate-400/80' : 'text-slate-400'}`}
                               title="AI 回答提及了本品,但该回答是开放式评述、未给出推荐位次(排名类指标不计入此类)"
                             >
-                              提及·无排名
+                              提及·无排名{cell.stale && <span className="ml-1 text-[9px] text-slate-400">{staleLabel(cell.asOf)}</span>}
+                            </span>
+                          ) : cell.stale ? (
+                            <span
+                              className="block cursor-help rounded bg-slate-50 px-1.5 py-0.5 text-xs text-slate-400"
+                              title={`最近一次有效采集(${new Date(cell.asOf ?? Date.now()).toLocaleString('zh-CN')})中未出现本品;本窗口内尚未重新采集`}
+                            >
+                              未提及·{staleLabel(cell.asOf)}
                             </span>
                           ) : (
                             <span
@@ -281,16 +318,32 @@ export default function RankingsPage() {
                   );
                 })}
                 <td className="metric-num border-l-2 border-slate-200 border-t border-t-slate-100 px-3 py-2 text-center font-semibold">
-                  {row.compositeRank != null ? `第${row.compositeRank}名` : '未提及'}
+                  {row.compositeRank != null ? `第${row.compositeRank}名` : '30天内未采集'}
                 </td>
                 <td className="metric-num border-t border-slate-100 px-3 py-2 text-center">{pct(row.mentionRate)}</td>
                 <td className="metric-num border-t border-slate-100 px-3 py-2 text-center">{pct(row.top3Rate)}</td>
                 <td className="metric-num border-t border-slate-100 px-3 py-2 text-center">{pct(row.top1Rate)}</td>
+                <td
+                  className="metric-num border-t border-slate-100 px-3 py-2 text-center"
+                  title={
+                    row.lastCollectedAt
+                      ? `最近一次有效采集:${new Date(row.lastCollectedAt).toLocaleString('zh-CN')}`
+                      : '30 天内无有效采集'
+                  }
+                >
+                  {row.lastCollectedAt ? (
+                    <span className={calendarDaysAgo(row.lastCollectedAt) === 0 ? 'text-good' : calendarDaysAgo(row.lastCollectedAt) >= 7 ? 'text-warn' : 'text-slate-500'}>
+                      {calendarDaysAgo(row.lastCollectedAt)}
+                    </span>
+                  ) : (
+                    <span className="text-slate-300">—</span>
+                  )}
+                </td>
               </tr>
             ))}
             {visibleRows.length === 0 && (
               <tr>
-                <td colSpan={visibleEngines.length + 5} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={visibleEngines.length + 6} className="px-4 py-8 text-center text-slate-400">
                   暂无监控问题
                 </td>
               </tr>
@@ -306,4 +359,19 @@ export default function RankingsPage() {
 
 function pct2(v: number) {
   return `${Math.round(v * 100)}%`;
+}
+
+/** 回填单元格的陈旧度标签:N 天前(不足 1 天按"今天",理论上回填不会出现) */
+function staleLabel(asOf?: string | null): string | null {
+  if (!asOf) return null;
+  const days = Math.floor((Date.now() - new Date(asOf).getTime()) / 86_400_000);
+  return days < 1 ? '今天' : `${days}天前`;
+}
+
+/** 距某时间的自然日差:0=今天、1=昨天、2=前天……("最近采集"列口径) */
+function calendarDaysAgo(iso: string): number {
+  const d = new Date(iso);
+  const now = new Date();
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  return Math.round((startOf(now) - startOf(d)) / 86_400_000);
 }

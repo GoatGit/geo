@@ -67,19 +67,22 @@ describe('overlayTailSubjects(竞品主体尾部补齐)', () => {
   });
 
   it('窗口已出现的 主体×引擎 对不回填;缺席对补 1 次样本并记 lastSeen', () => {
+    // 时间值各算一次复用:d(n) 每次调用取 Date.now(),断言处再算会差毫秒导致 flake
+    const nijieAt = d(1);
+    const aitoAt = d(6);
     const { added, lastSeenAt } = overlayTailSubjects(
       new Set(['wenjie|doubao', 'nijie|qwen']),
       [
         tf({ subjectKey: 'wenjie', engine: 'doubao', mentioned: true, rank: 1 }), // 窗口已有,跳过
-        tf({ subjectKey: 'nijie', engine: 'doubao', mentioned: true, rank: 1 }), // 引擎缺席,补
-        tf({ subjectKey: 'aito', engine: 'yuanbao', mentioned: false, rank: null, ranAt: d(6) }),
+        tf({ subjectKey: 'nijie', engine: 'doubao', mentioned: true, rank: 1, ranAt: nijieAt }), // 引擎缺席,补
+        tf({ subjectKey: 'aito', engine: 'yuanbao', mentioned: false, rank: null, ranAt: aitoAt }),
       ],
     );
     expect(added).toHaveLength(2);
     expect(added.find((a) => a.subjectKey === 'nijie' && a.engine === 'doubao')!.agg).toEqual({ runs: 1, mentions: 1, top3: 1 });
     expect(added.find((a) => a.subjectKey === 'aito')!.agg).toEqual({ runs: 1, mentions: 0, top3: 0 });
-    expect(lastSeenAt.get('nijie')!.getTime()).toBe(d(1).getTime());
-    expect(lastSeenAt.get('aito')!.getTime()).toBe(d(6).getTime());
+    expect(lastSeenAt.get('nijie')!.getTime()).toBe(nijieAt.getTime());
+    expect(lastSeenAt.get('aito')!.getTime()).toBe(aitoAt.getTime());
     expect(lastSeenAt.has('wenjie')).toBe(false);
   });
 

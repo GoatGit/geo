@@ -6,7 +6,7 @@ export interface HealthThresholds {
   top3Rate: number;
   top1Rate: number;
   avgRank: number; // ≤ 达标线
-  sentimentScore: number; // 0-100
+  sentimentScore: number; // −100..+100(docs/02 §4 归一化负分制,0=中性)
   ownedCitationShare: number; // 自有信源引用占比 ≥ 8% 且 ≥ minCount 条
   ownedCitationMinCount: number;
   /** 权威信源引用率(门户/官媒/权威机构/官网)≥ 25% 且 ≥ minCount 条 */
@@ -37,6 +37,13 @@ export const SNAPSHOT_RETENTION_DAYS = 7;
 
 /** 体检标签阈值"校准中"宽限期(灰度 8 周,docs/02 §3)。 */
 export const THRESHOLD_CALIBRATION_GRACE_DAYS = 56;
+
+/**
+ * 明细尾部补齐上限(docs/02 §1):监控视图/报告的逐条明细在窗口内无有效采集时,
+ * 回填该 问题×引擎 最近一次 ok run 的数据;超过此天数视为"无数据",不再回填。
+ * 品牌级指标卡不回填(保持本窗口真实采集率)。
+ */
+export const TAIL_COMPLETION_MAX_AGE_DAYS = 30;
 
 export interface PlanLimits {
   rankingQuota: number;
@@ -303,6 +310,11 @@ export interface MetricCard {
   /** docs/02 §1.1:failed/quota_blocked 计数必须可见,不允许静默为 0 */
   excludedFailed: number;
   excludedQuotaBlocked: number;
+  /**
+   * 分母口径说明(必填):top3Rate 在不同视图有 不同分母(榜单内/被提及内/全部有效),
+   * 同名指标不标注分母会让同一页面的数字互相矛盾、无法对账。
+   */
+  denominatorNote?: string;
   asOf: string;
   source: MetricSource;
 }
@@ -329,6 +341,10 @@ export interface MatrixCell {
   /** 上一窗口同引擎最好位次(环比 ▲▼;null = 上期无数据) */
   prevRank?: number | null;
   prevMentioned?: boolean | null;
+  /** 该单元格数据的采集时间(docs/02 §1 尾部补齐口径;回填单元格 = 最近一次有效 run 时间) */
+  asOf?: string | null;
+  /** true = 窗口内无采集,数据来自最近一次有效 run 回填(展示层标"N 天前") */
+  stale?: boolean;
 }
 
 export interface MatrixRow {
@@ -342,6 +358,8 @@ export interface MatrixRow {
   mentionRate: number | null;
   top3Rate: number | null;
   top1Rate: number | null;
+  /** 最近一次有效采集时间(任一引擎,≤30 天;null=30 天内无有效采集)——表格"最近采集"列 */
+  lastCollectedAt?: string | null;
 }
 
 export interface RecognitionEntry {

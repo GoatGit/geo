@@ -11,6 +11,8 @@ interface CompetitorsMatrixDto {
     key: string;
     name: string;
     totalMentions: number;
+    /** 尾部补齐主体的最近出现时间;窗口主体为 null(展示层标"N 天前") */
+    lastSeenAt: string | null;
     engines: Record<string, { mentionRate: number | null; top3Rate: number | null }>;
   }>;
   engines: string[];
@@ -23,6 +25,8 @@ interface LeaderRow {
   mentionRate: number | null;
   top3Rate: number | null;
   top1Rate: number | null;
+  /** 尾部补填主体的最近出现时间;窗口主体为 null */
+  lastSeenAt: string | null;
 }
 
 interface CompetitorsDto {
@@ -119,6 +123,14 @@ export default function CompetitorsPage() {
                     <td className="px-4 py-2.5 font-medium text-slate-800">
                       <span className="metric-num mr-2 text-xs text-slate-400">#{i + 1}</span>
                       {r.name}
+                      {r.lastSeenAt && (
+                        <span
+                          className="ml-2 cursor-help rounded bg-slate-50 px-1.5 py-0.5 text-[10px] font-normal text-slate-400"
+                          title="窗口内未出现,数据来自其最近一次有效采集(≤30 天)"
+                        >
+                          {daysAgoText(r.lastSeenAt)}
+                        </span>
+                      )}
                     </td>
                     <td className="metric-num px-3 py-2.5">{r.mentions}</td>
                     <td className="metric-num px-3 py-2.5">{pct(r.mentionRate)}</td>
@@ -160,6 +172,14 @@ export default function CompetitorsPage() {
                     <tr key={r.key} className="border-t border-slate-100">
                       <td className="max-w-44 truncate py-2.5 pr-4 font-medium text-slate-800" title={r.name}>
                         {r.name}
+                        {r.lastSeenAt && (
+                          <span
+                            className="ml-2 cursor-help rounded bg-slate-50 px-1.5 py-0.5 text-[10px] font-normal text-slate-400"
+                            title="窗口内未出现,数据来自其最近一次有效采集(≤30 天)"
+                          >
+                            {daysAgoText(r.lastSeenAt)}
+                          </span>
+                        )}
                       </td>
                       {engines.map((e) => {
                         const cell = r.engines[e];
@@ -189,11 +209,17 @@ export default function CompetitorsPage() {
               </table>
             </div>
             <p className="mt-3 text-[11px] text-slate-400">
-              竞品与本品同批查询、同口径解析;高频未匹配实体经确认后进入竞品口径(docs/01 §3.4)。
+              竞品与本品同批查询、同口径解析;高频未匹配实体经确认后进入竞品口径(docs/01 §3.4)。窗口内未出现的主体沿用其最近一次有效采集(≤30 天,标"N 天前")。
             </p>
           </section>
         </>
       )}
     </div>
   );
+}
+
+/** 回填主体的陈旧度标签:今天 / N天前 */
+function daysAgoText(iso: string): string {
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  return days < 1 ? '今天' : `${days}天前`;
 }

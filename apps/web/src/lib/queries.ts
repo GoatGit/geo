@@ -51,9 +51,22 @@ export interface RankingsDto {
     mentionRate: number | null;
     top3Rate: number | null;
     top1Rate: number | null;
-    cells: Array<{ engine: string; mentioned: boolean; rank: number | null; runId?: number | null; prevRank?: number | null; prevMentioned?: boolean | null }>;
+    /** 最近一次有效采集时间(ISO,任一引擎,≤30 天;null=30 天内无) */
+    lastCollectedAt?: string | null;
+    cells: Array<{
+      engine: string;
+      mentioned: boolean;
+      rank: number | null;
+      runId?: number | null;
+      prevRank?: number | null;
+      prevMentioned?: boolean | null;
+      /** 单元格数据采集时间(ISO);回填单元格=最近一次有效 run 时间 */
+      asOf?: string | null;
+      /** true=窗口内无采集,来自最近一次有效 run 回填(展示"N 天前") */
+      stale?: boolean;
+    }>;
   }>;
-  engineStats: Array<{ engine: string; mentionRate: number; top3Rate: number; top1Rate: number }>;
+  engineStats: Array<{ engine: string; mentionRate: number | null; top3Rate: number | null; top1Rate: number | null; denominatorNote?: string }>;
   trend: Array<{ date: string; mentionRate: number | null; top3Rate: number | null; top1Rate: number | null }>;
   health: {
     summary: string;

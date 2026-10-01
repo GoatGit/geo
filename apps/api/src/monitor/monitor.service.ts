@@ -1,10 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, or, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import {
   brands,
   citationFacts,
   dailyMetrics,
+  latestOkRuns,
   mentionFacts,
   monitoringQuestions,
   queryRuns,
@@ -21,7 +22,7 @@ import {
   type MetricCard,
   type MetricSource,
 } from '@geo/shared';
-import { classifyDomain, evaluateHealth, generateActionList, isAuthoritativeCategory } from '@geo/metrics';
+import { bestCellPerEngine, classifyDomain, evaluateHealth, generateActionList, isAuthoritativeCategory, overlayTailSubjects, sentimentScore as sentimentScoreOf } from '@geo/metrics';
 import Redis from 'ioredis';
 import { chatCompletion, InsightAgent } from '@geo/insight-agent';
 import { createStorageFromEnv } from '@geo/evidence';
@@ -110,9 +111,12 @@ export class MonitorService {
     const nEx = { failed: Number(ex.failed ?? 0), quotaBlocked: Number(ex.quota_blocked ?? 0) };
 
     const cards: MetricCard[] = [
-      this.card('mentionRate', rate(mentioned, valid), mentioned, valid, nEx, asOf, source),
-      this.card('top3Rate', rate(top3, ranked), top3, ranked, nEx, asOf, source),
-      this.card('top1Rate', rate(top1, ranked), top1, ranked, nEx, asOf, source),
+      this.card('mentionRate', rate(mentioned, valid), mentioned, valid, nEx, asOf, source,
+        '全部有效 QueryRun(ok_with_answer + ok_empty)'),
+      this.card('top3Rate', rate(top3, ranked), top3, ranked, nEx, asOf, source,
+        '有名次的 QueryRun(含散文提及中判出位次;漏斗②用"被提及"作分母,口径不同勿直接对比)'),
+      this.card('top1Rate', rate(top1, ranked), top1, ranked, nEx, asOf, source,
+        '有名次的 QueryRun'),
       {
         metric: 'avgRank',
         value: t.avg_rank ? Math.round(Number(t.avg_rank) * 100) / 100 : null,
@@ -438,25 +442,44 @@ export class MonitorService {
       for (const [engine, v] of per) prevBest.set(`${qid}|${engine}`, v);
     }
 
+    // 尾部补齐(docs/02 §1):窗口内无 ok run 的问题×引擎,回填其最近一次有效 run 的 self 事实
+    const { byPair, tail } = await latestOkRuns(this.db, brandId, since);
+    // 每问题最近一次有效采集时间(任一引擎;≤30 天)——表格"最近采集"列,0=今天
+    const lastOkByQuestion = new Map<number, Date>();
+    for (const run of byPair.values()) {
+      const prev = lastOkByQuestion.get(run.questionId);
+      if (!prev || run.ranAt > prev) lastOkByQuestion.set(run.questionId, run.ranAt);
+    }
+    const tailByQuestion = new Map<number, Array<{ engine: string; mentioned: boolean; rank: number | null; runId: number; ranAt: Date }>>();
+    if (tail.size > 0) {
+      const tailRunIds = [...tail.values()].map((r) => r.runId);
+      const tailFacts = await this.db
+        .select({
+          questionId: mentionFacts.questionId,
+          engine: mentionFacts.engine,
+          mentioned: mentionFacts.mentioned,
+          rank: mentionFacts.rank,
+          runId: mentionFacts.runId,
+          ranAt: mentionFacts.ranAt,
+        })
+        .from(mentionFacts)
+        .where(and(eq(mentionFacts.brandId, brandId), eq(mentionFacts.subjectKind, 'self'), inArray(mentionFacts.runId, tailRunIds)));
+      for (const f of tailFacts) {
+        const arr = tailByQuestion.get(f.questionId) ?? [];
+        arr.push(f);
+        tailByQuestion.set(f.questionId, arr);
+      }
+    }
+
     const rows: MatrixRow[] = questions.map((q) => {
       const fs = byQuestion.get(q.id) ?? [];
-      // 每引擎取窗口内最好位次(同名问题多轮次取更优,趋势用日结层)
-      const perEngine = new Map<string, { mentioned: boolean; rank: number | null; runId: number | null }>();
-      for (const f of fs) {
-        const prev = perEngine.get(f.engine);
-        const better =
-          !prev ||
-          (f.mentioned && !prev.mentioned) ||
-          (f.mentioned && f.rank !== null && (prev.rank === null || f.rank < prev.rank)) ||
-          // 位次相同取更新一次(回溯入口指向最新证据)
-          (f.mentioned === prev.mentioned &&
-            ((f.rank ?? null) === (prev.rank ?? null) && f.runId > (prev.runId ?? 0)));
-        if (better) perEngine.set(f.engine, { mentioned: f.mentioned, rank: f.rank, runId: f.runId });
-      }
-      const cells = [...perEngine.entries()].map(([e, v]) => {
-        const pb = prevBest.get(`${q.id}|${e}`);
+      // 每引擎取窗口内最好位次(同名问题多轮次取更优,趋势用日结层);
+      // 窗口完全缺席的引擎回填最近一次有效 run 的数据(窗口严格优先,stale 标记)
+      const perEngine = bestCellPerEngine(fs, tailByQuestion.get(q.id) ?? []);
+      const cells = [...perEngine.values()].map((v) => {
+        const pb = prevBest.get(`${q.id}|${v.engine}`);
         return {
-          engine: e as EngineId,
+          engine: v.engine as EngineId,
           surface: 'web' as const,
           status: 'ok_with_answer' as const,
           mentioned: v.mentioned,
@@ -466,6 +489,9 @@ export class MonitorService {
           /** 上一窗口最好位次(环比 ▲▼ 标记;null=上期无数据) */
           prevRank: pb ? pb.rank : null,
           prevMentioned: pb ? pb.mentioned : null,
+          /** 单元格数据采集时间(回填=最近一次有效 run;前端展示"N 天前") */
+          asOf: v.ranAt.toISOString(),
+          stale: v.stale,
         };
       });
       const collected = cells.length;
@@ -494,6 +520,8 @@ export class MonitorService {
         cells,
         compositeRank,
         layer: layerOf(top3Engines, collected),
+        /** 最近一次有效采集时间(任一引擎,≤30 天;null=30 天内无有效采集) */
+        lastCollectedAt: lastOkByQuestion.get(q.id)?.toISOString() ?? null,
       };
     });
     return rows.sort((a, b) => (a.compositeRank ?? 999) - (b.compositeRank ?? 999));
@@ -543,6 +571,7 @@ export class MonitorService {
       group by mf.subject_key, mf.subject_name, mf.engine
     `);
     const bySubject = new Map<string, { key: string; name: string; engines: Map<string, { runs: number; mentions: number; top3: number }> }>();
+    const windowPairs = new Set<string>();
     for (const r of res.rows) {
       const row = r as Record<string, string>;
       let subj = bySubject.get(row.subject_key);
@@ -550,17 +579,56 @@ export class MonitorService {
         subj = { key: row.subject_key, name: row.subject_name, engines: new Map() };
         bySubject.set(row.subject_key, subj);
       }
+      windowPairs.add(`${row.subject_key}|${row.engine}`);
       const prev = subj.engines.get(row.engine) ?? { runs: 0, mentions: 0, top3: 0 };
       prev.runs += Number(row.runs);
       prev.mentions += Number(row.mentions);
       prev.top3 += Number(row.top3);
       subj.engines.set(row.engine, prev);
     }
+    // 尾部补齐:窗口内未出现的 主体×引擎 对,回填最近一次有效 run 的样本(主体行带 lastSeen)
+    const lastSeenBySubject = new Map<string, Date>();
+    const { tail } = await latestOkRuns(this.db, brandId, since);
+    if (tail.size > 0) {
+      const tailRunIds = [...tail.values()].map((r) => r.runId);
+      const tailRes = await this.db
+        .select({
+          subjectKey: mentionFacts.subjectKey,
+          subjectName: mentionFacts.subjectName,
+          engine: mentionFacts.engine,
+          mentioned: mentionFacts.mentioned,
+          rank: mentionFacts.rank,
+          ranAt: mentionFacts.ranAt,
+        })
+        .from(mentionFacts)
+        .where(
+          and(
+            eq(mentionFacts.brandId, brandId),
+            inArray(mentionFacts.runId, tailRunIds),
+            inArray(mentionFacts.subjectKind, ['competitor', 'discovered']),
+          ),
+        );
+      const { added, lastSeenAt } = overlayTailSubjects(
+        windowPairs,
+        tailRes.map((f) => ({ ...f, rank: f.rank ?? null })),
+      );
+      for (const a of added) {
+        let subj = bySubject.get(a.subjectKey);
+        if (!subj) {
+          subj = { key: a.subjectKey, name: a.subjectName, engines: new Map() };
+          bySubject.set(a.subjectKey, subj);
+        }
+        subj.engines.set(a.engine, a.agg);
+      }
+      for (const [k, d] of lastSeenAt) lastSeenBySubject.set(k, d);
+    }
     const rows = [...bySubject.values()]
       .map((s) => ({
         key: s.key,
         name: s.name,
         totalMentions: [...s.engines.values()].reduce((a, b) => a + b.mentions, 0),
+        /** 主体最近一次出现时间(仅回填主体非 null;展示层标"N 天前") */
+        lastSeenAt: lastSeenBySubject.has(s.key) ? lastSeenBySubject.get(s.key)!.toISOString() : null,
         engines: Object.fromEntries(
           [...s.engines.entries()].map(([engine, v]) => [
             engine,
@@ -577,7 +645,10 @@ export class MonitorService {
     return { rows, engines };
   }
 
-  async engineRates(brandId: number, since: Date) {
+  async engineRates(
+    brandId: number,
+    since: Date,
+  ): Promise<Array<{ engine: string; mentionRate: number | null; top3Rate: number | null; top1Rate: number | null; denominatorNote: string }>> {
     const res = await this.db.execute(sql`
       select
         mf.engine,
@@ -597,8 +668,16 @@ export class MonitorService {
       const mentioned = Number(row.mentioned);
       const top3 = Number(row.top3);
       const top1 = Number(row.top1);
-      const rate = (n: number) => (valid > 0 ? Math.round((n / valid) * 1000) / 1000 : 0);
-      return { engine: row.engine, mentionRate: rate(mentioned), top3Rate: rate(top3), top1Rate: rate(top1) };
+      // 无有效样本返回 null 而非 0:"从未采到"≠"0% 命中"(docs/02 §1.1 静默为 0 禁令)
+      const rate = (n: number) => (valid > 0 ? Math.round((n / valid) * 1000) / 1000 : null);
+      return {
+        engine: row.engine,
+        mentionRate: rate(mentioned),
+        top3Rate: rate(top3),
+        top1Rate: rate(top1),
+        /** 该组三率的分母 = 该引擎全部有效回答(self 主体),与总览卡(有名次)口径不同 */
+        denominatorNote: '该引擎全部有效回答(self 主体)',
+      };
     });
   }
 
@@ -636,7 +715,16 @@ export class MonitorService {
       order by mentions desc
       limit 50
     `);
-    const competitors = res.rows.map((r) => {
+    const competitors: Array<{
+      key: string;
+      name: string;
+      mentions: number;
+      mentionRate: number | null;
+      top3Rate: number | null;
+      top1Rate: number | null;
+      /** 尾部补齐主体的最近出现时间;窗口主体为 null */
+      lastSeenAt: string | null;
+    }> = res.rows.map((r) => {
       const row = r as Record<string, string>;
       const runs = Number(row.runs);
       const mentions = Number(row.mentions);
@@ -650,8 +738,59 @@ export class MonitorService {
         mentionRate: rate(mentions),
         top3Rate: rate(top3),
         top1Rate: rate(top1),
+        lastSeenAt: null,
       };
     });
+    // 尾部补齐:窗口内整个主体未出现的,回填其最近有效 run 里的竞品样本(带 lastSeen)
+    const windowSubjects = new Set(competitors.map((c) => c.key));
+    const { tail } = await latestOkRuns(this.db, brandId, since);
+    if (tail.size > 0) {
+      const tailRunIds = [...tail.values()].map((r) => r.runId);
+      const tailRes = await this.db
+        .select({
+          subjectKey: mentionFacts.subjectKey,
+          subjectName: mentionFacts.subjectName,
+          mentioned: mentionFacts.mentioned,
+          rank: mentionFacts.rank,
+          runId: mentionFacts.runId,
+          ranAt: mentionFacts.ranAt,
+        })
+        .from(mentionFacts)
+        .where(
+          and(
+            eq(mentionFacts.brandId, brandId),
+            inArray(mentionFacts.runId, tailRunIds),
+            inArray(mentionFacts.subjectKind, ['competitor', 'discovered']),
+          ),
+        );
+      const bySubject = new Map<string, { name: string; runs: Set<number>; mentions: number; top3: number; top1: number; lastSeen: Date }>();
+      for (const f of tailRes) {
+        if (windowSubjects.has(f.subjectKey)) continue; // 窗口已有该主体,不回填
+        const s = bySubject.get(f.subjectKey) ?? { name: f.subjectName, runs: new Set<number>(), mentions: 0, top3: 0, top1: 0, lastSeen: f.ranAt };
+        s.runs.add(f.runId);
+        if (f.mentioned) {
+          s.mentions += 1;
+          if (f.rank !== null && f.rank <= 3) s.top3 += 1;
+          if (f.rank === 1) s.top1 += 1;
+        }
+        if (f.ranAt > s.lastSeen) s.lastSeen = f.ranAt;
+        bySubject.set(f.subjectKey, s);
+      }
+      for (const [key, s] of bySubject) {
+        const runs = s.runs.size;
+        const rate = (n: number) => (runs > 0 ? Math.round((n / runs) * 1000) / 1000 : null);
+        competitors.push({
+          key,
+          name: s.name,
+          mentions: s.mentions,
+          mentionRate: rate(s.mentions),
+          top3Rate: rate(s.top3),
+          top1Rate: rate(s.top1),
+          lastSeenAt: s.lastSeen.toISOString(),
+        });
+      }
+    }
+    competitors.sort((a, b) => b.mentions - a.mentions);
     // 竞品均值 = 上表各竞品三率的算术平均(仅计有数据的竞品)
     const avgOf = (pick: (c: { mentionRate: number | null; top3Rate: number | null; top1Rate: number | null }) => number | null) => {
       const vals = competitors.map(pick).filter((v): v is number => v != null);
@@ -668,7 +807,16 @@ export class MonitorService {
     /** 引用源分析(docs/01 §3.5):明细 + 信源平台偏好 + 自有占比。 */
   async citations(brandId: number, days: number, page = 1, pageSize = 20) {
     const since = new Date(Date.now() - days * 24 * 3600 * 1000);
-    const where = and(eq(citationFacts.brandId, brandId), gte(citationFacts.extractedAt, since));
+    // 尾部补齐:窗口 ∪ 最近一次有效 run 的引用事实(条目自带时间,聚合自然并入)
+    const { tail } = await latestOkRuns(this.db, brandId, since);
+    const tailRunIds = [...tail.values()].map((r) => r.runId);
+    const where =
+      tailRunIds.length > 0
+        ? and(
+            eq(citationFacts.brandId, brandId),
+            or(gte(citationFacts.extractedAt, since), inArray(citationFacts.runId, tailRunIds)),
+          )
+        : and(eq(citationFacts.brandId, brandId), gte(citationFacts.extractedAt, since));
     const rows = await this.db
       .select()
       .from(citationFacts)
@@ -769,25 +917,27 @@ export class MonitorService {
       if (e) e.domains.set(r.domain, r.n);
     }
 
-    const pref = await this.db.execute(sql`
-      select domain, platform_category, count(*) as hits,
-             count(*) filter (where is_owned) as owned
-      from citation_facts
-      where brand_id = ${brandId} and extracted_at >= ${since}
-      group by domain, platform_category
-      order by hits desc
-      limit 20
-    `);
+    const pref = await this.db
+      .select({
+        domain: citationFacts.domain,
+        hits: sql<number>`count(*)::int`,
+        owned: sql<number>`count(*) filter (where ${citationFacts.isOwned})::int`,
+      })
+      .from(citationFacts)
+      .where(where)
+      .groupBy(citationFacts.domain)
+      .orderBy(desc(sql`count(*)`))
+      .limit(20);
 
     // 域名 → 平台中文名聚合(auto.sina.cn/k.sina.cn/sina.cn 合并为「新浪」):
     // 展示层语义,字典子域匹配在此现算(采集侧不落 platform 名,免迁移)
     const byPlatform = new Map<string, { hits: number; owned: number; domains: string[] }>();
-    for (const r of pref.rows as Array<Record<string, string>>) {
-      const platform = classifyDomain(r.domain!).platform;
+    for (const r of pref) {
+      const platform = classifyDomain(r.domain).platform;
       const cur = byPlatform.get(platform) ?? { hits: 0, owned: 0, domains: [] };
-      cur.hits += Number(r.hits);
-      cur.owned += Number(r.owned);
-      cur.domains.push(r.domain!);
+      cur.hits += r.hits;
+      cur.owned += r.owned;
+      cur.domains.push(r.domain);
       byPlatform.set(platform, cur);
     }
 
@@ -850,18 +1000,26 @@ export class MonitorService {
   /** 口碑(docs/01 §3.6):仅口碑词;空态诚实(docs/research 03 A5 对策)。 */
   async reputation(brandId: number, days: number) {
     const since = new Date(Date.now() - days * 24 * 3600 * 1000);
+    // 尾部补齐:窗口 ∪ 最近一次有效 run 的口碑事实(样本自带 ranAt,展示层可见新鲜度)
+    const { tail } = await latestOkRuns(this.db, brandId, since);
+    const tailRunIds = [...tail.values()].map((r) => r.runId);
     const rows = await this.db
       .select()
       .from(reputationFacts)
-      .where(and(eq(reputationFacts.brandId, brandId), gte(reputationFacts.ranAt, since)))
+      .where(
+        tailRunIds.length > 0
+          ? and(eq(reputationFacts.brandId, brandId), or(gte(reputationFacts.ranAt, since), inArray(reputationFacts.runId, tailRunIds)))
+          : and(eq(reputationFacts.brandId, brandId), gte(reputationFacts.ranAt, since)),
+      )
       .orderBy(desc(reputationFacts.ranAt));
 
     const pos = rows.filter((r) => r.sentiment === 'pos').length;
     const neu = rows.filter((r) => r.sentiment === 'neu').length;
     const neg = rows.filter((r) => r.sentiment === 'neg').length;
-    // 加权情绪分(docs/14 §23):正+1/中0/负-1 映射到 0-100(50=中性),
-    // 替代"正面占比"——中性占比高时旧口径会系统性压低分值
-    const weightedScore = rows.length > 0 ? Math.round(((pos - neg) / rows.length) * 50 + 50) : null;
+    // 情绪分统一走 @geo/metrics(docs/02 §4 归一化负分制,−100..+100,0=中性):
+    // 此前这里另用 (pos-neg)/n*50+50 的 0-100 制,同一品牌同一天实时页与报告/行动规则
+    // 两套刻度共用同一阈值 60,结论可能相反。weightedScore 字段保留为同值别名(前端兼容)
+    const weightedScore = sentimentScoreOf(pos, neu, neg, rows.length);
     // 小样本门槛(docs/14 §24):N<10 不出结论性得分,页面展示"数据积累中"
     const MIN_REPUTATION_SAMPLE = 10;
 
@@ -920,7 +1078,12 @@ export class MonitorService {
   async actionList(brandId: number, days: number) {
     const since = new Date(Date.now() - days * 24 * 3600 * 1000);
     const rows = await this.matrix(brandId, since);
-    const eng = await this.engineRates(brandId, since);
+    const engAll = await this.engineRates(brandId, since);
+    // 行动规则/LLM 事实层只比"有数据"的引擎:零样本引擎的 null 不进均值与文案
+    const eng = engAll.filter(
+      (e): e is { engine: string; mentionRate: number; top3Rate: number; top1Rate: number; denominatorNote: string } =>
+        e.mentionRate != null && e.top3Rate != null && e.top1Rate != null,
+    );
     const cite = await this.citations(brandId, days, 1, 500);
     const rep = await this.reputation(brandId, days);
     const ranking = await this.rankings({ brandId, days });
@@ -1105,6 +1268,7 @@ export class MonitorService {
     ex: { failed: number; quotaBlocked: number },
     asOf: string,
     source: MetricSource,
+    denominatorNote?: string,
   ): MetricCard {
     return {
       metric,
@@ -1115,6 +1279,7 @@ export class MonitorService {
       excludedQuotaBlocked: ex.quotaBlocked,
       asOf,
       source,
+      ...(denominatorNote ? { denominatorNote } : {}),
     };
   }
 }
