@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { PageHeader, Skeleton } from '@/components/ui';
+import { PageHeader, Skeleton, EmptyState } from '@/components/ui';
 
 interface RoundRow {
   id: number;
@@ -15,13 +15,18 @@ interface RoundRow {
 
 /** 平台后台 · 采集轮次:跨品牌轮次进度与结果分布(自动刷新)。 */
 export default function AdminRoundsPage() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['admin-rounds'],
     queryFn: () => api<{ rounds: RoundRow[] }>('/admin/rounds?limit=100'),
     refetchInterval: 10_000,
   });
 
-  if (isLoading || !data) return <Skeleton />;
+  if (isLoading) return <Skeleton />;
+
+  // 接口持续报错时给出明确错误态(而非无限骨架屏);refetchInterval 仍在轮询,恢复后自动还原
+  if (!data) {
+    return <EmptyState title="轮次加载失败" text={error instanceof Error ? error.message : '接口无响应,每 10 秒自动重试中'} />;
+  }
 
   return (
     <>

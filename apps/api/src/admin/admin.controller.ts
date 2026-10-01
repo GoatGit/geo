@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, HttpException, HttpStatus, OnModuleDestr
 import { BadRequestException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Request } from 'express';
 import { Queue } from 'bullmq';
@@ -397,21 +397,22 @@ export class AdminController implements OnModuleDestroy {
       .innerJoin(brands, eq(brands.id, collectionRounds.brandId))
       .orderBy(desc(collectionRounds.startedAt))
       .limit(n);
-    // 失败原因聚合(按轮):悬停 ✗ 数字的提示数据源(meta.error 为采集失败原因)
+    // 失败原因聚合(按轮):悬停 ✗ 数字的提示数据源(meta.error 为采集失败原因)。
+    // 数组条件必须走 inArray:sql 模板里裸嵌 ${ids} 会被拼成 ($1,$2,…)::bigint[] 的
+    // 记录转换,Postgres 报 42846 cannot cast type record to bigint[](线上曾致本端点持续 500)
     const ids = rows.map((r) => r.id);
     const failReasons: Record<number, Array<{ engine: string; reason: string; count: number }>> = {};
     if (ids.length) {
-      const res = await this.db.execute(sql`
-        select round_id, engine, left(coalesce(meta->>'error', '未知原因'), 90) as reason, count(*)::int as cnt
-        from query_runs
-        where round_id = any(${ids}::bigint[]) and status = 'failed'
-        group by round_id, engine, reason
-        order by round_id, cnt desc`);
-      const rrows = (res as unknown as { rows: Array<{ round_id: string; engine: string; reason: string; cnt: number }> }).rows ?? [];
-      void rowsOf;
-      for (const r of rrows) {
-        const rid = Number(r.round_id);
-        (failReasons[rid] ??= []).push({ engine: r.engine, reason: r.reason, count: Number(r.cnt) });
+      const reasonExpr = sql<string>`left(coalesce(${queryRuns.meta} ->> 'error', '未知原因'), 90)`;
+      const grouped = await this.db
+        .select({ roundId: queryRuns.roundId, engine: queryRuns.engine, reason: reasonExpr, count: sql<number>`count(*)::int` })
+        .from(queryRuns)
+        .where(and(inArray(queryRuns.roundId, ids), eq(queryRuns.status, 'failed')))
+        .groupBy(queryRuns.roundId, queryRuns.engine, reasonExpr)
+        .orderBy(desc(sql`count(*)`));
+      for (const g of grouped) {
+        if (g.roundId == null) continue;
+        (failReasons[g.roundId] ??= []).push({ engine: g.engine, reason: g.reason, count: Number(g.count) });
       }
     }
     return { rounds: rows.map((r) => ({ ...r, failReasons: (failReasons[r.id] ?? []).slice(0, 8) })) };
