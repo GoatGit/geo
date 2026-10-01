@@ -3,3 +3,4 @@ export * from './client';
 export * from './migrator';
 export * from './partitions';
 export * from './settings';
+export * from './tail-runs';

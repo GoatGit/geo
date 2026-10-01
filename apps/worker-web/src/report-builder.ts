@@ -1,5 +1,5 @@
-import { and, eq, gte, sql } from 'drizzle-orm';
-import { brands, citationFacts, mentionFacts, monitoringQuestions, reputationFacts, type Db } from '@geo/db';
+import { and, desc, eq, gte, inArray, or, sql } from 'drizzle-orm';
+import { brands, citationFacts, latestOkRuns, mentionFacts, monitoringQuestions, reputationFacts, type Db } from '@geo/db';
 import { classifyLayer, generateActionList, sentimentScore } from '@geo/metrics';
 
 /** 窗口内单条 self 事实的最小投影(纯函数输入,便于单测)。 */
@@ -50,6 +50,11 @@ export async function buildReportPayload(
 ): Promise<Record<string, unknown>> {
   const brand = (await db.select().from(brands).where(eq(brands.id, brandId)).limit(1))[0];
   const since = new Date(Date.now() - 7 * 24 * 3600 * 1000);
+  // 尾部补齐(docs/02 §1):逐条区块(分层/竞品/引用/口碑)并入"窗口内缺席对"的
+  // 最近一次有效 run 数据;概览 totals 与 excluded 保持本期真实采集口径。
+  const { tail } = await latestOkRuns(db, brandId, since);
+  const tailRunIds = [...tail.values()].map((r) => r.runId);
+  const orTail = tailRunIds.length > 0 ? inArray(mentionFacts.runId, tailRunIds) : undefined;
 
   const totals = await db.execute(sql`
     select
@@ -100,42 +105,82 @@ export async function buildReportPayload(
         eq(mentionFacts.subjectKind, 'self'),
       ),
     );
-  const layers = aggregateQuestionLayers(perQuestion, facts);
+  // 分层尾部补齐:窗口缺席的 问题×引擎 对,并入其最近一次有效 run 的 self 事实(窗口严格优先)
+  let effectiveFacts = facts;
+  if (tailRunIds.length > 0) {
+    const windowPairs = new Set(facts.map((f) => `${f.questionId}|${f.engine}`));
+    const tailFacts = await db
+      .select({
+        questionId: mentionFacts.questionId,
+        engine: mentionFacts.engine,
+        mentioned: mentionFacts.mentioned,
+        rank: mentionFacts.rank,
+      })
+      .from(mentionFacts)
+      .where(
+        and(
+          eq(mentionFacts.brandId, brandId),
+          eq(mentionFacts.subjectKind, 'self'),
+          inArray(mentionFacts.runId, tailRunIds),
+        ),
+      );
+    effectiveFacts = [...facts, ...tailFacts.filter((f) => !windowPairs.has(`${f.questionId}|${f.engine}`))];
+  }
+  const layers = aggregateQuestionLayers(perQuestion, effectiveFacts);
 
   const rep = await db
     .select()
     .from(reputationFacts)
-    .where(and(eq(reputationFacts.brandId, brandId), gte(reputationFacts.ranAt, since)))
+    .where(
+      tailRunIds.length > 0
+        ? and(
+            eq(reputationFacts.brandId, brandId),
+            or(gte(reputationFacts.ranAt, since), inArray(reputationFacts.runId, tailRunIds)),
+          )
+        : and(eq(reputationFacts.brandId, brandId), gte(reputationFacts.ranAt, since)),
+    )
     .limit(200);
   const pos = rep.filter((r) => r.sentiment === 'pos').length;
   const neu = rep.filter((r) => r.sentiment === 'neu').length;
   const neg = rep.filter((r) => r.sentiment === 'neg').length;
 
-  // 竞品榜(前 5,同批查询同口径)
-  const comp = await db.execute(sql`
-    select mf.subject_name,
-           count(*) filter (where mf.mentioned)                   as mentions,
-           count(*) filter (where mf.mentioned and mf.rank <= 3)  as top3,
-           count(distinct mf.run_id)                              as runs
-    from mention_facts mf
-    where mf.brand_id = ${brandId} and mf.ran_at >= ${since}
-      and mf.subject_kind in ('competitor', 'discovered')
-    group by mf.subject_name
-    order by mentions desc limit 5
-  `);
-  const competitors = comp.rows.map((r) => {
-    const row = r as Record<string, string>;
-    const runs = Number(row.runs);
-    const mentions = Number(row.mentions);
+  // 竞品榜(前 5,同批查询同口径;窗口 ∪ 尾部补齐)
+  const comp = await db
+    .select({
+      subjectName: mentionFacts.subjectName,
+      mentions: sql<number>`count(*) filter (where ${mentionFacts.mentioned})::int`,
+      top3: sql<number>`count(*) filter (where ${mentionFacts.mentioned} and ${mentionFacts.rank} <= 3)::int`,
+      runs: sql<number>`count(distinct ${mentionFacts.runId})::int`,
+    })
+    .from(mentionFacts)
+    .where(
+      and(
+        eq(mentionFacts.brandId, brandId),
+        orTail ? or(gte(mentionFacts.ranAt, since), orTail) : gte(mentionFacts.ranAt, since),
+        inArray(mentionFacts.subjectKind, ['competitor', 'discovered']),
+      ),
+    )
+    .groupBy(mentionFacts.subjectName)
+    .orderBy(desc(sql`count(*) filter (where ${mentionFacts.mentioned})`))
+    .limit(5);
+  const competitors = comp.map((row) => {
+    const runs = row.runs;
     const rate = (n: number) => (runs > 0 ? Math.round((n / runs) * 1000) / 1000 : null);
-    return { name: row.subject_name, mentions, mentionRate: rate(mentions), top3Rate: rate(Number(row.top3)) };
+    return { name: row.subjectName, mentions: row.mentions, mentionRate: rate(row.mentions), top3Rate: rate(row.top3) };
   });
 
-  // 引用源概况(自有域名占比 + 高频信源)
+  // 引用源概况(自有域名占比 + 高频信源;窗口 ∪ 尾部补齐)
   const cites = await db
     .select({ domain: citationFacts.domain, isOwned: citationFacts.isOwned })
     .from(citationFacts)
-    .where(and(eq(citationFacts.brandId, brandId), gte(citationFacts.extractedAt, since)));
+    .where(
+      tailRunIds.length > 0
+        ? and(
+            eq(citationFacts.brandId, brandId),
+            or(gte(citationFacts.extractedAt, since), inArray(citationFacts.runId, tailRunIds)),
+          )
+        : and(eq(citationFacts.brandId, brandId), gte(citationFacts.extractedAt, since)),
+    );
   const domainHits = new Map<string, number>();
   let owned = 0;
   for (const c of cites) {
@@ -212,7 +257,7 @@ export async function buildReportPayload(
     actions: items,
     appendix: {
       methodology:
-        '口径定义见 docs/02:提及率分母=有效 QueryRun(ok_with_answer+ok_empty);Top3/首推率分母=有效且有名次;综合名次=未上榜记 N+1 取中位数。健康阈值方法论=行业 P75 分位,8 周重校。',
+        '口径定义见 docs/02:提及率分母=有效 QueryRun(ok_with_answer+ok_empty);Top3/首推率分母=有效且有名次;综合名次=未上榜记 N+1 取中位数。健康阈值方法论=行业 P75 分位,8 周重校。逐条区块(问题分层/竞品/引用/口碑)含尾部补齐:本期窗口内未采集到的问题×引擎沿用其 30 天内最近一次有效结果(总览数字仍为本期真实采集口径)。',
       rulesetVersion,
       snapshotNote: '原始快照按 7 天保留;报告内引用的证据随报告 payload 归档(docs/01 §3.7)。',
     },

@@ -10,3 +10,4 @@ export * from './rules';
 export * from './sentiment';
 export * from './citations';
 export * from './daily';
+export * from './tail-overlay';
