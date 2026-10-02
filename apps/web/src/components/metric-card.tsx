@@ -83,11 +83,14 @@ export function MetricCardView({
   spark?: Array<number | null>;
   sparkLabel?: string;
 }) {
+  const [open, setOpen] = useState(false);
   if (!card) return null;
   return (
-    <div className="card card-hover group relative overflow-hidden p-5">
-      <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-brand-400 to-sand-400 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-      <CardInner card={card} lowerBetter={lowerBetter} title={title} spark={spark} sparkLabel={sparkLabel} />
+    // 不用 overflow-hidden(会裁掉点击展开的口径气泡);渐变条自带圆角对齐卡片圆角;
+    // 展开时卡片抬层,避免被相邻卡片盖住气泡
+    <div className={`card card-hover group relative p-5 ${open ? 'z-20' : ''}`}>
+      <div className="absolute inset-x-0 top-0 h-0.5 rounded-t-xl bg-gradient-to-r from-brand-400 to-sand-400 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+      <CardInner card={card} lowerBetter={lowerBetter} title={title} spark={spark} sparkLabel={sparkLabel} open={open} setOpen={setOpen} />
     </div>
   );
 }
@@ -98,15 +101,18 @@ function CardInner({
   title,
   spark,
   sparkLabel,
+  open,
+  setOpen,
 }: {
   card: MetricCard;
   lowerBetter: boolean;
   title: string;
   spark?: Array<number | null>;
   sparkLabel?: string;
+  open: boolean;
+  setOpen: (v: boolean) => void;
 }) {
   const animated = useCountUp(card.value);
-  const [open, setOpen] = useState(false);
   const isEmpty = (card.denominator ?? 0) === 0;
   const display =
     card.value == null || isEmpty
@@ -126,7 +132,7 @@ function CardInner({
             type="button"
             aria-expanded={open}
             aria-label="统计口径说明(点击展开)"
-            onClick={() => setOpen((v) => !v)}
+            onClick={() => setOpen(!open)}
             className={`flex h-4 w-4 cursor-help items-center justify-center rounded-full text-[9px] font-bold transition-colors ${
               open ? 'bg-brand-100 text-brand-600' : 'bg-slate-100 text-slate-400 hover:bg-brand-100 hover:text-brand-600'
             }`}
