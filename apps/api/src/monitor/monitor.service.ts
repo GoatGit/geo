@@ -68,26 +68,73 @@ export class MonitorService {
     return direct;
   }
 
+  /**
+   * 有效口径事实集(docs/02 §1.1.1):窗口内全部 self 事实 ∪ 窗口缺席对的最近一次有效 run 事实。
+   * 指标卡/漏斗/分引擎三率/竞品本品侧/体检引用源统一用它统计;
+   * 趋势(时间序列)与 excluded(采集事件)仍按窗口,不回填。
+   */
+  private async effectiveSelfFacts(brandId: number, since: Date) {
+    const windowFacts = await this.db
+      .select({
+        questionId: mentionFacts.questionId,
+        engine: mentionFacts.engine,
+        mentioned: mentionFacts.mentioned,
+        rank: mentionFacts.rank,
+        runId: mentionFacts.runId,
+        ranAt: mentionFacts.ranAt,
+      })
+      .from(mentionFacts)
+      .where(and(eq(mentionFacts.brandId, brandId), gte(mentionFacts.ranAt, since), eq(mentionFacts.subjectKind, 'self')));
+    const { tail } = await latestOkRuns(this.db, brandId, since);
+    const tailRunIds = [...tail.values()].map((r) => r.runId);
+    let effective = windowFacts;
+    let backfilled = 0;
+    if (tailRunIds.length > 0) {
+      const windowPairs = new Set(windowFacts.map((f) => `${f.questionId}|${f.engine}`));
+      const tailFacts = await this.db
+        .select({
+          questionId: mentionFacts.questionId,
+          engine: mentionFacts.engine,
+          mentioned: mentionFacts.mentioned,
+          rank: mentionFacts.rank,
+          runId: mentionFacts.runId,
+          ranAt: mentionFacts.ranAt,
+        })
+        .from(mentionFacts)
+        .where(
+          and(eq(mentionFacts.brandId, brandId), eq(mentionFacts.subjectKind, 'self'), inArray(mentionFacts.runId, tailRunIds)),
+        );
+      const add = tailFacts.filter((f) => !windowPairs.has(`${f.questionId}|${f.engine}`));
+      backfilled = add.length;
+      effective = [...windowFacts, ...add];
+    }
+    return { effective, backfilled, tailRunIds };
+  }
+
   private async rankingsWindow(input: { brandId: number; days: number; engine?: EngineId }) {
     const since = new Date(Date.now() - input.days * 24 * 3600 * 1000);
-    const engineFilter = input.engine ? sql`and mf.engine = ${input.engine}` : sql``;
 
-    const totals = await this.db.execute(sql`
-      select
-        count(*) filter (where true)                                        as valid,
-        count(*) filter (where mf.mentioned)                                 as mentioned,
-        count(*) filter (where mf.mentioned and mf.rank <= 3)                as top3,
-        count(*) filter (where mf.mentioned and mf.rank = 1)                 as top1,
-        count(*) filter (where mf.mentioned and mf.rank is not null)         as ranked,
-        avg(mf.rank) filter (where mf.mentioned and mf.rank is not null)     as avg_rank
-      from mention_facts mf
-      where mf.brand_id = ${input.brandId}
-        and mf.ran_at >= ${since}
-        and mf.subject_kind = 'self'
-        and mf.question_id in (select id from monitoring_questions where status = 'active')
-        ${engineFilter}
-    `);
-    const t = (totals.rows[0] ?? {}) as Record<string, string | null>;
+    // 总览统计改走有效口径(窗口 ∪ 尾部补齐,docs/02 §1.1.1),与矩阵逐条数据同源
+    const activeIds = new Set(
+      (
+        await this.db
+          .select({ id: monitoringQuestions.id })
+          .from(monitoringQuestions)
+          .where(and(eq(monitoringQuestions.brandId, input.brandId), eq(monitoringQuestions.status, 'active')))
+      ).map((r) => r.id),
+    );
+    const { effective, backfilled, tailRunIds } = await this.effectiveSelfFacts(input.brandId, since);
+    const factList = (input.engine ? effective.filter((f) => f.engine === input.engine) : effective).filter((f) =>
+      activeIds.has(f.questionId),
+    );
+    const valid = factList.length;
+    const mentioned = factList.filter((f) => f.mentioned).length;
+    const top3 = factList.filter((f) => f.mentioned && f.rank !== null && f.rank <= 3).length;
+    const top1 = factList.filter((f) => f.mentioned && f.rank === 1).length;
+    const rankedFacts = factList.filter((f) => f.mentioned && f.rank !== null);
+    const ranked = rankedFacts.length;
+    const avgRankValue = ranked > 0 ? rankedFacts.reduce((a, f) => a + (f.rank ?? 0), 0) / ranked : null;
+    const t = { avg_rank: avgRankValue != null ? String(avgRankValue) : null } as Record<string, string | null>;
 
     // excluded = failed/quota_blocked(docs/02 §1.1:失败/拦截在任何页面不得体现为 0 值)
     const excluded = await this.db.execute(sql`
@@ -102,21 +149,16 @@ export class MonitorService {
 
     const asOf = new Date().toISOString();
     const source: MetricSource = 'realtime';
-    const valid = Number(t.valid ?? 0);
-    const mentioned = Number(t.mentioned ?? 0);
-    const top3 = Number(t.top3 ?? 0);
-    const top1 = Number(t.top1 ?? 0);
-    const ranked = Number(t.ranked ?? 0);
     const rate = (n: number, d: number | null) => (d && d > 0 ? Math.round((n / d) * 1000) / 1000 : null);
     const nEx = { failed: Number(ex.failed ?? 0), quotaBlocked: Number(ex.quota_blocked ?? 0) };
 
     const cards: MetricCard[] = [
       this.card('mentionRate', rate(mentioned, valid), mentioned, valid, nEx, asOf, source,
-        '全部有效 QueryRun(ok_with_answer + ok_empty)'),
+        '窗口内有效采集 + 最近有效回填(ok_with_answer + ok_empty)', backfilled),
       this.card('top3Rate', rate(top3, ranked), top3, ranked, nEx, asOf, source,
-        '有名次的 QueryRun(含散文提及中判出位次;漏斗②用"被提及"作分母,口径不同勿直接对比)'),
+        '有名次的采集(含回填;含散文提及中判出位次;漏斗②用"被提及"作分母,口径不同勿直接对比)', backfilled),
       this.card('top1Rate', rate(top1, ranked), top1, ranked, nEx, asOf, source,
-        '有名次的 QueryRun'),
+        '有名次的采集(含回填)', backfilled),
       {
         metric: 'avgRank',
         value: t.avg_rank ? Math.round(Number(t.avg_rank) * 100) / 100 : null,
@@ -124,6 +166,7 @@ export class MonitorService {
         denominator: ranked,
         excludedFailed: nEx.failed,
         excludedQuotaBlocked: nEx.quotaBlocked,
+        backfilled,
         asOf,
         source,
       },
@@ -131,17 +174,17 @@ export class MonitorService {
 
     const matrix = await this.matrix(input.brandId, since);
 
-    // 可见性漏斗:嵌套转化口径(docs/02 §2,2026-09 修订)
+    // 可见性漏斗:嵌套转化口径(docs/02 §2,2026-09 修订);有效口径(含回填)
     const funnel: FunnelStage[] = [
-      stage('mention', '提及', mentioned, valid, '全部有效 QueryRun(ok_with_answer + ok_empty)'),
-      stage('top3', '上榜(Top3)', top3, mentioned, '①的分子:被提及的 QueryRun'),
-      stage('top1', '首推(位次=1)', top1, top3, '②的分子:进 Top3 的 QueryRun'),
+      stage('mention', '提及', mentioned, valid, '全部有效采集+最近有效回填(ok_with_answer + ok_empty)'),
+      stage('top3', '上榜(Top3)', top3, mentioned, '①的分子:被提及的采集(含回填)'),
+      stage('top1', '首推(位次=1)', top1, top3, '②的分子:进 Top3 的采集(含回填)'),
     ];
 
     const trend = await this.trend(input.brandId, 7); // 迷你趋势固定近 7 天,不受所选周期影响
 
     // ===== 品牌洞察图表(rubric 迁移):问题层→结局桑基 + 本品 vs 行业均值 =====
-    const layerSankey = await this.layerSankey(input.brandId, since);
+    const layerSankey = await this.layerSankey(input.brandId, since, effective);
     const benchmark = await this.benchmark(input.brandId, since, { mentioned, top3, top1, valid, ranked });
 
     const calibrating = await this.inCalibrationWindow(input.brandId);
@@ -155,10 +198,12 @@ export class MonitorService {
       })
       .from(citationFacts)
       .where(
-        and(
-          eq(citationFacts.brandId, input.brandId),
-          gte(citationFacts.extractedAt, since),
-        ),
+        tailRunIds.length > 0
+          ? and(
+              eq(citationFacts.brandId, input.brandId),
+              or(gte(citationFacts.extractedAt, since), inArray(citationFacts.runId, tailRunIds)),
+            )
+          : and(eq(citationFacts.brandId, input.brandId), gte(citationFacts.extractedAt, since)),
       )
       .groupBy(citationFacts.platformCategory);
     let citeTotal = 0;
@@ -191,11 +236,11 @@ export class MonitorService {
       cards,
       funnel,
       matrix,
-      engineStats: await this.engineRates(input.brandId, since),
+      engineStats: await this.engineRates(input.brandId, since, effective),
       trend,
       health,
       excluded: nEx,
-      period: { days: input.days, since: since.toISOString() },
+      period: { days: input.days, since: since.toISOString(), backfilled },
       asOf,
       source,
       layerSankey,
@@ -205,31 +250,41 @@ export class MonitorService {
 
   /**
    * 问题层→转化结局 桑基数据(单品牌):每层问题被提及/进Top3/被首推/缺席的次数。
-   * 数据源 mention_facts(self 主体,关联问题分层);无分层的问题归「未分层」。
+   * 数据源 = 有效口径事实集(窗口∪回填,docs/02 §1.1.1,与矩阵同源);无分层的问题归「未分层」。
    */
-  private async layerSankey(brandId: number, since: Date) {
-    const rows = (await this.db.execute(sql`
-      select coalesce(q.group_name, '未分层') as layer,
-             count(*)::int as asked,
-             count(*) filter (where mf.mentioned)::int as mentioned,
-             count(*) filter (where mf.mentioned and mf.rank <= 3)::int as top3,
-             count(*) filter (where mf.mentioned and mf.rank = 1)::int as top1
-      from mention_facts mf
-      join monitoring_questions q on q.id = mf.question_id
-      where mf.brand_id = ${brandId} and mf.ran_at >= ${since}
-        and mf.subject_kind = 'self'
-        and q.status = 'active'
-      group by coalesce(q.group_name, '未分层')
-    `)) as unknown as { rows: Array<{ layer: string; asked: number; mentioned: number; top3: number; top1: number }> };
-    return rows.rows
-      .filter((r) => r.asked > 0)
-      .map((r) => ({
-        layer: r.layer,
-        asked: r.asked,
-        mentioned: r.mentioned,
-        top3: r.top3,
-        top1: r.top1,
-        missed: r.asked - r.mentioned,
+  private async layerSankey(
+    brandId: number,
+    since: Date,
+    precomputed?: Array<{ questionId: number; mentioned: boolean; rank: number | null }>,
+  ) {
+    const facts = precomputed ?? (await this.effectiveSelfFacts(brandId, since)).effective;
+    const questions = await this.db
+      .select({ id: monitoringQuestions.id, groupName: monitoringQuestions.groupName })
+      .from(monitoringQuestions)
+      .where(and(eq(monitoringQuestions.brandId, brandId), eq(monitoringQuestions.status, 'active')));
+    const layerOfQuestion = new Map(questions.map((q) => [q.id, q.groupName ?? '未分层']));
+    const byLayer = new Map<string, { asked: number; mentioned: number; top3: number; top1: number }>();
+    for (const f of facts) {
+      const layer = layerOfQuestion.get(f.questionId);
+      if (!layer) continue; // 非本品牌活跃问题的事实不计入
+      const e = byLayer.get(layer) ?? { asked: 0, mentioned: 0, top3: 0, top1: 0 };
+      e.asked += 1;
+      if (f.mentioned) {
+        e.mentioned += 1;
+        if (f.rank !== null && f.rank <= 3) e.top3 += 1;
+        if (f.rank === 1) e.top1 += 1;
+      }
+      byLayer.set(layer, e);
+    }
+    return [...byLayer.entries()]
+      .filter(([, e]) => e.asked > 0)
+      .map(([layer, e]) => ({
+        layer,
+        asked: e.asked,
+        mentioned: e.mentioned,
+        top3: e.top3,
+        top1: e.top1,
+        missed: e.asked - e.mentioned,
       }));
   }
 
@@ -645,61 +700,54 @@ export class MonitorService {
     return { rows, engines };
   }
 
+  /** 分引擎三率(docs/02 §1.1.1):有效口径(窗口 ∪ 最近有效回填),与矩阵/指标卡同源。 */
   async engineRates(
     brandId: number,
     since: Date,
+    precomputed?: Array<{ engine: string; mentioned: boolean; rank: number | null }>,
   ): Promise<Array<{ engine: string; mentionRate: number | null; top3Rate: number | null; top1Rate: number | null; denominatorNote: string }>> {
-    const res = await this.db.execute(sql`
-      select
-        mf.engine,
-        count(*)                                              as valid,
-        count(*) filter (where mf.mentioned)                  as mentioned,
-        count(*) filter (where mf.mentioned and mf.rank <= 3) as top3,
-        count(*) filter (where mf.mentioned and mf.rank = 1)  as top1
-      from mention_facts mf
-      where mf.brand_id = ${brandId} and mf.ran_at >= ${since}
-        and mf.subject_kind = 'self'
-      group by mf.engine
-      order by mf.engine
-    `);
-    return res.rows.map((r) => {
-      const row = r as Record<string, string>;
-      const valid = Number(row.valid);
-      const mentioned = Number(row.mentioned);
-      const top3 = Number(row.top3);
-      const top1 = Number(row.top1);
-      // 无有效样本返回 null 而非 0:"从未采到"≠"0% 命中"(docs/02 §1.1 静默为 0 禁令)
-      const rate = (n: number) => (valid > 0 ? Math.round((n / valid) * 1000) / 1000 : null);
-      return {
-        engine: row.engine,
-        mentionRate: rate(mentioned),
-        top3Rate: rate(top3),
-        top1Rate: rate(top1),
-        /** 该组三率的分母 = 该引擎全部有效回答(self 主体),与总览卡(有名次)口径不同 */
-        denominatorNote: '该引擎全部有效回答(self 主体)',
-      };
-    });
+    const facts = precomputed ?? (await this.effectiveSelfFacts(brandId, since)).effective;
+    const byEngine = new Map<string, { valid: number; mentioned: number; top3: number; top1: number }>();
+    for (const f of facts) {
+      const e = byEngine.get(f.engine) ?? { valid: 0, mentioned: 0, top3: 0, top1: 0 };
+      e.valid += 1;
+      if (f.mentioned) {
+        e.mentioned += 1;
+        if (f.rank !== null && f.rank <= 3) e.top3 += 1;
+        if (f.rank === 1) e.top1 += 1;
+      }
+      byEngine.set(f.engine, e);
+    }
+    return [...byEngine.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([engine, v]) => {
+        // 无有效样本返回 null 而非 0:"从未采到"≠"0% 命中"(docs/02 §1.1 静默为 0 禁令)
+        const rate = (n: number) => (v.valid > 0 ? Math.round((n / v.valid) * 1000) / 1000 : null);
+        return {
+          engine,
+          mentionRate: rate(v.mentioned),
+          top3Rate: rate(v.top3),
+          top1Rate: rate(v.top1),
+          /** 该组三率的分母 = 该引擎全部有效回答(self 主体,含回填),与总览卡(有名次)口径不同 */
+          denominatorNote: '该引擎全部有效回答(self 主体,含最近有效回填)',
+        };
+      });
   }
 
   /** 竞品透视(docs/01 §3.4):同批查询同口径解析。 */
   async competitors(brandId: number, days: number) {
     const since = new Date(Date.now() - days * 24 * 3600 * 1000);
-    // 本品三率(与 rankings 同口径):作为对比的"本品"侧
-    const selfRow = (await this.db.execute(sql`
-      select count(*) filter (where true) as valid,
-             count(*) filter (where mf.mentioned) as mentioned,
-             count(*) filter (where mf.mentioned and mf.rank <= 3) as top3,
-             count(*) filter (where mf.mentioned and mf.rank = 1) as top1
-      from mention_facts mf
-      where mf.brand_id = ${brandId} and mf.ran_at >= ${since}
-        and mf.subject_kind = 'self'
-    `)) as unknown as { rows: Array<{ valid: string; mentioned: string; top3: string; top1: string }> };
-    const s = selfRow.rows[0];
+    // 本品三率(与 rankings 同口径,有效口径=窗口∪回填):作为对比的"本品"侧
+    const selfFacts = (await this.effectiveSelfFacts(brandId, since)).effective;
+    const sValid = selfFacts.length;
+    const sMentioned = selfFacts.filter((f) => f.mentioned).length;
+    const sTop3 = selfFacts.filter((f) => f.mentioned && f.rank !== null && f.rank <= 3).length;
+    const sTop1 = selfFacts.filter((f) => f.mentioned && f.rank === 1).length;
     const rate = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 1000) / 1000 : null);
     const selfRates = {
-      mention: rate(Number(s?.mentioned ?? 0), Number(s?.valid ?? 0)),
-      top3: rate(Number(s?.top3 ?? 0), Number(s?.valid ?? 0)),
-      top1: rate(Number(s?.top1 ?? 0), Number(s?.valid ?? 0)),
+      mention: rate(sMentioned, sValid),
+      top3: rate(sTop3, sValid),
+      top1: rate(sTop1, sValid),
     };
     const res = await this.db.execute(sql`
       select
@@ -1269,6 +1317,7 @@ export class MonitorService {
     asOf: string,
     source: MetricSource,
     denominatorNote?: string,
+    backfilled?: number,
   ): MetricCard {
     return {
       metric,
@@ -1277,6 +1326,7 @@ export class MonitorService {
       denominator,
       excludedFailed: ex.failed,
       excludedQuotaBlocked: ex.quotaBlocked,
+      ...(backfilled ? { backfilled } : {}),
       asOf,
       source,
       ...(denominatorNote ? { denominatorNote } : {}),

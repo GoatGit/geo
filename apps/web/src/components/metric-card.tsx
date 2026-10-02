@@ -9,6 +9,8 @@ type MetricCard = {
   denominator: number | null;
   excludedFailed: number;
   excludedQuotaBlocked: number;
+  /** 统计含最近有效回填的条数(docs/02 §1.1.1)>0 时提示语注明 */
+  backfilled?: number;
   asOf: string;
   source: string;
 };
@@ -115,7 +117,9 @@ function CardInner({
         <span className="text-xs font-medium text-slate-500">{title}</span>
         <span
           className="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-slate-100 text-[9px] font-bold text-slate-400 transition-colors hover:bg-brand-100 hover:text-brand-600"
-          title={`分子/分母:${card.numerator ?? '—'}/${card.denominator ?? '—'};排除 failed=${card.excludedFailed}、quota_blocked=${card.excludedQuotaBlocked}(不计入分母);截至 ${new Date(card.asOf).toLocaleString('zh-CN')}`}
+          title={`分子/分母:${card.numerator ?? '—'}/${card.denominator ?? '—'};排除 failed=${card.excludedFailed}、quota_blocked=${card.excludedQuotaBlocked}(不计入分母)${
+            card.backfilled ? `;含最近有效回填 ${card.backfilled} 条(窗口内未采到的沿用其最近一次有效结果)` : ''
+          };截至 ${new Date(card.asOf).toLocaleString('zh-CN')}`}
         >
           i
         </span>

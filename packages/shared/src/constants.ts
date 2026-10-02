@@ -310,6 +310,8 @@ export interface MetricCard {
   /** docs/02 §1.1:failed/quota_blocked 计数必须可见,不允许静默为 0 */
   excludedFailed: number;
   excludedQuotaBlocked: number;
+  /** 统计含最近有效回填的条数(docs/02 §1.1.1;>0 时提示语注明),分母由窗口+回填组成 */
+  backfilled?: number;
   /**
    * 分母口径说明(必填):top3Rate 在不同视图有 不同分母(榜单内/被提及内/全部有效),
    * 同名指标不标注分母会让同一页面的数字互相矛盾、无法对账。
