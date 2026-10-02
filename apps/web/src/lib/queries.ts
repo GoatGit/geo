@@ -39,6 +39,8 @@ export interface RankingsDto {
     denominator: number | null;
     excludedFailed: number;
     excludedQuotaBlocked: number;
+    backfilled?: number;
+    denominatorNote?: string;
     asOf: string;
     source: string;
   }>;

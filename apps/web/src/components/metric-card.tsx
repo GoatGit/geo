@@ -11,6 +11,8 @@ type MetricCard = {
   excludedQuotaBlocked: number;
   /** 统计含最近有效回填的条数(docs/02 §1.1.1)>0 时提示语注明 */
   backfilled?: number;
+  /** 该卡分母口径说明(不同卡分母不同,悬停对账用) */
+  denominatorNote?: string;
   asOf: string;
   source: string;
 };
@@ -115,13 +117,29 @@ function CardInner({
     <>
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-slate-500">{title}</span>
-        <span
-          className="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-slate-100 text-[9px] font-bold text-slate-400 transition-colors hover:bg-brand-100 hover:text-brand-600"
-          title={`分子/分母:${card.numerator ?? '—'}/${card.denominator ?? '—'};排除 failed=${card.excludedFailed}、quota_blocked=${card.excludedQuotaBlocked}(不计入分母)${
-            card.backfilled ? `;含最近有效回填 ${card.backfilled} 条(窗口内未采到的沿用其最近一次有效结果)` : ''
-          };截至 ${new Date(card.asOf).toLocaleString('zh-CN')}`}
-        >
-          i
+        {/* CSS 悬停气泡:原生 title 在内嵌浏览器/webview 不渲染,改用与排名页"?"图例同款 group-hover */}
+        <span className="group relative inline-flex">
+          <span className="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-slate-100 text-[9px] font-bold text-slate-400 transition-colors group-hover:bg-brand-100 group-hover:text-brand-600">
+            i
+          </span>
+          <span className="pointer-events-none absolute right-0 top-6 z-30 hidden w-64 whitespace-normal rounded-lg border border-slate-100 bg-white px-3 py-2 text-left text-[11px] leading-5 font-normal text-slate-500 shadow-lg group-hover:flex group-focus-within:flex">
+            <b className="font-semibold text-slate-700">
+              {card.numerator ?? '—'}/{card.denominator ?? '—'}
+            </b>
+            {card.denominatorNote ? `(${card.denominatorNote})` : ''}
+            <br />
+            排除 failed={card.excludedFailed}、quota_blocked={card.excludedQuotaBlocked}(不计入分母)
+            {card.backfilled ? (
+              <>
+                <br />
+                含最近有效回填 {card.backfilled} 条(窗口内未采到的沿用其最近一次有效结果)
+              </>
+            ) : (
+              ''
+            )}
+            <br />
+            截至 {new Date(card.asOf).toLocaleString('zh-CN')}
+          </span>
         </span>
       </div>
       <div className="mt-2 text-[26px] font-semibold leading-8 text-slate-900">

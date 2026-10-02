@@ -288,11 +288,7 @@ export default function RankingsPage() {
                                   {cell.rank < cell.prevRank ? '▲' : '▼'}
                                 </span>
                               )}
-                              {staleMark != null && (
-                                <span className="text-[10px] font-normal text-slate-400" title={`${staleMark} 天前的采集数据(本窗口内未重新采集)`}>
-                                  ({staleMark})
-                                </span>
-                              )}
+                              {staleMark != null && <StaleMark days={staleMark} />}
                             </span>
                           ) : cell.mentioned ? (
                             <span
@@ -300,11 +296,7 @@ export default function RankingsPage() {
                               title="AI 回答提及了本品,但该回答是开放式评述、未给出推荐位次(排名类指标不计入此类)"
                             >
                               提及·无排名
-                              {staleMark != null && (
-                                <span className="text-[10px]" title={`${staleMark} 天前的采集数据(本窗口内未重新采集)`}>
-                                  ({staleMark})
-                                </span>
-                              )}
+                              {staleMark != null && <StaleMark days={staleMark} />}
                             </span>
                           ) : cell.stale ? (
                             <span
@@ -315,7 +307,7 @@ export default function RankingsPage() {
                                   : `最近一次有效采集(${new Date(cell.asOf ?? Date.now()).toLocaleString('zh-CN')})中未出现本品;本窗口内尚未重新采集`
                               }
                             >
-                              未提及{staleMark != null && `(${staleMark})`}
+                              未提及{staleMark != null && <StaleMark days={staleMark} />}
                             </span>
                           ) : (
                             <span
@@ -356,4 +348,16 @@ export default function RankingsPage() {
 
 function pct2(v: number) {
   return `${Math.round(v * 100)}%`;
+}
+
+/** 回填陈旧度 (N) 小标:CSS 悬停气泡(原生 title 在内嵌浏览器/webview 不渲染) */
+function StaleMark({ days }: { days: number }) {
+  return (
+    <span className="group relative inline-flex">
+      <span className="text-[10px] font-normal text-slate-400">({days})</span>
+      <span className="pointer-events-none absolute left-1/2 top-full z-30 mt-1 hidden -translate-x-1/2 whitespace-nowrap rounded-lg border border-slate-100 bg-white px-2.5 py-1.5 text-[11px] font-normal text-slate-500 shadow-lg group-hover:block">
+        {days} 天前的采集数据(本窗口内未重新采集)
+      </span>
+    </span>
+  );
 }
