@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { Pool, PoolClient } from 'pg';
 import type { Db } from '@geo/db';
 import { accountProfiles } from '@geo/db';
-import { WEB_ENGINES, SecretBox, type BrowserStorageState } from '@geo/shared';
+import { WEB_ENGINES, SecretBox, PROFILE_DAILY_QUOTA, type BrowserStorageState } from '@geo/shared';
 
 export interface AcquiredProfile {
   id: number;
@@ -17,8 +17,8 @@ export interface AcquiredProfile {
   storageState: BrowserStorageState | null;
 }
 
-/** 单账号单日提问上限(docs/04 §3.2 配额内化,超限强制轮换)。 */
-export const DAILY_QUOTA_PER_PROFILE = 20;
+/** 单账号单日提问上限(docs/04 §3.2 配额内化,超限强制轮换)。单一事实源在 @geo/shared。 */
+export const DAILY_QUOTA_PER_PROFILE = PROFILE_DAILY_QUOTA;
 
 /**
  * 健康分结果状态迁移(docs/04 §3.2,M0 取值,PoC 后按封损率校准):

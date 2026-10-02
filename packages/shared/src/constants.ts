@@ -45,6 +45,13 @@ export const THRESHOLD_CALIBRATION_GRACE_DAYS = 56;
  */
 export const TAIL_COMPLETION_MAX_AGE_DAYS = 30;
 
+/**
+ * 账号档案单日配额(每个账号每天可为所属引擎采集的次数上限)。
+ * 单一事实源:worker 侧 profiles.ts 的 DAILY_QUOTA_PER_PROFILE 由此 re-export,
+ * 管理后台"账号需求量"估算(每日任务数 ÷ 本配额)与调度器共用同一数值。
+ */
+export const PROFILE_DAILY_QUOTA = 20;
+
 export interface PlanLimits {
   rankingQuota: number;
   reputationQuota: number;

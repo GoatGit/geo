@@ -7,7 +7,7 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Request } from 'express';
 import { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
-import { accountProfiles, brands, collectionRounds, queryRuns, surveys } from '@geo/db';
+import { accountProfiles, brands, collectionPlans, collectionRounds, queryRuns, surveys } from '@geo/db';
 import {
   REPORTS_QUEUE,
   REPUTATION_QUEUE,
@@ -19,6 +19,7 @@ import {
   WEB_ENGINES,
   WORKER_HEARTBEAT_KEY,
   WORKER_HEARTBEAT_STALE_MS,
+  PROFILE_DAILY_QUOTA,
   breakerManualKey,
   breakerTrippedKey,
   insightStatKey,
@@ -438,7 +439,7 @@ export class AdminController implements OnModuleDestroy {
 
   // ===== 账号池:人工登录(docs/04 §3.1 账号供给由运营完成)=====
 
-  /** 账号池清单:按引擎分组展示状态/健康分/当日用量,后台"账号池"页消费。 */
+  /** 账号池清单:按引擎分组展示状态/健康分/当日用量 + 每引擎需求量估算,后台"账号池"页消费。 */
   @Get('accounts')
   async accounts() {
     const rows = await this.db
@@ -456,7 +457,45 @@ export class AdminController implements OnModuleDestroy {
       .from(accountProfiles)
       .orderBy(accountProfiles.engine, accountProfiles.id);
     const sessions = rows.length ? await this.redis.mget(...rows.map((row) => loginProfileKey(row.id))) : [];
-    return { accounts: rows.map((row, i) => ({ ...row, loginSessionId: sessions[i] ?? null })) };
+
+    // 账号需求量估算:每日任务数 = Σ(启用采集计划品牌 × 该品牌活跃问题数,引擎 ∈ 计划);
+    // 受平台引擎日上限/全局日上限截断;需求账号数 = 任务数 ÷ 单账号日配额(向上取整)
+    const plans = await this.db
+      .select({ brandId: collectionPlans.brandId, engines: collectionPlans.engines })
+      .from(collectionPlans)
+      .where(eq(collectionPlans.active, true));
+    const qRows = await this.db.execute(sql`
+      select brand_id, count(*)::int as n from monitoring_questions where status = 'active' group by brand_id`);
+    const questionsByBrand = new Map(
+      ((qRows as unknown as { rows: Array<{ brand_id: string; n: number }> }).rows ?? []).map((r) => [
+        Number(r.brand_id),
+        Number(r.n),
+      ]),
+    );
+    const settings = await loadPlatformSettings(this.db);
+    const tasksByEngine = new Map<string, number>();
+    for (const p of plans) {
+      for (const e of p.engines ?? []) {
+        tasksByEngine.set(e, (tasksByEngine.get(e) ?? 0) + (questionsByBrand.get(p.brandId) ?? 0));
+      }
+    }
+    const demand = WEB_ENGINES.map((engine) => {
+      let tasks = tasksByEngine.get(engine) ?? 0;
+      const engineCap = settings.engineDailyCaps[engine];
+      if (engineCap > 0) tasks = Math.min(tasks, engineCap);
+      if (settings.globalDailyRunCap > 0) tasks = Math.min(tasks, settings.globalDailyRunCap);
+      return {
+        engine,
+        dailyTasks: tasks,
+        quotaPerProfile: PROFILE_DAILY_QUOTA,
+        requiredAccounts: Math.ceil(tasks / PROFILE_DAILY_QUOTA),
+      };
+    });
+
+    return {
+      accounts: rows.map((row, i) => ({ ...row, loginSessionId: sessions[i] ?? null })),
+      demand,
+    };
   }
 
   /** 新建账号档案:仅登记引擎与指纹,状态 pending_login,等人工登录注入账号态。 */

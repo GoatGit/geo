@@ -168,7 +168,12 @@ export default function AdminAccountsPage() {
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ['admin-accounts'],
-    queryFn: () => api<{ accounts: AccountRow[] }>('/admin/accounts'),
+    // demand:每引擎需求量估算(每日任务数 ÷ 单账号日配额)
+    queryFn: () =>
+      api<{
+        accounts: AccountRow[];
+        demand?: Array<{ engine: string; dailyTasks: number; quotaPerProfile: number; requiredAccounts: number }>;
+      }>('/admin/accounts'),
     refetchInterval: 15_000,
   });
 
@@ -324,14 +329,19 @@ export default function AdminAccountsPage() {
     }
   };
 
-  // 每引擎存量统计(供给水位一目了然)
+  // 每引擎存量统计 + 需求量(供给缺口一目了然:可用/待登录/总数/需求)
+  const demandByEngine = new Map((data?.demand ?? []).map((d) => [d.engine, d]));
   const engineSummary = WEB_ENGINES.map((e) => {
     const rows = accounts.filter((a) => a.engine === e);
+    const demand = demandByEngine.get(e);
     return {
       engine: e,
       total: rows.length,
       available: rows.filter((a) => a.status === 'available').length,
       pending: rows.filter((a) => a.status === 'pending_login' || a.status === 'login_required').length,
+      required: demand?.requiredAccounts ?? 0,
+      dailyTasks: demand?.dailyTasks ?? 0,
+      quotaPerProfile: demand?.quotaPerProfile ?? 20,
     };
   });
 
@@ -354,9 +364,13 @@ export default function AdminAccountsPage() {
       <section className="card rise p-6">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           {engineSummary.map((s) => (
-            <span key={s.engine} className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
-              {engineLabel(s.engine)}:{s.available}/{s.total} 可用
-              {s.pending > 0 && <span className="ml-1 text-warn">(待登录 {s.pending})</span>}
+            <span
+              key={s.engine}
+              className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600"
+              title={`需求量估算:每日任务 ${s.dailyTasks} 次 ÷ 每账号 ${s.quotaPerProfile} 次/天 = 需 ${s.required} 个账号(按启用采集计划的活跃问题数,受引擎/全局日上限截断)`}
+            >
+              {engineLabel(s.engine)}:{s.available}(可用)/{s.pending}(待登录)/{s.total}(总数)/
+              <span className={s.total < s.required ? 'font-semibold text-bad' : 'text-good'}>{s.required}(需求)</span>
             </span>
           ))}
         </div>
