@@ -280,6 +280,7 @@ export class BillingService {
     return {
       orderId: row.id,
       outTradeNo: row.outTradeNo,
+      product: row.product,
       plan: row.plan as PlanTier,
       planLabel: PLAN_LABELS[row.plan as PlanTier] ?? row.plan,
       period: row.period as BillingPeriod,

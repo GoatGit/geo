@@ -1,6 +1,7 @@
 import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import PDFDocument from 'pdfkit';
+import { engineLabel } from '@geo/shared';
 import type { ReportPayload, ReportType } from './render.service';
 import { REPORT_TEMPLATES } from './render.service';
 
@@ -8,10 +9,20 @@ import { REPORT_TEMPLATES } from './render.service';
  * 品牌报告 PDF 渲染(docs/01 §3.8):payload → 矢量 PDF(pdfkit),分节与 HTML 模板一致。
  * - 中文字体复用 assets/fonts/Noto Sans CJK SC Medium(OTF/CFF,macOS 预览渲染锐利)
  * - A4 纵向;表格手绘(列宽/截断/斑马纹);KPI 卡与优先级标签配色对齐控制台
- * - 分节随模板类型裁剪:weekly/diagnostic 无竞品/口碑/引用源,monthly 全量
+ * - 周报/月报全量分节(体检项/趋势/分引擎/竞品矩阵/口碑天平/信源类别随 payload 出现)
  */
 
 const FONT_PATH = join(__dirname, '..', '..', 'assets', 'fonts', 'NotoSansCJKsc-Medium.otf');
+
+const HEALTH_LABELS: Record<string, string> = {
+  mentionRate: '提及率',
+  top3Rate: 'Top3 率',
+  top1Rate: '首推率',
+  avgRank: '平均名次',
+  sentimentScore: '情绪得分',
+  ownedCitationShare: '自有信源占比',
+  authoritativeCitationShare: '权威信源引用率',
+};
 
 const NAVY = '#1d3fae';
 const BRAND = '#6f7c6d';
@@ -162,8 +173,73 @@ export async function renderReportPdf(payload: ReportPayload, type: ReportType):
   });
   y += 64;
   if (ex.failed || ex.quotaBlocked) {
-    text(`采集失败 ${ex.failed ?? 0} 次、配额拦截 ${ex.quotaBlocked ?? 0} 次,均不计入指标分母。`, 8.5, WARN);
+    text(`采集失败 ${ex.failed ?? 0} 次、配额拦截 ${ex.quotaBlocked ?? 0} 次,不影响指标计算。`, 8.5, WARN);
     y += 6;
+  }
+
+  // ===== 品牌体检(达标线 + 通过态;与控制台总览同源规则)=====
+  if (payload.health?.items?.length) {
+    sectionTitle('品牌体检');
+    table(
+      ['指标', '数值', '达标线', '状态'],
+      [CONTENT_W - 260, 90, 80, 90],
+      payload.health.items.map((i) => {
+        const v =
+          i.value == null
+            ? '—'
+            : i.metric === 'avgRank' || i.metric === 'sentimentScore'
+              ? String(i.value)
+              : `${Math.round(i.value * 100)}%`;
+        return [
+          HEALTH_LABELS[i.metric] ?? i.metric,
+          v,
+          i.target ?? '—',
+          i.pass === null ? '暂无数据' : i.pass ? '达标' : i.label ?? '待改进',
+        ];
+      }),
+    );
+  }
+
+  // ===== 提及率趋势(矢量折线)=====
+  const trendPts = (payload.trend ?? []).filter((t) => t.mentionRate != null);
+  if (trendPts.length >= 2) {
+    sectionTitle('提及率趋势(逐日)');
+    ensure(88);
+    const tw = CONTENT_W;
+    const th = 52;
+    const px = (i: number) => PAGE.left + (i / (trendPts.length - 1)) * tw;
+    const py = (v: number) => y + th - 6 - v * (th - 12);
+    doc.moveTo(PAGE.left, y + th - 5).lineTo(PAGE.w - PAGE.right, y + th - 5).lineWidth(0.6).strokeColor(LINE).stroke();
+    for (let i = 1; i < trendPts.length; i++) {
+      doc.moveTo(px(i - 1), py(trendPts[i - 1]!.mentionRate!)).lineTo(px(i), py(trendPts[i]!.mentionRate!)).lineWidth(1.6).strokeColor(BRAND).stroke();
+    }
+    const lastPt = trendPts[trendPts.length - 1]!;
+    doc.circle(px(trendPts.length - 1), py(lastPt.mentionRate!), 2).fill(BRAND);
+    doc.fillColor(SUB).fontSize(7.5).text(trendPts[0]!.date, PAGE.left, y + th - 2, { lineBreak: false });
+    doc
+      .fillColor(SUB)
+      .fontSize(7.5)
+      .text(`${lastPt.date} · ${Math.round((lastPt.mentionRate ?? 0) * 100)}%`, PAGE.w - PAGE.right - 90, y + th - 2, {
+        width: 90,
+        align: 'right',
+        lineBreak: false,
+      });
+    y += th + 14;
+  }
+
+  // ===== 分引擎三率 =====
+  if (payload.engineStats?.length) {
+    sectionTitle('分引擎三率');
+    table(
+      ['引擎', '提及率', 'Top3 率', '首推率'],
+      [CONTENT_W - 270, 90, 90, 90],
+      payload.engineStats.map((e) => [
+        engineLabel(e.engine),
+        e.mentionRate == null ? '—' : `${Math.round(e.mentionRate * 100)}%`,
+        e.top3Rate == null ? '—' : `${Math.round(e.top3Rate * 100)}%`,
+        e.top1Rate == null ? '—' : `${Math.round(e.top1Rate * 100)}%`,
+      ]),
+    );
   }
 
   // ===== 位次表现(问题分层)=====
@@ -176,9 +252,21 @@ export async function renderReportPdf(payload: ReportPayload, type: ReportType):
     );
   }
 
-  // ===== 竞品格局(monthly)=====
+  // ===== 竞品格局(本品 vs 竞品均值 → 榜单 → ×引擎矩阵)=====
   if (payload.competitors?.length) {
     sectionTitle('竞品格局(同批查询同口径)');
+    const b = payload.benchmark;
+    if (b?.self || b?.competitorAvg) {
+      const pctS = (v?: number | null) => (v == null ? '—' : `${Math.round(v * 100)}%`);
+      table(
+        ['本品 vs 竞品', '提及率', 'Top3 率', '首推率'],
+        [CONTENT_W - 270, 90, 90, 90],
+        [
+          ['本品', pctS(b?.self?.mention), pctS(b?.self?.top3), pctS(b?.self?.top1)],
+          ['头部竞品均值', pctS(b?.competitorAvg?.mention), pctS(b?.competitorAvg?.top3), pctS(b?.competitorAvg?.top1)],
+        ],
+      );
+    }
     table(
       ['竞品', '提及次数', '提及率', 'Top3 率'],
       [CONTENT_W - 210, 70, 70, 70],
@@ -189,41 +277,74 @@ export async function renderReportPdf(payload: ReportPayload, type: ReportType):
         c.top3Rate == null ? '—' : `${Math.round(c.top3Rate * 100)}%`,
       ]),
     );
+    const m = payload.competitorMatrix;
+    const mEngines = m?.engines ?? [];
+    if (mEngines.length > 0 && m?.rows?.length) {
+      text('竞品 × 引擎矩阵(单元格 = 该竞品在该引擎的提及率):', 9, SUB);
+      y += 2;
+      const cols = [CONTENT_W - 90 * mEngines.length, ...mEngines.map(() => 90)];
+      table(
+        ['竞品', ...mEngines.map((e) => engineLabel(e))],
+        cols,
+        m.rows.map((r) => [
+          r.name,
+          ...mEngines.map((e) => {
+            const v = r.engines?.[e];
+            return v == null ? '—' : `${Math.round(v * 100)}%`;
+          }),
+        ]),
+      );
+    }
   }
 
-  // ===== 口碑摘要(monthly)=====
+  // ===== 口碑天平 =====
   if (payload.reputation) {
-    sectionTitle('口碑摘要');
+    const r = payload.reputation;
+    const bd = r.breakdown ?? {};
+    sectionTitle('口碑天平');
     ensure(46);
     text(
-      `情绪得分 ${payload.reputation.sentimentScore ?? '—'}(口碑词有效回答 ${payload.reputation.runs} 条)`,
+      `情绪得分 ${r.sentimentScore ?? '—'}(口碑词有效回答 ${r.runs} 条 · 正面 ${bd.pos ?? 0} / 中性 ${bd.neu ?? 0} / 负面 ${bd.neg ?? 0})`,
       10,
       INK,
     );
     y += 4;
-    const weak = payload.reputation.weaknesses ?? [];
+    const strong = r.strengths ?? [];
+    if (strong.length > 0) {
+      text(`优势印象(巩固):${strong.map((w) => `${w.term} × ${w.runs}`).join(' · ')}`, 9, SUB);
+      y += 4;
+    }
+    const weak = r.weaknesses ?? [];
     if (weak.length > 0) {
-      text(`待攻印象:${weak.map((w) => `${w.term} × ${w.runs}`).join(' · ')}`, 9, SUB);
+      text(`待攻印象(攻坚):${weak.map((w) => `${w.term} × ${w.runs}`).join(' · ')}`, 9, SUB);
       y += 4;
     }
   }
 
-  // ===== 引用源概况(monthly)=====
+  // ===== 信源分析 =====
   if (payload.citations) {
-    sectionTitle('引用源概况');
+    sectionTitle('信源分析');
     ensure(46);
     const c = payload.citations;
+    const pctS = (v: number | null | undefined) => (v == null ? '—' : `${Math.round(v * 100)}%`);
     text(
-      `总被引 ${c.total} 条 · 自有域名 ${c.owned} 条 · 占比 ${c.ownedShare == null ? '—' : `${Math.round(c.ownedShare * 100)}%`}`,
+      `总被引 ${c.total} 条 · 权威信源占比 ${pctS(c.authoritativeShare)} · 自有域名占比 ${pctS(c.ownedShare)}`,
       10,
       INK,
     );
     y += 4;
+    const cats = (c.categories ?? []).map((t) => `${t.category} · ${t.hits}`).join(' · ');
+    if (cats) {
+      text(`信源类别:${cats}`, 9, SUB);
+      y += 4;
+    }
     const top = (c.top ?? []).map((t) => `${t.domain} · ${t.hits}`).join(' · ');
     if (top) {
       text(`高频信源:${top}`, 9, SUB);
       y += 4;
     }
+    text('权威信源 = 门户/官媒、权威机构、官网;占比越高,品牌信息的可信背书越足。', 8, SUB);
+    y += 4;
   }
 
   // ===== 行动清单 =====

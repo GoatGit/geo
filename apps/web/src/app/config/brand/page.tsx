@@ -194,6 +194,29 @@ export default function BrandAssetPage() {
     if (!editing) setForm((f) => (f ? { ...f, selfAliases: selfAliasesText } : f));
   }, [selfAliasesText, editing]);
 
+  // 未保存离开保护(与 surveys 详情页同模式):编辑中改了 2000 字简介,点侧栏导航不应静默丢失
+  const guardDirty =
+    !!brand &&
+    !!form &&
+    editing &&
+    (form.name !== brand.name ||
+      form.industry !== (brand.industry ?? '') ||
+      form.website !== (brand.website ?? '') ||
+      form.intro !== (brand.intro ?? '') ||
+      form.selfAliases !== selfAliasesText);
+  useEffect(() => {
+    if (!guardDirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    const guardLink = (event: MouseEvent) => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const link = event.target instanceof Element ? event.target.closest('a') : null;
+      if (!link || link.target === '_blank' || link.href === window.location.href) return;
+      if (!window.confirm('品牌档案有未保存的修改,离开将丢弃。继续吗?')) { event.preventDefault(); event.stopPropagation(); }
+    };
+    window.addEventListener('beforeunload', warn); document.addEventListener('click', guardLink, true);
+    return () => { window.removeEventListener('beforeunload', warn); document.removeEventListener('click', guardLink, true); };
+  }, [guardDirty]);
+
   const updateEntry = useMutation({
     mutationFn: ({ entryId, name, aliases }: { entryId: number; name?: string; aliases?: string[] }) =>
       api(`/brands/${brandId}/recognition/${entryId}`, { method: 'PATCH', json: { name, aliases } }),
@@ -625,8 +648,9 @@ export default function BrandAssetPage() {
         <ul className="mt-3 space-y-2">
           {shownMaterials.map((m) => (
             <li key={m.id} className="rounded-lg border border-slate-100 px-3 py-2 text-sm">
-              <button
-                className="flex w-full items-center gap-3 text-left"
+              {/* 行级展开用 div(而非 button):内部含删除按钮等交互元素,嵌套 button 不可聚焦 */}
+              <div
+                className="flex w-full cursor-pointer items-center gap-3 text-left"
                 onClick={() => setExpanded((prev) => ({ ...prev, [m.id]: !prev[m.id] }))}
                 title="点击查看内容"
               >
@@ -643,16 +667,17 @@ export default function BrandAssetPage() {
                 <span className="ml-auto metric-num text-xs text-slate-400">
                   {m.kind === 'text' ? `${m.byteLen} 字` : ''}
                 </span>
-                <span
-                  className="h-7 px-2 text-xs text-slate-400 hover:text-slate-800"
+                <button
+                  className="h-7 px-2 text-xs text-slate-400 hover:text-bad"
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (!window.confirm(`删除资料「${m.title}」?删除后不可恢复。`)) return;
                     removeMaterial.mutate(m.id);
                   }}
                 >
                   删除
-                </span>
-              </button>
+                </button>
+              </div>
               {m.kind === 'url' ? (
                 <a
                   href={m.content}
@@ -716,7 +741,7 @@ export default function BrandAssetPage() {
               onChange={(e) => setNewName(e.target.value)}
             />
             <input
-              className="w-96 rounded border border-slate-200 px-2 py-1.5 text-sm"
+              className="w-full max-w-96 min-w-0 flex-1 rounded border border-slate-200 px-2 py-1.5 text-sm"
               placeholder="别名(逗号分隔,可留空)"
               value={newAliases}
               onChange={(e) => setNewAliases(e.target.value)}
@@ -745,7 +770,7 @@ export default function BrandAssetPage() {
                   onChange={(e) => setEditName(e.target.value)}
                 />
                 <input
-                  className="w-96 rounded border border-slate-200 px-2 py-1.5 text-sm"
+                  className="w-full max-w-96 min-w-0 flex-1 rounded border border-slate-200 px-2 py-1.5 text-sm"
                   placeholder="别名(逗号分隔)"
                   value={editAliases}
                   onChange={(e) => setEditAliases(e.target.value)}
@@ -794,7 +819,10 @@ export default function BrandAssetPage() {
                       <button
                         className="h-7 px-2 text-xs text-slate-400 hover:text-bad"
                         title="不采纳这条 AI 建议(删除)"
-                        onClick={() => removeEntry.mutate(c.id)}
+                        onClick={() => {
+                          if (!window.confirm(`忽略 AI 建议的竞品「${c.name}」?`)) return;
+                          removeEntry.mutate(c.id);
+                        }}
                       >
                         忽略
                       </button>
@@ -810,7 +838,10 @@ export default function BrandAssetPage() {
                       </button>
                       <button
                         className="h-7 px-2 text-xs text-slate-400 hover:text-bad"
-                        onClick={() => removeEntry.mutate(c.id)}
+                        onClick={() => {
+                          if (!window.confirm(`删除竞品「${c.name}」?删除后它将不再参与提及识别与排名统计。`)) return;
+                          removeEntry.mutate(c.id);
+                        }}
                       >
                         删除
                       </button>

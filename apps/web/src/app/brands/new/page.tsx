@@ -1,5 +1,5 @@
 'use client';
-import { engineLabel } from '@geo/shared';
+import { PLAN_LABELS, engineLabel } from '@geo/shared';
 
 import { useEffect, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -43,6 +43,9 @@ export default function NewBrandPage() {
         void qc.invalidateQueries({ queryKey: ['brands'] });
       }
     },
+    onError: (e) => {
+      toast(`品牌创建失败:${(e as Error).message}`, 'err');
+    },
   });
 
   return (
@@ -57,18 +60,23 @@ export default function NewBrandPage() {
         value={description}
         onChange={(e) => setDescription(e.target.value)}
       />
-      <button
-        className="rounded bg-brand px-5 py-2 text-sm text-white disabled:opacity-50"
-        disabled={create.isPending || description.trim().length < 10}
-        onClick={() => create.mutate()}
-      >
-        解析并创建
-      </button>
+      <div className="flex items-center gap-4">
+        <button
+          className="rounded bg-brand px-5 py-2 text-sm text-white disabled:opacity-50"
+          disabled={create.isPending || description.trim().length < 10}
+          onClick={() => create.mutate()}
+        >
+          {create.isPending ? '解析中…' : '解析并创建'}
+        </button>
+        {description.trim().length < 10 && (
+          <span className="text-xs text-slate-400">再输入 {10 - description.trim().length} 个字即可提交(品牌名 + 一句定位 + 官网/竞品)</span>
+        )}
+      </div>
 
       {result && (
         <div className="space-y-3 rounded-lg border bg-white p-5 text-sm">
           <p>
-            已创建品牌:<b>{result.brand.name}</b> · 套餐 {result.plan} · 引擎 {result.engines.map(engineLabel).join('/')}
+            已创建品牌:<b>{result.brand.name}</b> · 套餐 {PLAN_LABELS[result.plan as keyof typeof PLAN_LABELS] ?? result.plan} · 引擎 {result.engines.map(engineLabel).join('/')}
           </p>
           <p>
             建议识别别名(已默认登记):

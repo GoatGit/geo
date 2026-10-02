@@ -67,7 +67,18 @@ export default function CollectionPage() {
   };
 
   if (isLoading) return <Skeleton />;
-  if (!data) return <EmptyState text="暂无采集计划" />;
+  if (!data)
+    return (
+      <EmptyState
+        title="采集尚未开始"
+        text="添加监控问题后,系统会按套餐频率自动采集各引擎数据;此处展示每次采集的进度与健康度。"
+        action={
+          <a href="/config/questions" className="btn-primary">
+            去添加监控问题
+          </a>
+        }
+      />
+    );
 
   return (
     <div className="space-y-6">
@@ -102,7 +113,7 @@ export default function CollectionPage() {
                   <td className="metric-num py-1.5">{e.successRate == null ? '—' : `${Math.round(e.successRate * 100)}%`}</td>
                   <td className="py-1.5">
                     {e.paused ? (
-                      <span className="rounded bg-bad-50 px-1.5 py-0.5 text-bad">熔断维护中,数据将延迟</span>
+                      <span className="rounded bg-bad-50 px-1.5 py-0.5 text-bad" title="该引擎连续失败已触发自动保护,暂停采集;恢复后自动续上">引擎维护中,数据将延迟</span>
                     ) : (
                       <span className="rounded bg-good-50 px-1.5 py-0.5 text-good">正常</span>
                     )}
@@ -181,7 +192,11 @@ export default function CollectionPage() {
                 </li>
               );
             })}
-            {data.rounds.length === 0 && <li className="text-slate-400">还没有轮次</li>}
+            {data.rounds.length === 0 && (
+              <li className="flex flex-wrap items-center justify-between gap-2 text-slate-400">
+                还没有轮次——点右上角「立即采集」马上开始第一轮
+              </li>
+            )}
           </ul>
           {msg && <p className="mt-3 rounded-lg bg-brand-50 px-3 py-2 text-xs text-brand-700">{msg}</p>}
         </div>
@@ -208,7 +223,7 @@ export default function CollectionPage() {
           {data.lastRuns.length === 0 && <span className="text-sm text-slate-400">暂无任务</span>}
         </div>
         <p className="mt-2 text-[10px] text-slate-400">
-          绿=有回答 · 灰=空回答 · 红=失败 · 黄=配额拦截;失败/拦截不计入指标分母,但永远可见(docs/02 §1.1)。
+          绿=有回答 · 灰=空回答 · 红=失败 · 黄=配额拦截;失败和被拦截的查询不会算进成功率/提及率等指标,但会一直展示在这里。
         </p>
       </section>
     </div>

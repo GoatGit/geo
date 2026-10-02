@@ -38,8 +38,18 @@ export function EvidenceModal({ runId, onClose }: { runId: number | null; onClos
         className="card max-h-[85vh] w-full max-w-2xl overflow-y-auto p-6"
         onClick={(e) => e.stopPropagation()}
       >
-        {evidence.isLoading || !evidence.data ? (
+        {evidence.isLoading || (!evidence.data && !evidence.isError) ? (
           <p className="py-10 text-center text-sm text-slate-400">正在调取存证…</p>
+        ) : evidence.isError ? (
+          <div className="py-10 text-center">
+            <p className="text-sm text-bad">存证调取失败:{(evidence.error as Error).message}</p>
+            <button
+              className="btn-ghost mt-3"
+              onClick={() => void evidence.refetch()}
+            >
+              重试
+            </button>
+          </div>
         ) : (
           <>
             <div className="flex items-start justify-between gap-3">

@@ -119,8 +119,9 @@ const ROUTE_TITLES: Array<[RegExp, string]> = [
   [/^\/reputation/, '口碑分析'],
   [/^\/reports/, '报告中心'],
   [/^\/billing/, '套餐与账单'],
+  [/^\/industry-insights/, '行业洞察'],
   [/^\/config\/questions/, '监控问题'],
-  [/^\/config\/recognition/, '识别口径'],
+  [/^\/config\/brand/, '品牌资产'],
   [/^\/config\/collection/, '采集状态'],
   [/^\/brands\/new/, '新建品牌'],
   [/^\/admin\/insights/, '行业洞察管理'],
@@ -153,12 +154,14 @@ function ConsoleShell({ pathname, children }: { pathname: string; children: Reac
   }, [pathname]);
   useEffect(() => {
     if (!tokenStore.access) {
-      // 场景化理由:洞察报告/套餐页/普通控制台各自说明「为什么登录」,登录后回跳原页
+      // 场景化理由:洞察报告/报告中心/套餐页/普通控制台各自说明「为什么登录」,登录后回跳原页
       const reason = pathname.startsWith('/insights/')
         ? 'insight'
-        : pathname.startsWith('/billing') || pathname.startsWith('/reports')
-          ? 'plan'
-          : 'console';
+        : pathname.startsWith('/reports')
+          ? 'report'
+          : pathname.startsWith('/billing')
+            ? 'plan'
+            : 'console';
       router.replace(buildLoginUrl(reason, pathname));
       return;
     }
@@ -552,6 +555,7 @@ function BrandSwitcher() {
 
 function AccountMenu() {
   const router = useRouter();
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -590,7 +594,8 @@ function AccountMenu() {
           <button
             onClick={() => {
               tokenStore.clear();
-              router.replace('/login');
+              // 带 next 退出:重新登录后回到当前页,而不是总被丢回总览
+              router.replace(buildLoginUrl('console', pathname));
             }}
             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-600 hover:bg-bad-50 hover:text-bad"
           >

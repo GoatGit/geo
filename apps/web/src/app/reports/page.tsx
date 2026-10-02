@@ -36,7 +36,13 @@ export default function ReportsPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const brandId = useBrandId();
-  const reports = useQuery({ queryKey: ['reports', brandId], queryFn: () => api<ReportRow[]>('/reports') });
+  const reports = useQuery({
+    queryKey: ['reports', brandId],
+    queryFn: () => api<ReportRow[]>(`/reports?brand=${brandId}`),
+    // 生成中/排队中时轮询,完成后自动展示(否则列表永远停在「排队中」)
+    refetchInterval: (query) =>
+      (query.state.data ?? []).some((r) => r.status === 'generating' || r.status === 'queued') ? 4_000 : false,
+  });
   const templates = useQuery({ queryKey: ['templates'], queryFn: () => api<TemplateDto[]>('/reports/templates') });
 
   const generate = useMutation({

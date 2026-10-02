@@ -26,23 +26,45 @@ export default function RankingsPage() {
   const [backfilling, setBackfilling] = useState(false);
   const brandId = useBrandId();
   const qc = useQueryClient();
-  const { data, isLoading, error } = useRankings(days);
+  const { data, isLoading, isFetching, error, refetch } = useRankings(days);
 
   if (isLoading) return <Skeleton />;
   if (error) {
-    return <EmptyState title="数据加载失败" text={`${(error as Error).message} —— 请稍后重试,或在顶栏切换品牌。`} />;
+    return (
+      <EmptyState
+        title="数据加载失败"
+        text={`${(error as Error).message} —— 请重试,或在顶栏切换品牌。`}
+        action={
+          <button className="btn-primary" onClick={() => void refetch()}>
+            重试
+          </button>
+        }
+      />
+    );
   }
   if (!data) return <EmptyState text="暂无数据:完成品牌与问题配置后,首轮采集结果将在此展示" />;
 
-  // 引擎列 = 窗口有数据的引擎 ∪ 矩阵单元格出现的引擎(尾部补齐可能带回窗口外引擎,
-  // 只按 engineStats(纯窗口)取列会把回填单元格整列隐藏)。按 WEB_ENGINES 规范序排列。
+  // 引擎列 = 采集计划引擎面(固定骨架,零数据引擎显示"未采集"占位)
+  //   ∪ 窗口有数据的引擎 ∪ 矩阵单元格出现的引擎(尾部补齐可能带回窗口外引擎)。
+  //   只按 engineStats(纯窗口)取列会把当日没采到的引擎整列静默隐藏——用户会误以为不支持该引擎。
+  //   按 WEB_ENGINES 规范序排列。
   const matrixEngines: string[] = [
     ...WEB_ENGINES.filter((e) => data.matrix.some((r) => r.cells.some((c) => c.engine === e))),
     ...[...new Set(data.matrix.flatMap((r) => r.cells.map((c) => c.engine)))].filter(
       (e) => !WEB_ENGINES.includes(e as never),
     ),
   ];
-  const allEngines = [...new Set([...data.engineStats.map((e) => e.engine), ...matrixEngines])];
+  const allEngines = [
+    ...WEB_ENGINES,
+    ...[...new Set([...(data.planEngines ?? []), ...data.engineStats.map((e) => e.engine), ...matrixEngines])].filter(
+      (e) => !WEB_ENGINES.includes(e as never),
+    ),
+  ].filter(
+    (e) =>
+      (data.planEngines ?? []).includes(e) ||
+      data.engineStats.some((s) => s.engine === e) ||
+      matrixEngines.includes(e),
+  );
   const visibleEngines = engineFilter === 'all' ? allEngines : [engineFilter];
   const visibleRows = data.matrix.filter(
     (r) => questionFilter === 'all' || String(r.questionId) === questionFilter,
@@ -73,18 +95,21 @@ export default function RankingsPage() {
       <PageHeader
         title="排名透视"
         actions={
-          <div className="flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
-            {[[1, '今日'], [7, '近 7 天'], [30, '近 30 天']].map(([v, label]) => (
-              <button
-                key={v}
-                onClick={() => setDays(v as number)}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
-                  days === v ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            {isFetching && <span className="text-[10px] text-slate-400">更新中…</span>}
+            <div className="flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
+              {[[1, '今日'], [7, '近 7 天'], [30, '近 30 天']].map(([v, label]) => (
+                <button
+                  key={v}
+                  onClick={() => setDays(v as number)}
+                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
+                    days === v ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         }
       />
@@ -109,7 +134,7 @@ export default function RankingsPage() {
         <MetricCardView title="平均名次" card={data.cards.find((c) => c.metric === 'avgRank')} lowerBetter />
       </section>
 
-      {/* ===== 分引擎三率(条形对比,置于矩阵前) ===== */}
+      {/* ===== 分引擎三率(条形对比,置于矩阵前;按采集计划引擎面固定渲染,零数据引擎显示占位) ===== */}
       <section className="card rise p-5">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-slate-900">分引擎三率</h2>
@@ -123,31 +148,45 @@ export default function RankingsPage() {
           </div>
         </div>
         <div className="grid gap-x-6 gap-y-2 md:grid-cols-2">
-          {data.engineStats.map((e) => (
-            <div key={e.engine} className="flex items-center gap-3">
-              <span className="w-20 shrink-0 truncate text-xs font-semibold text-slate-700">{engineLabel(e.engine)}</span>
-              <div className="grid flex-1 gap-1">
-                {RATE_BARS.map((b) => {
-                  const v = e[b.key];
-                  return (
-                    <div key={b.key} className="flex items-center gap-2">
-                      <div className="h-1.5 flex-1 rounded-full bg-slate-100">
-                        <div
-                          className={`h-1.5 rounded-full ${b.tone}`}
-                          style={{ width: v != null ? `${Math.round(v * 100)}%` : 0 }}
-                          title={v == null ? '该引擎窗口内无有效回答(非 0%)' : undefined}
-                        />
+          {allEngines.map((eng) => {
+            const e = data.engineStats.find((s) => s.engine === eng);
+            if (!e) {
+              // 计划内但窗口内零成功采集:占位说明,而不是整行消失
+              return (
+                <div key={eng} className="flex items-center gap-3 opacity-70">
+                  <span className="w-20 shrink-0 truncate text-xs font-semibold text-slate-400">{engineLabel(eng)}</span>
+                  <span className="flex-1 rounded bg-slate-50 px-2 py-1.5 text-[11px] text-slate-400">
+                    本窗口未采集(采集失败或额度拦截时会出现;详见「采集状态」)
+                  </span>
+                </div>
+              );
+            }
+            return (
+              <div key={eng} className="flex items-center gap-3">
+                <span className="w-20 shrink-0 truncate text-xs font-semibold text-slate-700">{engineLabel(eng)}</span>
+                <div className="grid flex-1 gap-1">
+                  {RATE_BARS.map((b) => {
+                    const v = e[b.key];
+                    return (
+                      <div key={b.key} className="flex items-center gap-2">
+                        <div className="h-1.5 flex-1 rounded-full bg-slate-100">
+                          <div
+                            className={`h-1.5 rounded-full ${b.tone}`}
+                            style={{ width: v != null ? `${Math.round(v * 100)}%` : 0 }}
+                            title={v == null ? '该引擎窗口内无有效回答(非 0%)' : undefined}
+                          />
+                        </div>
+                        <span className="metric-num w-10 text-right text-[11px] text-slate-500">
+                          {v != null ? pct2(v) : '—'}
+                        </span>
                       </div>
-                      <span className="metric-num w-10 text-right text-[11px] text-slate-500">
-                        {v != null ? pct2(v) : '—'}
-                      </span>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
-          {data.engineStats.length === 0 && <p className="text-sm text-slate-400">暂无采集数据</p>}
+            );
+          })}
+          {allEngines.length === 0 && <p className="text-sm text-slate-400">暂无采集数据</p>}
         </div>
       </section>
 
@@ -200,30 +239,14 @@ export default function RankingsPage() {
           {backfilling ? '重判中…' : '重判历史排名'}
         </button>
         <button
-          onClick={() => exportMatrix(data.matrix, allEngines)}
+          onClick={() => exportMatrix(visibleRows, visibleEngines)}
+          title="导出当前筛选(问题/引擎)下的矩阵;清除筛选即导出全部"
           className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:border-brand-300"
         >
           导出 CSV
         </button>
-        {/* 图例收进「?」提示:悬停/聚焦展开,单行呈现位次色标 + 综合名次口径 */}
-        <span className="group relative ml-auto inline-flex">
-          <button
-            type="button"
-            aria-label="矩阵图例与综合名次口径说明"
-            className="flex h-[18px] w-[18px] cursor-help items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-400 transition-colors hover:bg-brand-100 hover:text-brand-600"
-          >
-            ?
-          </button>
-          <span className="pointer-events-none absolute right-0 top-6 z-20 hidden items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-100 bg-white px-3 py-2 text-[11px] text-slate-500 shadow-lg group-hover:flex group-focus-within:flex">
-            <span className="metric-num rounded bg-good-50 px-1.5 py-0.5 text-good">#1</span>首推
-            <span className="metric-num ml-1 rounded bg-brand-50 px-1.5 py-0.5 text-brand-700">#2-3</span>Top3
-            <span className="metric-num ml-1 rounded bg-slate-100 px-1.5 py-0.5">#4+</span>靠后
-            <span className="ml-1 rounded bg-slate-50 px-1.5 py-0.5 text-slate-400">提及·无排名</span>
-            <span className="ml-1 rounded bg-bad-50 px-1.5 py-0.5 text-bad">未提及</span>
-            <span className="ml-1 rounded bg-slate-50 px-1.5 py-0.5 text-slate-400">#3(3)</span>括号天数 = 数据距今天数(≥2 天才标,悬停可见;窗口内未采集时沿用最近一次有效结果,≤30 天)
-            <span className="ml-1.5 border-l border-slate-100 pl-1.5 text-slate-400">综合名次 = 未提及记 N+1 取中位数;位次 = 榜单位次,或品牌评述题中的首位评述</span>
-          </span>
-        </span>
+        {/* 图例:点击「?」展开(触屏无 hover,group-hover 在移动端不可达) */}
+        <LegendHint />
       </div>
 
       {/* ===== 全景矩阵 ===== */}
@@ -259,7 +282,17 @@ export default function RankingsPage() {
                   return (
                     <td key={eng} className="border-t border-slate-100 px-2.5 py-2 text-center">
                       {!cell ? (
-                        <span className="text-slate-300">—</span>
+                        (data.planEngines ?? []).includes(eng) ? (
+                          /* 计划内引擎但本窗口零成功采集:占位而非空白/隐藏列 */
+                          <span
+                            className="block cursor-help rounded bg-slate-50 px-1.5 py-0.5 text-xs text-slate-300"
+                            title="该引擎在本窗口内没有成功采集(可能采集失败或额度拦截,详见「配置 → 采集状态」)"
+                          >
+                            未采集
+                          </span>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )
                       ) : (
                         <button
                           disabled={!cell.runId}
@@ -323,7 +356,7 @@ export default function RankingsPage() {
                   );
                 })}
                 <td className="metric-num border-l-2 border-slate-200 border-t border-t-slate-100 px-3 py-2 text-center font-semibold">
-                  {row.compositeRank != null ? `第${row.compositeRank}名` : '30天内未采集'}
+                  {row.compositeRank != null ? `第${row.compositeRank}名` : '暂无采集结果'}
                 </td>
                 <td className="metric-num border-t border-slate-100 px-3 py-2 text-center">{pct(row.mentionRate)}</td>
                 <td className="metric-num border-t border-slate-100 px-3 py-2 text-center">{pct(row.top3Rate)}</td>
@@ -348,6 +381,45 @@ export default function RankingsPage() {
 
 function pct2(v: number) {
   return `${Math.round(v * 100)}%`;
+}
+
+/** 矩阵图例:点击「?」展开(原生 title/hover 在触屏与内嵌浏览器不可用,口径见 StaleMark 同款模式)。 */
+function LegendHint() {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative ml-auto inline-flex">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-label="矩阵图例与综合名次口径说明"
+        onClick={() => setOpen((v) => !v)}
+        className={`flex h-[18px] w-[18px] items-center justify-center rounded-full text-[10px] font-bold transition-colors ${
+          open ? 'bg-brand-100 text-brand-600' : 'cursor-help bg-slate-100 text-slate-400 hover:bg-brand-100 hover:text-brand-600'
+        }`}
+      >
+        ?
+      </button>
+      {open && (
+        <span
+          className="absolute right-0 top-6 z-20 block w-72 whitespace-normal rounded-lg border border-slate-100 bg-white px-3 py-2.5 text-left text-[11px] leading-5 text-slate-500 shadow-lg"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span className="flex flex-wrap items-center gap-1.5">
+            <span className="metric-num rounded bg-good-50 px-1.5 py-0.5 text-good">#1</span>首推
+            <span className="metric-num rounded bg-brand-50 px-1.5 py-0.5 text-brand-700">#2-3</span>Top3
+            <span className="metric-num rounded bg-slate-100 px-1.5 py-0.5">#4+</span>靠后
+            <span className="rounded bg-slate-50 px-1.5 py-0.5 text-slate-400">提及·无排名</span>
+            <span className="rounded bg-bad-50 px-1.5 py-0.5 text-bad">未提及</span>
+            <span className="rounded bg-slate-50 px-1.5 py-0.5 text-slate-400">未采集</span>
+          </span>
+          <span className="mt-2 block">▲▼ = 与上一窗口相比的名次升降</span>
+          <span className="mt-1.5 block">#3(3) 中的括号 = 数据距今天数(点击可见说明;未采集时沿用最近一次有效结果,≤30 天)</span>
+          <span className="mt-1.5 block border-t border-slate-100 pt-1.5">点击任何色块格子可查看该次 AI 回答的原文与引用</span>
+          <span className="mt-1.5 block">综合名次 = 各引擎名次取中位数(未提及按引擎数+1 记);名次 = 榜单位次,或品牌评述题中的首位评述</span>
+        </span>
+      )}
+    </span>
+  );
 }
 
 /** 回填陈旧度 (N) 小标:点击展开说明(悬停不弹;原生 title 在内嵌浏览器不渲染) */

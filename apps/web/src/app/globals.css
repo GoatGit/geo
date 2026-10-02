@@ -70,7 +70,8 @@
 
   /* 表格 */
   .table-wrap {
-    @apply overflow-hidden rounded-xl border border-slate-200/70 bg-white shadow-card;
+    /* 窄屏横向滚动而非裁切:overflow-hidden 会把最右列(常是删除/操作按钮)裁到不可达 */
+    @apply overflow-x-auto rounded-xl border border-slate-200/70 bg-white shadow-card;
   }
   .table-head {
     @apply bg-slate-50/80 text-left text-xs font-medium text-slate-500;

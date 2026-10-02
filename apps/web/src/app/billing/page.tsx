@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { Badge, EmptyState, PageHeader, Skeleton } from '@/components/ui';
 import { api } from '@/lib/queries';
+import { useToast } from '@/components/toast';
 import type { BillingPeriod, PlanTier } from '@geo/shared';
 import { BOOSTER_PACK } from '@geo/shared';
 
@@ -53,6 +54,10 @@ interface OrderDetail extends OrderRow {
   qrDataUrl: string | null;
   mock: boolean;
   expireAt: string;
+  /** 重新下单用:plan 为档位;product='pack' 时按资源包重下 */
+  plan?: PlanTier | 'booster10';
+  product?: 'pack' | 'plan';
+  pack?: 'booster10';
 }
 
 const CHANNEL_LABEL: Record<string, string> = { wechat: '微信支付', alipay: '支付宝', mock: '模拟通道' };
@@ -73,6 +78,7 @@ const ALIPAY_ENABLED = process.env.NEXT_PUBLIC_ALIPAY !== 'off';
 
 export default function BillingPage() {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [period, setPeriod] = useState<BillingPeriod>('monthly');
   const [activeOrder, setActiveOrder] = useState<OrderDetail | null>(null);
   const [payError, setPayError] = useState<string | null>(null);
@@ -115,7 +121,8 @@ export default function BillingPage() {
       });
       setActiveOrder(order);
     } catch (err) {
-      setPayError((err as Error).message);
+      // toast 而非页首红字:触发按钮在长页面下方,页首错误根本看不到
+      toast(`下单失败:${(err as Error).message}`, 'err');
     } finally {
       setCreating(null);
     }
@@ -181,10 +188,6 @@ export default function BillingPage() {
           </button>
         ))}
       </div>
-
-      {payError && (
-        <p className="rounded-lg bg-bad-50 px-3.5 py-2.5 text-xs text-bad">下单失败:{payError}</p>
-      )}
 
       {/* 档位卡 */}
       <section className="grid gap-4 lg:grid-cols-3">
@@ -325,6 +328,34 @@ export default function BillingPage() {
                 <button onClick={() => setActiveOrder(null)} className="btn-primary mt-5 w-full">
                   完成
                 </button>
+              </div>
+            ) : activeOrder.status === 'expired' || activeOrder.status === 'failed' ? (
+              /* 过期/失败必须显式收口:二维码已失效,继续展示只会让用户拿着死码干等 */
+              <div className="py-8">
+                <p className="text-sm font-medium text-slate-700">
+                  {activeOrder.status === 'expired' ? '二维码已过期,订单未支付' : '订单支付失败'}
+                </p>
+                <p className="mt-1 text-xs text-slate-400">未扣款;可重新下单生成新二维码。</p>
+                <div className="mt-5 flex gap-2">
+                  {(() => {
+                    // 资源包订单的 plan 回填等效档位,重下必须按资源包 SKU
+                    const target = activeOrder.pack ?? (activeOrder.product === 'pack' ? 'booster10' : activeOrder.plan);
+                    return target ? (
+                      <button
+                        onClick={() => {
+                          setActiveOrder(null);
+                          void purchase(target, (activeOrder.channel as 'wechat' | 'alipay') ?? 'wechat');
+                        }}
+                        className="btn-primary flex-1"
+                      >
+                        重新下单
+                      </button>
+                    ) : null;
+                  })()}
+                  <button onClick={() => setActiveOrder(null)} className="btn-ghost flex-1">
+                    关闭
+                  </button>
+                </div>
               </div>
             ) : (
               <>

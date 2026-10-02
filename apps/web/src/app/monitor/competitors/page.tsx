@@ -52,6 +52,26 @@ export default function CompetitorsPage() {
   });
 
   if (leader.isLoading || matrix.isLoading) return <Skeleton />;
+  // 接口失败 ≠ 无数据:显式报错,否则会被误读成"还没采集"误导排查方向
+  if (leader.isError || matrix.isError) {
+    return (
+      <EmptyState
+        title="数据加载失败"
+        text={`${((leader.error ?? matrix.error) as Error).message} —— 请重试,或在顶栏切换品牌。`}
+        action={
+          <button
+            className="btn-primary"
+            onClick={() => {
+              void leader.refetch();
+              void matrix.refetch();
+            }}
+          >
+            重试
+          </button>
+        }
+      />
+    );
+  }
   const rows = matrix.data?.rows ?? [];
   const engines = matrix.data?.engines ?? [];
   const board = leader.data?.competitors ?? [];
@@ -70,7 +90,7 @@ export default function CompetitorsPage() {
     <div className="space-y-6">
       <PageHeader
         title="竞品透视"
-        desc="基于同批 AI 查询的竞品提及与位次分析(同口径解析)"
+        desc="基于同批 AI 查询的竞品提及与位次分析(同口径解析) · 统计范围:近 7 天"
       />
       {top && (
         <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -209,7 +229,7 @@ export default function CompetitorsPage() {
               </table>
             </div>
             <p className="mt-3 text-[11px] text-slate-400">
-              竞品与本品同批查询、同口径解析;高频未匹配实体经确认后进入竞品口径(docs/01 §3.4)。窗口内未出现的主体沿用其最近一次有效采集(≤30 天,标"N 天前")。
+              竞品与本品同批查询、同口径解析;高频未匹配实体经确认后进入竞品口径。窗口内未出现的主体沿用其最近一次有效采集(≤30 天,标「N 天前」)。
             </p>
           </section>
         </>

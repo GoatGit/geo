@@ -17,6 +17,15 @@ const VALUE_POINTS = [
 /** 登录(docs/01 §5):左品牌叙事右表单;验证码显式点击才发送(docs/research 03 A8 对策)。
  * 短信通道未开通期间可用 NEXT_PUBLIC_SMS_LOGIN=off 隐藏短信表单(只留微信扫码)。 */
 const SMS_LOGIN_ENABLED = process.env.NEXT_PUBLIC_SMS_LOGIN !== 'off';
+
+/** 验证码发送失败的常见态翻成人话(429 频率限制最常见,裸英文错误让用户无所适从)。 */
+function friendlyAuthError(e: Error): string {
+  const code = (e as { code?: number }).code;
+  if (code === 429) return '发送过于频繁,请稍等一分钟再试,或改用微信扫码登录';
+  if (code === 400) return e.message || '手机号格式有误,请检查后重试';
+  if (code != null && code >= 500) return '服务繁忙,请稍后再试,或改用微信扫码登录';
+  return e.message;
+}
 export default function LoginPage() {
   const router = useRouter();
   const [phone, setPhone] = useState('');
@@ -46,11 +55,12 @@ export default function LoginPage() {
     setError('');
     setBusy(true);
     try {
-      const r = await api<{ devCode?: string }>('/auth/sms/code', { method: 'POST', json: { phone } });
+      // auth:false:登录页的公开接口不带凭证,残留过期 token 时 401 不应触发"跳登录"套娃
+      const r = await api<{ devCode?: string }>('/auth/sms/code', { method: 'POST', json: { phone }, auth: false });
       setDevCode(r.devCode ?? null);
       setCountdown(60);
     } catch (e) {
-      setError((e as Error).message);
+      setError(friendlyAuthError(e as Error));
     } finally {
       setBusy(false);
     }
@@ -61,7 +71,7 @@ export default function LoginPage() {
     setError('');
     try {
       const nextPath = safeNext(next);
-      const r = await api<{ url: string; state: string }>('/auth/wechat/url');
+      const r = await api<{ url: string; state: string }>('/auth/wechat/url', { auth: false });
       sessionStorage.setItem('wx_state', r.state);
       sessionStorage.setItem('wx_next', nextPath);
       window.location.href = r.url;
@@ -77,6 +87,7 @@ export default function LoginPage() {
       const r = await api<{ accessToken: string; refreshToken: string; account: SessionAccount }>('/auth/sms/verify', {
         method: 'POST',
         json: { phone, code },
+        auth: false,
       });
       tokenStore.save(r.accessToken, r.refreshToken);
       if (r.account) accountStore.save(r.account);
@@ -198,12 +209,12 @@ export default function LoginPage() {
                   disabled={busy || phone.length !== 11 || countdown > 0}
                   onClick={send}
                 >
-                  {countdown > 0 ? `${countdown}s 后重发` : '获取验证码'}
+                  {busy ? '发送中…' : countdown > 0 ? `${countdown}s 后重发` : '获取验证码'}
                 </button>
               </div>
             </div>
 
-            {devCode && (
+            {devCode && process.env.NODE_ENV === 'development' && (
               <div className="flex items-center gap-2 rounded-lg border border-brand-100 bg-brand-50 px-3 py-2.5 text-xs text-brand-700">
                 <span className="animate-pulse-soft">●</span>
                 dev 环境验证码:

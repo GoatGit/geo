@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, useBrandId } from '@/lib/queries';
 import { EmptyState, PageHeader, Skeleton } from '@/components/ui';
+import { EvidenceModal } from '@/components/evidence-modal';
 
 interface ReputationDto {
   totals: {
@@ -26,18 +27,6 @@ interface ReputationDto {
   samples: Array<{ runId: number; sentiment: string; excerpt: string | null; engine: string | null; ranAt: string }>;
 }
 
-interface RunEvidence {
-  runId: number;
-  status: string;
-  engine: string;
-  ranAt: string;
-  question: string | null;
-  answerText: string;
-  citations: Array<{ url: string; title?: string }>;
-  manifestHash: string | null;
-  answerRef: string | null;
-}
-
 const SENTIMENT_LABEL: Record<string, { label: string; cls: string }> = {
   pos: { label: '正面', cls: 'text-good' },
   neu: { label: '中性', cls: 'text-slate-500' },
@@ -51,12 +40,7 @@ export default function ReputationPage() {
   const brandId = useBrandId();
   const [evidenceRun, setEvidenceRun] = useState<number | null>(null);
   const [evidencePageState, setEvidencePage] = useState(0);
-  const evidence = useQuery({
-    queryKey: ['run-evidence', evidenceRun],
-    queryFn: () => api<RunEvidence>(`/runs/${evidenceRun}/answer`),
-    enabled: evidenceRun !== null,
-  });
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['reputation', brandId],
     queryFn: () => api<ReputationDto>(`/monitor/reputation?brand=${brandId}&days=7`),
     enabled: !!brandId,
@@ -67,16 +51,29 @@ export default function ReputationPage() {
 
   if (isLoading) return <Skeleton />;
   if (error) {
-    return <EmptyState title="数据加载失败" text={`${(error as Error).message} —— 请稍后重试,或在顶栏切换品牌。`} />;
+    return (
+      <EmptyState
+        title="数据加载失败"
+        text={`${(error as Error).message} —— 请重试,或在顶栏切换品牌。`}
+        action={
+          <button className="btn-primary" onClick={() => void refetch()}>
+            重试
+          </button>
+        }
+      />
+    );
   }
   if (!data || !data.totals.hasData)
     return (
-      <EmptyState text="暂无口碑数据:在「监控问题」添加口碑词类型的问题(如「XX的口碑怎么样?」),采集完成后此处展示" />
+      <EmptyState
+        text="暂无口碑数据:在「监控问题」添加口碑词类型的问题(如「XX的口碑怎么样?」),采集完成后此处展示"
+        action={<a href="/config/questions" className="btn-primary">去添加监控问题</a>}
+      />
     );
 
   return (
     <div className="space-y-6">
-      <PageHeader title="口碑分析" />
+      <PageHeader title="口碑分析" desc="统计范围:近 7 天" />
 
       <div className="card rise flex items-center gap-8 p-6">
         <ScoreRing value={data.totals.minimumMet === false ? null : data.totals.sentimentScore} />
@@ -94,7 +91,7 @@ export default function ReputationPage() {
             )}
           </p>
           <p className="mt-1 text-[11px] text-slate-400">
-            得分 = round((正面 + 0.5×中性 − 负面) / 有效数 × 100),值域 −100~+100;60 分以下为负面档(阈值与行动建议/健康体检同源),口径见 docs/02 §4。
+            正面回答越多得分越高,满分 +100;60 分以下为负面档(阈值与行动建议/健康体检同源)。得分 = round((正面 + 0.5×中性 − 负面) / 有效数 × 100),值域 −100~+100。
           </p>
         </div>
       </div>
@@ -191,60 +188,12 @@ export default function ReputationPage() {
           </div>
         )}
         <p className="mt-2 text-[10px] text-slate-400">
-          情感判定带置信度,低置信样本自动进入人工抽检池校准(docs/05 §3.2)。
+          情感判定带置信度,低置信样本会自动进入人工抽检池校准。
         </p>
       </section>
 
-      {/* 原文证据详情弹窗 */}
-      {evidenceRun !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/40 p-4 backdrop-blur-sm" onClick={() => setEvidenceRun(null)}>
-          <div className="card max-h-[85vh] w-full max-w-2xl overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
-            {evidence.isLoading || !evidence.data ? (
-              <p className="py-10 text-center text-sm text-slate-400">正在调取存证…</p>
-            ) : (
-              <>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[11px] text-slate-400">
-                      run #{evidence.data.runId} · {engineLabel(evidence.data.engine)} ·{' '}
-                      {new Date(evidence.data.ranAt).toLocaleString('zh-CN')}
-                    </p>
-                    <h3 className="mt-1 text-[15px] font-semibold leading-6 text-slate-900">
-                      {evidence.data.question ?? '(问题缺失)'}
-                    </h3>
-                  </div>
-                  <button onClick={() => setEvidenceRun(null)} className="shrink-0 text-slate-400 hover:text-slate-700">
-                    ✕
-                  </button>
-                </div>
-
-                <div className="mt-4 whitespace-pre-wrap rounded-lg border border-slate-100 bg-slate-50 p-4 text-[13px] leading-6 text-slate-700">
-                  {evidence.data.answerText || '(空回答)'}
-                </div>
-
-                {evidence.data.citations.length > 0 && (
-                  <div className="mt-4">
-                    <p className="mb-1.5 text-xs font-medium text-slate-500">引用来源({evidence.data.citations.length})</p>
-                    <ul className="space-y-1">
-                      {evidence.data.citations.map((c, i) => (
-                        <li key={i} className="truncate text-xs">
-                          <a href={c.url} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline">
-                            {c.title || c.url}
-                          </a>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                <p className="metric-num mt-4 break-all border-t border-slate-100 pt-3 text-[10px] text-slate-400">
-                  存证 {evidence.data.answerRef} · 完整性 {evidence.data.manifestHash ?? '—'}
-                </p>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      {/* 原文证据详情弹窗(与排名透视共用 EvidenceModal) */}
+      <EvidenceModal runId={evidenceRun} onClose={() => setEvidenceRun(null)} />
     </div>
   );
 }

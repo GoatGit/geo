@@ -37,6 +37,7 @@ async function main() {
   const profileId = arg('profile-id');
   const apiBase = (arg('api', 'https://geo.gemux.cn') || 'https://geo.gemux.cn').replace(/\/$/, '');
   const manual = process.argv.includes('--manual');
+  const proxyOverride = arg('proxy') || null; // 代理出口覆盖:直连被风控时手动指定青果通道
   const keepMs = Number(arg('keep', '60')) * 1000;
   if (!smsLink || !profileId) {
     console.error('用法: tsx src/engine-login.ts --engine=deepseek --sms-link=<收码链接> --profile-id=<档案ID> [--manual] [--keep=60]');
@@ -70,7 +71,7 @@ async function main() {
     console.log('[login] 鉴权:admin JWT(未配置 GEO_SKILL_API_KEY,建议在全局配置生成技能 Key)');
   }
 
-  const ctx = await fetch(`${apiBase}/api/admin/accounts/${profileId}/login-context`, { headers: { authorization: auth.authorization } }).then(r => r.json()) as {
+  const ctx = await fetch(`${apiBase}/api/admin/accounts/${profileId}/login-context`, { headers: auth }).then(r => r.json()) as {
     id: number; engine: string; fingerprint: Record<string, unknown>; proxyServer: string | null; contextRef: string | null; status: string;
   };
   if (!ctx?.id) throw new Error(`读取档案登录上下文失败: ${JSON.stringify(ctx)}`);
@@ -85,14 +86,40 @@ async function main() {
   }
   const session = await broker.acquire({
     profileKey: `profile:${profileId}`,
-    contextRef: ctx.contextRef ?? undefined,
+    // --fresh:Context 句柄被上次强杀卡死时,放弃旧 Context 新建(成功后 ingest 会回写新 contextRef)
+    contextRef: process.argv.includes('--fresh') ? undefined : ctx.contextRef ?? undefined,
     fingerprint: ctx.fingerprint,
-    proxyHint: ctx.proxyServer ?? undefined,
+    proxyHint: proxyOverride ?? ctx.proxyServer ?? undefined,
     purpose: 'login',
   });
   console.log(`[login] AgentBay 会话已建立 context=${session.contextId?.slice(0, 20) ?? '无'}`);
   const browser = await chromium.connectOverCDP(session.cdpUrl);
-  const context = await browser.newContext(browserContextOptions(ctx.fingerprint, ctx.proxyServer));
+  const egress = proxyOverride ?? ctx.proxyServer;
+  // 代理按客户端出口 IP 鉴权:走代理前先直连探测本会话出口并幂等加白(否则 407)
+  if (egress) {
+    const qgKey = (process.env.QG_PROXY_KEY ?? '').trim();
+    const probeCtx = await browser.newContext({});
+    const probePage = probeCtx.pages()[0] ?? (await probeCtx.newPage());
+    const egressIp = await probePage
+      .goto('https://api.ipify.org', { waitUntil: 'domcontentloaded', timeout: 20_000 })
+      .then(() => probePage.textContent('body', { timeout: 5_000 }))
+      .then((s) => (s ?? '').trim())
+      .catch(() => '');
+    await probeCtx.close().catch(() => undefined);
+    console.log(`[login] 会话出口 IP: ${egressIp || '(探测失败)'}`);
+    if (qgKey && egressIp) {
+      const wl = await fetch(`https://proxy.qg.net/whitelist/query?Key=${qgKey}&format=json`).then(r => r.text()).catch(() => '');
+      if (!wl.includes(egressIp)) {
+        const add = await fetch(`https://proxy.qg.net/whitelist/add?Key=${qgKey}&IP=${egressIp}`).then(r => r.text()).catch(() => '');
+        console.log(`[login] 白名单加白 ${egressIp}: ${add.includes('"Num":1') || add.includes(egressIp) ? '成功' : add.slice(0, 60)}`);
+      } else {
+        console.log('[login] 出口已在白名单');
+      }
+    } else if (!qgKey) {
+      console.warn('[login] 未配置 QG_PROXY_KEY,跳过加白(代理可能 407)');
+    }
+  }
+  const context = await browser.newContext(browserContextOptions(ctx.fingerprint, egress));
   const page = context.pages()[0] ?? (await context.newPage());
   console.log(`[login] 打开 ${site.chatUrl}`);
   await page.goto(site.chatUrl, { waitUntil: 'domcontentloaded', timeout: 90_000 });
@@ -111,7 +138,7 @@ async function main() {
     while (!stop.value) {
       const buf = await page.screenshot({ type: 'jpeg', quality: 60, timeout: 5_000 }).catch(() => null);
       if (buf) writeFileSync(`${dir}/live.jpg`, buf);
-      await page.waitForTimeout(2_000).catch(() => undefined);
+      await page.waitForTimeout(700).catch(() => undefined);
     }
   })();
   let lastCmdMtime = 0;
@@ -174,13 +201,13 @@ async function main() {
   const storageState = await page.context().storageState();
   const ingest = await fetch(`${apiBase}/api/admin/accounts/${profileId}/credentials`, {
     method: 'POST', headers: auth,
-    body: JSON.stringify({ storageState, contextId: session.contextId, proxyServer: ctx.proxyServer }),
+    body: JSON.stringify({ storageState, contextId: session.contextId, proxyServer: egress }),
   }).then(r => r.json()) as { ok?: boolean; cookies?: number; error?: string };
   if (!ingest?.ok) {
     console.error(`[login] 凭证入池失败: ${JSON.stringify(ingest)}`);
     process.exit(1);
   }
-  console.log(`[login] ✅ 凭证已入池:档案 #${profileId} 置 available(cookies=${ingest.cookies}, 出口=${ctx.proxyServer ?? '直连'})`);
+  console.log(`[login] ✅ 凭证已入池:档案 #${profileId} 置 available(cookies=${ingest.cookies}, 出口=${egress ?? '直连'})`);
   await status(`登录成功,凭证已入池(cookies=${ingest.cookies})`);
   console.log(`[login] 保留画面 ${keepMs / 1000}s(Ctrl-C 提前退出)`);
   await page.waitForTimeout(keepMs).catch(() => undefined);

@@ -175,6 +175,20 @@ export default function IndustryInsightsPage() {
   });
 
   if (hub.isLoading) return <Skeleton />;
+  // 接口失败 ≠ 无数据:显式报错(否则会引导用户去"创建品牌",方向完全错)
+  if (hub.isError) {
+    return (
+      <EmptyState
+        title="数据加载失败"
+        text={`${(hub.error as Error).message} —— 请重试。`}
+        action={
+          <button className="btn-primary" onClick={() => void hub.refetch()}>
+            重试
+          </button>
+        }
+      />
+    );
+  }
   const data = hub.data;
 
   return (

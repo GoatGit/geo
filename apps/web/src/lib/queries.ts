@@ -67,6 +67,8 @@ export interface RankingsDto {
     }>;
   }>;
   engineStats: Array<{ engine: string; mentionRate: number | null; top3Rate: number | null; top1Rate: number | null; denominatorNote?: string }>;
+  /** 采集计划引擎面(固定骨架):窗口内零数据的引擎据此显示"未采集"占位而非静默消失 */
+  planEngines?: string[];
   trend: Array<{ date: string; mentionRate: number | null; top3Rate: number | null; top1Rate: number | null }>;
   health: {
     summary: string;
@@ -83,6 +85,8 @@ export function useRankings(days: number) {
     queryKey: ['rankings', brandId, days],
     queryFn: () => api<RankingsDto>(`/monitor/rankings?brand=${brandId}&days=${days}`),
     enabled: !!brandId,
+    // 切换时间窗时保留旧数据(仅标记 isFetching):整页闪骨架屏会丢滚动位置与上下文
+    placeholderData: (prev) => prev,
   });
 }
 

@@ -85,7 +85,17 @@ export default function DashboardPage() {
 
   if (rankings.isLoading) return <Skeleton />;
   if (rankings.error) {
-    return <EmptyState text={`数据加载失败:${rankings.error.message}(可在顶栏切换品牌后重试)`} />;
+    return (
+      <EmptyState
+        title="数据加载失败"
+        text={`${rankings.error.message} —— 请重试,或在顶栏切换品牌。`}
+        action={
+          <button className="btn-primary" onClick={() => void rankings.refetch()}>
+            重试
+          </button>
+        }
+      />
+    );
   }
   if (!rankings.data) return <Skeleton />;
   const data = rankings.data;
@@ -264,7 +274,11 @@ export default function DashboardPage() {
               <span className="text-sm text-slate-500">{data.health.summary}</span>
             </div>
             <div className="space-y-3">
-              {data.health.items.map((item) => (
+              {data.health.items.map((item) => {
+                // 平均名次(越小越好)与情绪分(−100~+100)不是 0-100 的比率,
+                // 百分比进度条不承载信息还会误导(负值产生无效宽度)
+                const isRatio = item.metric !== 'avgRank' && item.metric !== 'sentimentScore';
+                return (
                 <div key={item.metric}>
                   <div className="mb-1 flex items-center justify-between text-xs">
                     <span className="font-medium text-slate-600">{HEALTH_LABELS[item.metric] ?? item.metric}</span>
@@ -285,23 +299,26 @@ export default function DashboardPage() {
                       </span>
                     </span>
                   </div>
-                  <div className="h-1.5 rounded-full bg-slate-100">
-                    <div
-                      className={`h-1.5 animate-grow-w rounded-full ${
-                        item.pass === null ? 'bg-slate-200' : item.pass ? 'bg-good' : 'bg-warn'
-                      }`}
-                      style={{
-                        width: item.value == null ? '0%' : item.metric === 'avgRank' ? '100%' : `${Math.min(100, item.value * 100)}%`,
-                      }}
-                    />
-                  </div>
+                  {isRatio ? (
+                    <div className="h-1.5 rounded-full bg-slate-100">
+                      <div
+                        className={`h-1.5 animate-grow-w rounded-full ${
+                          item.pass === null ? 'bg-slate-200' : item.pass ? 'bg-good' : 'bg-warn'
+                        }`}
+                        style={{ width: item.value == null ? '0%' : `${Math.min(100, item.value * 100)}%` }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="h-1.5 rounded-full bg-slate-100" />
+                  )}
                 </div>
-              ))}
+                );
+              })}
             </div>
             {data.excluded.failed + data.excluded.quotaBlocked > 0 && (
               <p className="mt-4 rounded-lg bg-warn-50 px-3.5 py-2.5 text-xs leading-5 text-warn">
                 近 24h 有 <b className="metric-num">{data.excluded.failed}</b> 次失败、
-                <b className="metric-num"> {data.excluded.quotaBlocked}</b> 次配额拦截(不计入分母)——
+                <b className="metric-num"> {data.excluded.quotaBlocked}</b> 次配额拦截(不影响上方指标的计算)——
                 <Link href="/config/collection" className="underline underline-offset-2">
                   详情
                 </Link>
@@ -342,10 +359,10 @@ export default function DashboardPage() {
             </div>
             <p className="mt-3 text-[10px] text-slate-400">
               {actions.data?.source === 'ai'
-                ? '由 AI 基于规则检测事实与品牌画像生成(每日更新);检测事实由规则引擎产出,可复现(docs/02 §6)。'
+                ? '由 AI 基于规则检测事实与品牌画像生成(每日更新);检测事实由规则引擎产出,同数据可复现。'
                 : actions.data?.generating
                   ? '以上为规则基线建议;AI 正在结合品牌画像生成更具体的行动项,稍后刷新查看。'
-                  : '由确定性规则引擎生成,规则版本入库可复现(docs/02 §6)。'}
+                  : '由确定性规则引擎生成,规则版本入库,同数据可复现。'}
             </p>
           </div>
         </section>

@@ -29,7 +29,10 @@ export function buildLoginUrl(reason: string | null | undefined, next?: string):
   return qs ? `/login?${qs}` : '/login';
 }
 
-/** 登录成功后的回跳地址:仅接受站内路径,否则落控制台。 */
+/** 登录成功后的回跳地址:仅接受站内路径,否则落控制台;/login 自身不作为落点(否则登录完仍停在登录页)。 */
 export function safeNext(raw: string | null | undefined): string {
-  return raw && raw.startsWith('/') && !raw.startsWith('//') ? raw : '/dashboard';
+  if (raw && raw !== '/login' && !raw.startsWith('/login?') && !raw.startsWith('/auth/') && raw.startsWith('/') && !raw.startsWith('//')) {
+    return raw;
+  }
+  return '/dashboard';
 }

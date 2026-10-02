@@ -47,7 +47,25 @@ export default function InsightDetailPage() {
   const toast = useToast();
 
   if (query.isLoading) return <Skeleton />;
-  if (query.error || !query.data) {
+  if (query.isError) {
+    // 网络抖动/服务故障 ≠ 报告不存在:分开呈现,404 才是"不存在"
+    const notFound = (query.error as { code?: number }).code === 404;
+    return notFound ? (
+      <EmptyState title="报告不存在" text="该洞察报告不存在或尚未发布。" action={<Link href="/" className="btn-ghost">返回官网</Link>} />
+    ) : (
+      <EmptyState
+        title="加载失败"
+        text={`${(query.error as Error).message} —— 请重试。`}
+        action={
+          <div className="flex gap-2">
+            <button className="btn-primary" onClick={() => void query.refetch()}>重试</button>
+            <Link href="/" className="btn-ghost">返回官网</Link>
+          </div>
+        }
+      />
+    );
+  }
+  if (!query.data) {
     return <EmptyState title="报告不存在" text="该洞察报告不存在或尚未发布。" action={<Link href="/" className="btn-ghost">返回官网</Link>} />;
   }
   const d = query.data;

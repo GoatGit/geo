@@ -4,6 +4,7 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import {
   brands,
   citationFacts,
+  collectionPlans,
   dailyMetrics,
   latestOkRuns,
   mentionFacts,
@@ -14,6 +15,7 @@ import {
 import {
   DEFAULT_HEALTH_THRESHOLDS,
   THRESHOLD_CALIBRATION_GRACE_DAYS,
+  WEB_ENGINES,
   engineLabel,
   sanitizeCitationTitle,
   type EngineId,
@@ -233,11 +235,24 @@ export class MonitorService {
       calibrating,
     );
 
+    // 采集计划引擎面:前端据此渲染固定引擎骨架,窗口内零数据的引擎显示
+    // "未采集"占位而非整列静默消失(引擎缺席曾被误读为"产品不支持该引擎")
+    const planRow = (
+      await this.db
+        .select({ engines: collectionPlans.engines })
+        .from(collectionPlans)
+        .where(eq(collectionPlans.brandId, input.brandId))
+        .limit(1)
+    )[0];
+
     return {
       cards,
       funnel,
       matrix,
       engineStats: await this.engineRates(input.brandId, since, effective),
+      planEngines: ((planRow?.engines as string[] | null) ?? []).filter((e): e is EngineId =>
+        typeof e === 'string' && (WEB_ENGINES as readonly string[]).includes(e),
+      ),
       trend,
       health,
       excluded: nEx,

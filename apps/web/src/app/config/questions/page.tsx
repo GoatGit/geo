@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -105,13 +106,15 @@ export default function QuestionsPage() {
   if (!brandId) return <Skeleton />;
 
   const submit = () => {
-    const items = input
+    const lines = input
       .split('\n')
       .map((s) => s.trim())
-      .filter(Boolean)
-      .slice(0, 50)
-      .map((text) => ({ text }));
-    if (items.length > 0) batch.mutate(items);
+      .filter(Boolean);
+    const items = lines.slice(0, 50).map((text) => ({ text }));
+    if (items.length > 0) {
+      if (lines.length > 50) toast(`单次最多添加 50 条,已忽略后 ${lines.length - 50} 条(可分批粘贴)`, 'err');
+      batch.mutate(items);
+    }
   };
 
   const q = quota.data;
@@ -176,15 +179,21 @@ export default function QuestionsPage() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
         />
-        <div className="mt-2 flex items-center gap-3">
+        <div className="mt-2 flex flex-wrap items-center gap-3">
           <button
             className="rounded bg-brand px-4 py-2 text-sm text-white disabled:opacity-50"
             disabled={batch.isPending || !input.trim()}
             onClick={submit}
           >
-            添加问题
+            {batch.isPending ? '添加中…' : '添加问题'}
           </button>
           {message && <span className="text-xs text-slate-500">{message}</span>}
+          {message.startsWith('已添加') && (
+            <span className="flex items-center gap-2 text-xs">
+              <Link href="/config/collection" className="text-brand-600 hover:underline">查看采集状态 →</Link>
+              <Link href="/dashboard" className="text-brand-600 hover:underline">去总览等数据 →</Link>
+            </span>
+          )}
         </div>
       </section>
 
@@ -226,14 +235,15 @@ export default function QuestionsPage() {
                 <td className="px-3 py-2.5">
                   <button
                     className="text-xs text-bad hover:underline"
-                    onClick={() =>
+                    onClick={() => {
+                      if (!window.confirm(`删除监控问题「${row.textRaw.slice(0, 30)}」?该问题将停止采集,历史数据保留。`)) return;
                       api(`/brands/${brandId}/questions/${row.id}`, { method: 'DELETE' })
                         .then(() => {
                           toast('问题已归档,历史数据保留');
                           qc.invalidateQueries({ queryKey: ['questions'] });
                         })
-                        .catch((e) => toast((e as Error).message, 'err'))
-                    }
+                        .catch((e) => toast((e as Error).message, 'err'));
+                    }}
                   >
                     删除
                   </button>
@@ -243,7 +253,7 @@ export default function QuestionsPage() {
             {questions.data?.length === 0 && (
               <tr>
                 <td colSpan={4} className="px-4 py-8 text-center text-slate-400">
-                  还没有监控问题
+                  还没有监控问题——按行粘贴到上方输入框,或点「✦ AI 推荐问题」一键生成 12 条
                 </td>
               </tr>
             )}

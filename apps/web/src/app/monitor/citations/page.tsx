@@ -39,13 +39,23 @@ export default function CitationsPage() {
 
   if (isLoading) return <Skeleton />;
   if (error) {
-    return <EmptyState title="数据加载失败" text={`${(error as Error).message} —— 请稍后重试,或在顶栏切换品牌。`} />;
+    return (
+      <EmptyState
+        title="数据加载失败"
+        text={`${(error as Error).message} —— 请重试,或在顶栏切换品牌。`}
+        action={
+          <button className="btn-primary" onClick={() => void refetch()}>
+            重试
+          </button>
+        }
+      />
+    );
   }
   if (!data) return <EmptyState text="暂无引用数据" />;
 
   return (
     <div className="space-y-6">
-      <PageHeader title="引用源分析" />
+      <PageHeader title="引用源分析" desc="统计范围:近 7 天" />
 
       <section className="card rise-1 p-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -111,7 +121,7 @@ export default function CitationsPage() {
                     <div key={c.category} className="flex items-center gap-2 text-xs">
                       <span className="w-24 shrink-0 truncate text-slate-600" title={c.category}>{c.category}</span>
                       <div className="h-1.5 flex-1 rounded bg-slate-100">
-                        <div className="h-1.5 rounded bg-brand" style={{ width: `${(c.hits / e.categories[0]!.hits) * 100}%` }} />
+                        <div className="h-1.5 rounded bg-brand" style={{ width: `${Math.min(100, (c.hits / (e.categories[0]!.hits || 1)) * 100)}%` }} />
                       </div>
                       <span className="metric-num w-8 text-right text-slate-500">{c.hits}</span>
                     </div>

@@ -80,6 +80,15 @@ export class ApiError extends Error {
   }
 }
 
+/** 非业务错误的状态码兜底文案(后端未给 message 时用户看到的不再是裸 "HTTP 500")。 */
+function statusFallback(status: number): string {
+  if (status === 403) return '没有权限执行此操作';
+  if (status === 404) return '请求的内容不存在';
+  if (status === 429) return '操作过于频繁,请稍后再试';
+  if (status >= 500) return '服务暂时不可用,请稍后重试';
+  return `请求失败(${status})`;
+}
+
 /** 401 单飞刷新:并发请求只触发一次 refresh,成功后重放原请求(消灭 2h 强制掉线)。 */
 let refreshing: Promise<boolean> | null = null;
 
@@ -164,8 +173,8 @@ export async function api<T>(
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const message = (body as { error?: { message?: string } })?.error?.message ?? `HTTP ${res.status}`;
-    throw new ApiError(res.status, message);
+    const raw = (body as { error?: { message?: string } })?.error?.message;
+    throw new ApiError(res.status, raw && raw !== 'Http Exception' ? raw : statusFallback(res.status));
   }
   return body as T;
 }
@@ -175,7 +184,7 @@ export async function apiDownload(path: string, fallbackName: string): Promise<v
   const res = await requestWithAuth(path, {});
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
-    throw new ApiError(res.status, body?.error?.message ?? `HTTP ${res.status}`);
+    throw new ApiError(res.status, body?.error?.message ?? statusFallback(res.status));
   }
   const disposition = res.headers.get('content-disposition') ?? '';
   const utf8 = /filename\*=UTF-8''([^;]+)/.exec(disposition)?.[1];

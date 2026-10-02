@@ -60,9 +60,10 @@ export class ReportsController implements OnModuleDestroy {
     await this.queue.close().catch(() => undefined);
   }
 
-  /** 仅返回本人品牌下的报告(跨租户隔离;admin 走平台后台总览)。 */
+  /** 仅返回本人品牌下的报告(跨租户隔离;admin 走平台后台总览)。
+   *  brand 查询参数:控制台按当前品牌过滤展示(缺省返回账号全部,向后兼容)。 */
   @Get()
-  async list(@Req() req: Request) {
+  async list(@Req() req: Request, @Query('brand') brand?: string) {
     const accountId = currentAccount(req).accountId;
     const owned = await this.db
       .select({ id: brands.id })
@@ -70,10 +71,12 @@ export class ReportsController implements OnModuleDestroy {
       .where(eq(brands.accountId, accountId));
     const ids = owned.map((b) => b.id);
     if (ids.length === 0) return [];
+    const brandId = Number(brand);
+    const scoped = Number.isInteger(brandId) && ids.includes(brandId) ? [brandId] : ids;
     return this.db
       .select()
       .from(reports)
-      .where(inArray(reports.brandId, ids))
+      .where(inArray(reports.brandId, scoped))
       .orderBy(desc(reports.createdAt))
       .limit(50);
   }
