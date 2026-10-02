@@ -48,7 +48,7 @@ export default function RankingsPage() {
     (r) => questionFilter === 'all' || String(r.questionId) === questionFilter,
   );
   const exportMatrix = (rows: typeof data.matrix, engines: string[]) => {
-    const header = ['监控问题', ...engines, '综合名次', '提及率', 'Top3 率', '首推率', '最近采集(天)'];
+    const header = ['监控问题', ...engines, '综合名次', '提及率', 'Top3 率', '首推率'];
     const lines = rows.map((r) => {
       const cells = engines.map((eng) => {
         const c = r.cells.find((x) => x.engine === eng);
@@ -56,15 +56,7 @@ export default function RankingsPage() {
         const base = c.rank !== null ? `#${c.rank}` : c.mentioned ? '提及·无排名' : '未提及';
         return c.stale ? `${base}·${staleLabel(c.asOf)}` : base;
       });
-      return [
-        r.questionText,
-        ...cells,
-        r.compositeRank ?? '',
-        pct(r.mentionRate),
-        pct(r.top3Rate),
-        pct(r.top1Rate),
-        r.lastCollectedAt ? String(calendarDaysAgo(r.lastCollectedAt)) : '—',
-      ];
+      return [r.questionText, ...cells, r.compositeRank ?? '', pct(r.mentionRate), pct(r.top3Rate), pct(r.top1Rate)];
     });
     const csv = [header, ...lines].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
@@ -227,7 +219,7 @@ export default function RankingsPage() {
             <span className="ml-1 rounded bg-slate-50 px-1.5 py-0.5 text-slate-400">提及·无排名</span>
             <span className="ml-1 rounded bg-bad-50 px-1.5 py-0.5 text-bad">未提及</span>
             <span className="ml-1 rounded bg-slate-50 px-1.5 py-0.5 text-slate-400">#3·3天前</span>窗口内未采集,沿用最近一次有效结果(≤30 天)
-            <span className="ml-1.5 border-l border-slate-100 pl-1.5 text-slate-400">综合名次 = 未提及记 N+1 取中位数;位次 = 榜单位次,或品牌评述题中的首位评述;最近采集 = 距最近一次有效采集的自然日(0=今天)</span>
+            <span className="ml-1.5 border-l border-slate-100 pl-1.5 text-slate-400">综合名次 = 未提及记 N+1 取中位数;位次 = 榜单位次,或品牌评述题中的首位评述</span>
           </span>
         </span>
       </div>
@@ -246,12 +238,6 @@ export default function RankingsPage() {
               <th className="border-b border-slate-200 px-3 py-2.5 text-center">提及率</th>
               <th className="border-b border-slate-200 px-3 py-2.5 text-center">Top3 率</th>
               <th className="border-b border-slate-200 px-3 py-2.5 text-center">首推率</th>
-              <th
-                className="border-b border-slate-200 px-3 py-2.5 text-center"
-                title="距最近一次有效采集的自然日:0=今天、1=昨天、2=前天……;—=30 天内无有效采集"
-              >
-                最近采集
-              </th>
             </tr>
           </thead>
           <tbody>
@@ -332,27 +318,11 @@ export default function RankingsPage() {
                 <td className="metric-num border-t border-slate-100 px-3 py-2 text-center">{pct(row.mentionRate)}</td>
                 <td className="metric-num border-t border-slate-100 px-3 py-2 text-center">{pct(row.top3Rate)}</td>
                 <td className="metric-num border-t border-slate-100 px-3 py-2 text-center">{pct(row.top1Rate)}</td>
-                <td
-                  className="metric-num border-t border-slate-100 px-3 py-2 text-center"
-                  title={
-                    row.lastCollectedAt
-                      ? `最近一次有效采集:${new Date(row.lastCollectedAt).toLocaleString('zh-CN')}`
-                      : '30 天内无有效采集'
-                  }
-                >
-                  {row.lastCollectedAt ? (
-                    <span className={calendarDaysAgo(row.lastCollectedAt) === 0 ? 'text-good' : calendarDaysAgo(row.lastCollectedAt) >= 7 ? 'text-warn' : 'text-slate-500'}>
-                      {calendarDaysAgo(row.lastCollectedAt)}
-                    </span>
-                  ) : (
-                    <span className="text-slate-300">—</span>
-                  )}
-                </td>
               </tr>
             ))}
             {visibleRows.length === 0 && (
               <tr>
-                <td colSpan={visibleEngines.length + 6} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={visibleEngines.length + 5} className="px-4 py-8 text-center text-slate-400">
                   暂无监控问题
                 </td>
               </tr>
@@ -375,12 +345,4 @@ function staleLabel(asOf?: string | null): string | null {
   if (!asOf) return null;
   const days = Math.floor((Date.now() - new Date(asOf).getTime()) / 86_400_000);
   return days < 1 ? '今天' : `${days}天前`;
-}
-
-/** 距某时间的自然日差:0=今天、1=昨天、2=前天……("最近采集"列口径) */
-function calendarDaysAgo(iso: string): number {
-  const d = new Date(iso);
-  const now = new Date();
-  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  return Math.round((startOf(now) - startOf(d)) / 86_400_000);
 }

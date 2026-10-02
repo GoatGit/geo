@@ -498,13 +498,7 @@ export class MonitorService {
     }
 
     // 尾部补齐(docs/02 §1):窗口内无 ok run 的问题×引擎,回填其最近一次有效 run 的 self 事实
-    const { byPair, tail } = await latestOkRuns(this.db, brandId, since);
-    // 每问题最近一次有效采集时间(任一引擎;≤30 天)——表格"最近采集"列,0=今天
-    const lastOkByQuestion = new Map<number, Date>();
-    for (const run of byPair.values()) {
-      const prev = lastOkByQuestion.get(run.questionId);
-      if (!prev || run.ranAt > prev) lastOkByQuestion.set(run.questionId, run.ranAt);
-    }
+    const { tail } = await latestOkRuns(this.db, brandId, since);
     const tailByQuestion = new Map<number, Array<{ engine: string; mentioned: boolean; rank: number | null; runId: number; ranAt: Date }>>();
     if (tail.size > 0) {
       const tailRunIds = [...tail.values()].map((r) => r.runId);
@@ -575,8 +569,6 @@ export class MonitorService {
         cells,
         compositeRank,
         layer: layerOf(top3Engines, collected),
-        /** 最近一次有效采集时间(任一引擎,≤30 天;null=30 天内无有效采集) */
-        lastCollectedAt: lastOkByQuestion.get(q.id)?.toISOString() ?? null,
       };
     });
     return rows.sort((a, b) => (a.compositeRank ?? 999) - (b.compositeRank ?? 999));

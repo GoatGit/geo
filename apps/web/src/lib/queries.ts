@@ -51,8 +51,6 @@ export interface RankingsDto {
     mentionRate: number | null;
     top3Rate: number | null;
     top1Rate: number | null;
-    /** 最近一次有效采集时间(ISO,任一引擎,≤30 天;null=30 天内无) */
-    lastCollectedAt?: string | null;
     cells: Array<{
       engine: string;
       mentioned: boolean;

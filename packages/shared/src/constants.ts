@@ -360,8 +360,6 @@ export interface MatrixRow {
   mentionRate: number | null;
   top3Rate: number | null;
   top1Rate: number | null;
-  /** 最近一次有效采集时间(任一引擎,≤30 天;null=30 天内无有效采集)——表格"最近采集"列 */
-  lastCollectedAt?: string | null;
 }
 
 export interface RecognitionEntry {
