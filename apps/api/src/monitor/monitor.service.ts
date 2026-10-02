@@ -154,11 +154,11 @@ export class MonitorService {
 
     const cards: MetricCard[] = [
       this.card('mentionRate', rate(mentioned, valid), mentioned, valid, nEx, asOf, source,
-        '窗口内有效采集 + 最近有效回填(ok_with_answer + ok_empty)', backfilled),
+        '每次成功获得 AI 回答的提问都计入;时段内未采到的沿用最近一次有效结果', backfilled),
       this.card('top3Rate', rate(top3, ranked), top3, ranked, nEx, asOf, source,
-        '有名次的采集(含回填;含散文提及中判出位次;漏斗②用"被提及"作分母,口径不同勿直接对比)', backfilled),
+        '只统计 AI 给出明确排名的回答;提到了但没给排名的评述不计入', backfilled),
       this.card('top1Rate', rate(top1, ranked), top1, ranked, nEx, asOf, source,
-        '有名次的采集(含回填)', backfilled),
+        '只统计 AI 给出明确排名的回答', backfilled),
       {
         metric: 'avgRank',
         value: t.avg_rank ? Math.round(Number(t.avg_rank) * 100) / 100 : null,
@@ -169,16 +169,17 @@ export class MonitorService {
         backfilled,
         asOf,
         source,
+        denominatorNote: '只统计 AI 给出明确排名的回答',
       },
     ];
 
     const matrix = await this.matrix(input.brandId, since);
 
-    // 可见性漏斗:嵌套转化口径(docs/02 §2,2026-09 修订);有效口径(含回填)
+    // 可见性漏斗:嵌套转化口径(docs/02 §2,2026-09 修订);有效口径(含沿用最近结果)
     const funnel: FunnelStage[] = [
-      stage('mention', '提及', mentioned, valid, '全部有效采集+最近有效回填(ok_with_answer + ok_empty)'),
-      stage('top3', '上榜(Top3)', top3, mentioned, '①的分子:被提及的采集(含回填)'),
-      stage('top1', '首推(位次=1)', top1, top3, '②的分子:进 Top3 的采集(含回填)'),
+      stage('mention', '提及', mentioned, valid, '每次成功获得 AI 回答的提问(含沿用最近一次有效结果)'),
+      stage('top3', '上榜(Top3)', top3, mentioned, '上一行的分子:AI 提到了本品的回答'),
+      stage('top1', '首推(位次=1)', top1, top3, '上一行的分子:排进前 3 的回答'),
     ];
 
     const trend = await this.trend(input.brandId, 7); // 迷你趋势固定近 7 天,不受所选周期影响
@@ -720,8 +721,8 @@ export class MonitorService {
           mentionRate: rate(v.mentioned),
           top3Rate: rate(v.top3),
           top1Rate: rate(v.top1),
-          /** 该组三率的分母 = 该引擎全部有效回答(self 主体,含回填),与总览卡(有名次)口径不同 */
-          denominatorNote: '该引擎全部有效回答(self 主体,含最近有效回填)',
+          /** 该组三率的分母说明:面向用户的口径话术,不用内部术语 */
+          denominatorNote: '该引擎成功获得回答的全部提问(含沿用最近一次有效结果)',
         };
       });
   }

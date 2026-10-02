@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useCountUp } from './motion';
 
 type MetricCard = {
@@ -105,6 +106,7 @@ function CardInner({
   sparkLabel?: string;
 }) {
   const animated = useCountUp(card.value);
+  const [open, setOpen] = useState(false);
   const isEmpty = (card.denominator ?? 0) === 0;
   const display =
     card.value == null || isEmpty
@@ -112,34 +114,51 @@ function CardInner({
       : isRateMetric(card.metric)
         ? pct(animated ?? 0)
         : String(Math.round((animated ?? 0) * 100) / 100);
+  // 面向用户的口径说明(点击 i 展开):不用内部术语,失败/拦截合并成一句人话
+  const excludedTotal = (card.excludedFailed ?? 0) + (card.excludedQuotaBlocked ?? 0);
 
   return (
     <>
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-slate-500">{title}</span>
-        {/* CSS 悬停气泡:原生 title 在内嵌浏览器/webview 不渲染,改用与排名页"?"图例同款 group-hover */}
-        <span className="group relative inline-flex">
-          <span className="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-slate-100 text-[9px] font-bold text-slate-400 transition-colors group-hover:bg-brand-100 group-hover:text-brand-600">
+        <span className="relative inline-flex">
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-label="统计口径说明(点击展开)"
+            onClick={() => setOpen((v) => !v)}
+            className={`flex h-4 w-4 cursor-help items-center justify-center rounded-full text-[9px] font-bold transition-colors ${
+              open ? 'bg-brand-100 text-brand-600' : 'bg-slate-100 text-slate-400 hover:bg-brand-100 hover:text-brand-600'
+            }`}
+          >
             i
-          </span>
-          <span className="pointer-events-none absolute right-0 top-6 z-30 hidden w-64 whitespace-normal rounded-lg border border-slate-100 bg-white px-3 py-2 text-left text-[11px] leading-5 font-normal text-slate-500 shadow-lg group-hover:flex group-focus-within:flex">
-            <b className="font-semibold text-slate-700">
-              {card.numerator ?? '—'}/{card.denominator ?? '—'}
-            </b>
-            {card.denominatorNote ? `(${card.denominatorNote})` : ''}
-            <br />
-            排除 failed={card.excludedFailed}、quota_blocked={card.excludedQuotaBlocked}(不计入分母)
-            {card.backfilled ? (
-              <>
-                <br />
-                含最近有效回填 {card.backfilled} 条(窗口内未采到的沿用其最近一次有效结果)
-              </>
-            ) : (
-              ''
-            )}
-            <br />
-            截至 {new Date(card.asOf).toLocaleString('zh-CN')}
-          </span>
+          </button>
+          {open && (
+            <span className="pointer-events-none absolute right-0 top-6 z-30 block w-64 whitespace-normal rounded-lg border border-slate-100 bg-white px-3 py-2 text-left text-[11px] leading-5 font-normal text-slate-500 shadow-lg">
+              <b className="font-semibold text-slate-700">
+                {card.numerator ?? '—'}/{card.denominator ?? '—'}
+              </b>
+              {card.denominatorNote ? `(${card.denominatorNote})` : ''}
+              {excludedTotal > 0 ? (
+                <>
+                  <br />
+                  另有 {excludedTotal} 次提问没能成功获得 AI 回答(如超时、被拦截或当日额度用完),未计入
+                </>
+              ) : (
+                ''
+              )}
+              {card.backfilled ? (
+                <>
+                  <br />
+                  其中 {card.backfilled} 条沿用的是本时段之前最近一次有效结果
+                </>
+              ) : (
+                ''
+              )}
+              <br />
+              截至 {new Date(card.asOf).toLocaleString('zh-CN')}
+            </span>
+          )}
         </span>
       </div>
       <div className="mt-2 text-[26px] font-semibold leading-8 text-slate-900">
@@ -158,7 +177,7 @@ function CardInner({
                 {card.numerator ?? '—'}/{card.denominator ?? '—'}
               </span>
               {card.excludedFailed + card.excludedQuotaBlocked > 0 && (
-                <span className="ml-2 text-warn">排除 {card.excludedFailed + card.excludedQuotaBlocked}</span>
+                <span className="ml-2 text-warn" title="这些提问没能成功获得 AI 回答,未计入统计">未获回答 {card.excludedFailed + card.excludedQuotaBlocked}</span>
               )}
             </>
           )}

@@ -350,14 +350,36 @@ function pct2(v: number) {
   return `${Math.round(v * 100)}%`;
 }
 
-/** 回填陈旧度 (N) 小标:CSS 悬停气泡(原生 title 在内嵌浏览器/webview 不渲染) */
+/** 回填陈旧度 (N) 小标:点击展开说明(悬停不弹;原生 title 在内嵌浏览器不渲染) */
 function StaleMark({ days }: { days: number }) {
+  const [open, setOpen] = useState(false);
   return (
-    <span className="group relative inline-flex">
-      <span className="text-[10px] font-normal text-slate-400">({days})</span>
-      <span className="pointer-events-none absolute left-1/2 top-full z-30 mt-1 hidden -translate-x-1/2 whitespace-nowrap rounded-lg border border-slate-100 bg-white px-2.5 py-1.5 text-[11px] font-normal text-slate-500 shadow-lg group-hover:block">
-        {days} 天前的采集数据(本窗口内未重新采集)
+    <span className="relative inline-flex">
+      <span
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        aria-label={`${days} 天前的数据说明(点击展开)`}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.stopPropagation();
+            e.preventDefault();
+            setOpen((v) => !v);
+          }
+        }}
+        className={`cursor-help text-[10px] font-normal ${open ? 'text-brand-600' : 'text-slate-400'}`}
+      >
+        ({days})
       </span>
+      {open && (
+        <span className="pointer-events-none absolute left-1/2 top-full z-30 mt-1 block -translate-x-1/2 whitespace-nowrap rounded-lg border border-slate-100 bg-white px-2.5 py-1.5 text-[11px] font-normal text-slate-500 shadow-lg">
+          {days} 天前采集的数据(这段时间内没有重新采集)
+        </span>
+      )}
     </span>
   );
 }
