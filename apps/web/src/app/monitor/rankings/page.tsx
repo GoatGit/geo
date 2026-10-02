@@ -54,7 +54,9 @@ export default function RankingsPage() {
         const c = r.cells.find((x) => x.engine === eng);
         if (!c) return '—';
         const base = c.rank !== null ? `#${c.rank}` : c.mentioned ? '提及·无排名' : '未提及';
-        return c.stale ? `${base}·${staleLabel(c.asOf)}` : base;
+        if (!c.stale) return base;
+        const days = Math.floor((Date.now() - new Date(c.asOf ?? Date.now()).getTime()) / 86_400_000);
+        return days >= 2 ? `${base}(${days})` : base;
       });
       return [r.questionText, ...cells, r.compositeRank ?? '', pct(r.mentionRate), pct(r.top3Rate), pct(r.top1Rate)];
     });
@@ -218,7 +220,7 @@ export default function RankingsPage() {
             <span className="metric-num ml-1 rounded bg-slate-100 px-1.5 py-0.5">#4+</span>靠后
             <span className="ml-1 rounded bg-slate-50 px-1.5 py-0.5 text-slate-400">提及·无排名</span>
             <span className="ml-1 rounded bg-bad-50 px-1.5 py-0.5 text-bad">未提及</span>
-            <span className="ml-1 rounded bg-slate-50 px-1.5 py-0.5 text-slate-400">#3·3天前</span>窗口内未采集,沿用最近一次有效结果(≤30 天)
+            <span className="ml-1 rounded bg-slate-50 px-1.5 py-0.5 text-slate-400">#3(3)</span>括号天数 = 数据距今天数(≥2 天才标,悬停可见;窗口内未采集时沿用最近一次有效结果,≤30 天)
             <span className="ml-1.5 border-l border-slate-100 pl-1.5 text-slate-400">综合名次 = 未提及记 N+1 取中位数;位次 = 榜单位次,或品牌评述题中的首位评述</span>
           </span>
         </span>
@@ -251,6 +253,9 @@ export default function RankingsPage() {
                 </td>
                 {visibleEngines.map((eng) => {
                   const cell = row.cells.find((c) => c.engine === eng);
+                  // 回填陈旧度小标:≥2 天才显示 (N),悬停说明;0/1 天(近窗口)不标
+                  const staleDays = cell?.stale && cell.asOf ? Math.floor((Date.now() - new Date(cell.asOf).getTime()) / 86_400_000) : null;
+                  const staleMark = staleDays != null && staleDays >= 2 ? staleDays : null;
                   return (
                     <td key={eng} className="border-t border-slate-100 px-2.5 py-2 text-center">
                       {!cell ? (
@@ -269,7 +274,7 @@ export default function RankingsPage() {
                         >
                           {cell.rank !== null ? (
                             <span
-                              className={`metric-num inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs ${
+                              className={`metric-num inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs ${
                                 cell.rank === 1
                                   ? 'bg-good-50 text-good'
                                   : cell.rank <= 3
@@ -283,21 +288,34 @@ export default function RankingsPage() {
                                   {cell.rank < cell.prevRank ? '▲' : '▼'}
                                 </span>
                               )}
-                              {cell.stale && <span className="text-[9px] font-normal text-slate-400">{staleLabel(cell.asOf)}</span>}
+                              {staleMark != null && (
+                                <span className="text-[10px] font-normal text-slate-400" title={`${staleMark} 天前的采集数据(本窗口内未重新采集)`}>
+                                  ({staleMark})
+                                </span>
+                              )}
                             </span>
                           ) : cell.mentioned ? (
                             <span
                               className={`block cursor-help px-1 py-0.5 text-xs ${cell.stale ? 'text-slate-400/80' : 'text-slate-400'}`}
                               title="AI 回答提及了本品,但该回答是开放式评述、未给出推荐位次(排名类指标不计入此类)"
                             >
-                              提及·无排名{cell.stale && <span className="ml-1 text-[9px] text-slate-400">{staleLabel(cell.asOf)}</span>}
+                              提及·无排名
+                              {staleMark != null && (
+                                <span className="text-[10px]" title={`${staleMark} 天前的采集数据(本窗口内未重新采集)`}>
+                                  ({staleMark})
+                                </span>
+                              )}
                             </span>
                           ) : cell.stale ? (
                             <span
                               className="block cursor-help rounded bg-slate-50 px-1.5 py-0.5 text-xs text-slate-400"
-                              title={`最近一次有效采集(${new Date(cell.asOf ?? Date.now()).toLocaleString('zh-CN')})中未出现本品;本窗口内尚未重新采集`}
+                              title={
+                                staleMark != null
+                                  ? `${staleMark} 天前的采集数据(本窗口内未重新采集)中未出现本品`
+                                  : `最近一次有效采集(${new Date(cell.asOf ?? Date.now()).toLocaleString('zh-CN')})中未出现本品;本窗口内尚未重新采集`
+                              }
                             >
-                              未提及·{staleLabel(cell.asOf)}
+                              未提及{staleMark != null && `(${staleMark})`}
                             </span>
                           ) : (
                             <span
@@ -338,11 +356,4 @@ export default function RankingsPage() {
 
 function pct2(v: number) {
   return `${Math.round(v * 100)}%`;
-}
-
-/** 回填单元格的陈旧度标签:N 天前(不足 1 天按"今天",理论上回填不会出现) */
-function staleLabel(asOf?: string | null): string | null {
-  if (!asOf) return null;
-  const days = Math.floor((Date.now() - new Date(asOf).getTime()) / 86_400_000);
-  return days < 1 ? '今天' : `${days}天前`;
 }
