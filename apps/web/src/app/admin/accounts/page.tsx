@@ -382,7 +382,8 @@ export default function AdminAccountsPage() {
           </thead>
           <tbody>
             {engineSummary.map((s) => {
-              const gap = Math.max(0, s.required - s.total);
+              // 缺口 = 需求 - 可用(待登录的不算,登录成功入池才补上)
+              const gap = Math.max(0, s.required - s.available);
               return (
                 <tr key={s.engine} className="border-t">
                   <td className="py-1.5 font-medium text-slate-700">{engineLabel(s.engine)}</td>
