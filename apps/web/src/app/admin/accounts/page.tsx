@@ -362,18 +362,47 @@ export default function AdminAccountsPage() {
       />
 
       <section className="card rise p-6">
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          {engineSummary.map((s) => (
-            <span
-              key={s.engine}
-              className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600"
-              title={`需求量估算:每日任务 ${s.dailyTasks} 次 ÷ 每账号 ${s.quotaPerProfile} 次/天 = 需 ${s.required} 个账号(按启用采集计划的活跃问题数,受引擎/全局日上限截断)`}
-            >
-              {engineLabel(s.engine)}:{s.available}(可用)/{s.pending}(待登录)/{s.total}(总数)/
-              <span className={s.total < s.required ? 'font-semibold text-bad' : 'text-good'}>{s.required}(需求)</span>
-            </span>
-          ))}
-        </div>
+        {/* 供给 vs 需求一览:表格形式,缺口一目了然 */}
+        <table className="mb-3 w-full text-xs">
+          <thead className="text-left text-slate-400">
+            <tr>
+              <th className="py-1.5">引擎</th>
+              <th className="py-1.5 text-center">可用</th>
+              <th className="py-1.5 text-center">待登录</th>
+              <th className="py-1.5 text-center">总数</th>
+              <th className="py-1.5 text-center" title="按启用采集计划的活跃问题数估算,受引擎/全局日上限截断">每日任务</th>
+              <th
+                className="py-1.5 text-center"
+                title={`需求量 = 每日任务 ÷ 每账号 ${engineSummary[0]?.quotaPerProfile ?? 20} 次/天,向上取整`}
+              >
+                需求
+              </th>
+              <th className="py-1.5 text-center">缺口</th>
+            </tr>
+          </thead>
+          <tbody>
+            {engineSummary.map((s) => {
+              const gap = Math.max(0, s.required - s.total);
+              return (
+                <tr key={s.engine} className="border-t">
+                  <td className="py-1.5 font-medium text-slate-700">{engineLabel(s.engine)}</td>
+                  <td className="metric-num py-1.5 text-center">{s.available}</td>
+                  <td className="metric-num py-1.5 text-center">{s.pending > 0 ? <span className="text-warn">{s.pending}</span> : 0}</td>
+                  <td className="metric-num py-1.5 text-center">{s.total}</td>
+                  <td className="metric-num py-1.5 text-center text-slate-500">{s.dailyTasks} 次</td>
+                  <td className="metric-num py-1.5 text-center font-semibold">{s.required}</td>
+                  <td className="py-1.5 text-center">
+                    {gap > 0 ? (
+                      <span className="rounded bg-bad-50 px-1.5 py-0.5 font-medium text-bad">缺 {gap} 个</span>
+                    ) : (
+                      <span className="rounded bg-good-50 px-1.5 py-0.5 text-good">够用</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
         <div className="mb-2 flex flex-wrap items-center gap-3">
           <h2 className="font-semibold text-slate-900">添加账号</h2>
           <select className="input h-9 w-40" value={newEngine} onChange={(e) => setNewEngine(e.target.value)}>
