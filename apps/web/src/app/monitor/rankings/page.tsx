@@ -1,5 +1,5 @@
 'use client';
-import { engineLabel } from '@geo/shared';
+import { engineLabel, WEB_ENGINES } from '@geo/shared';
 
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -34,7 +34,16 @@ export default function RankingsPage() {
   }
   if (!data) return <EmptyState text="暂无数据:完成品牌与问题配置后,首轮采集结果将在此展示" />;
 
-  const visibleEngines = engineFilter === 'all' ? data.engineStats.map((e) => e.engine) : [engineFilter];
+  // 引擎列 = 窗口有数据的引擎 ∪ 矩阵单元格出现的引擎(尾部补齐可能带回窗口外引擎,
+  // 只按 engineStats(纯窗口)取列会把回填单元格整列隐藏)。按 WEB_ENGINES 规范序排列。
+  const matrixEngines: string[] = [
+    ...WEB_ENGINES.filter((e) => data.matrix.some((r) => r.cells.some((c) => c.engine === e))),
+    ...[...new Set(data.matrix.flatMap((r) => r.cells.map((c) => c.engine)))].filter(
+      (e) => !WEB_ENGINES.includes(e as never),
+    ),
+  ];
+  const allEngines = [...new Set([...data.engineStats.map((e) => e.engine), ...matrixEngines])];
+  const visibleEngines = engineFilter === 'all' ? allEngines : [engineFilter];
   const visibleRows = data.matrix.filter(
     (r) => questionFilter === 'all' || String(r.questionId) === questionFilter,
   );
@@ -158,8 +167,8 @@ export default function RankingsPage() {
           className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-sm"
         >
           <option value="all">全部引擎</option>
-          {data.engineStats.map((e) => (
-            <option key={e.engine} value={e.engine}>{engineLabel(e.engine)}</option>
+          {allEngines.map((e) => (
+            <option key={e} value={e}>{engineLabel(e)}</option>
           ))}
         </select>
         <select
@@ -197,7 +206,7 @@ export default function RankingsPage() {
           {backfilling ? '重判中…' : '重判历史排名'}
         </button>
         <button
-          onClick={() => exportMatrix(data.matrix, data.engineStats.map((e) => e.engine))}
+          onClick={() => exportMatrix(data.matrix, allEngines)}
           className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:border-brand-300"
         >
           导出 CSV
