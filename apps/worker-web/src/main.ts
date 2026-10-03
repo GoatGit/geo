@@ -12,7 +12,7 @@ import { AccountPoolService } from './profiles';
 import { ProxyPoolManager } from './qg-proxy';
 import { startReportsWorker, startReputationWorker, scheduleWeeklyReports } from './report-worker';
 import { startInsightsWorker, scheduleWeeklyInsights } from './insights-worker';
-import { browserModeFromEnv, createBrokerFromEnv } from '@geo/browser-session';
+import { AgentBaySessionBroker, browserModeFromEnv, createBrokerFromEnv } from '@geo/browser-session';
 import { PersonaLibraryWorker } from './persona-library-worker';
 import { SurveyWorker } from './survey-worker';
 
@@ -56,6 +56,29 @@ async function bootstrap() {
 
   // 全进程共享一个 broker:采集与人工登录(refcount 复用本地浏览器进程/登录态)
   const broker = createBrokerFromEnv();
+  // AgentBay 孤儿会话治理(P1-D):登录会话 ManualRelease,worker 崩溃后云端不自动回收。
+  // 存活会话登记进 Redis,每 10 分钟扫除超龄孤儿(含上次进程崩溃遗留)。
+  if (broker instanceof AgentBaySessionBroker) {
+    const abRedis = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', {
+      lazyConnect: true,
+      maxRetriesPerRequest: 1,
+    });
+    const AB_LIVE = 'geo:ab:live';
+    const AB_ORPHAN_MS = 30 * 60_000;
+    broker.onAcquired = (sessionId) => void abRedis.hset(AB_LIVE, sessionId, Date.now()).catch(() => undefined);
+    broker.onReleased = (sessionId) => void abRedis.hdel(AB_LIVE, sessionId).catch(() => undefined);
+    const sweepOrphans = async () => {
+      const live = await abRedis.hgetall(AB_LIVE).catch(() => ({}) as Record<string, string>);
+      const now = Date.now();
+      for (const [sessionId, ts] of Object.entries(live)) {
+        if (now - Number(ts) < AB_ORPHAN_MS) continue;
+        const ok = await broker.forceRelease(sessionId);
+        if (ok) console.warn(`[agentbay] 回收孤儿会话 ${sessionId}(存活 ${Math.round((now - Number(ts)) / 60_000)} 分钟)`);
+      }
+    };
+    setInterval(() => void sweepOrphans().catch(() => undefined), 10 * 60_000).unref?.();
+    setTimeout(() => void sweepOrphans().catch(() => undefined), 60_000).unref?.(); // 启动 1 分钟先扫一次上次遗留
+  }
   // 青果代理池(闸门 #2):平台配置(platform_settings)优先,env 兜底;60s 热加载
   const proxyPool = new ProxyPoolManager(db, process.env.QG_PROXY_KEY ?? '');
   await proxyPool.bootstrap();

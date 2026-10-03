@@ -3,7 +3,7 @@ import {
   bigserial,
   boolean,
   date,
-  index,
+  index, uniqueIndex,
   integer,
   jsonb,
   pgTable,
@@ -168,6 +168,8 @@ export const mentionFacts = pgTable(
     brandQuestionIdx: index('mention_facts_brand_question_idx').on(t.brandId, t.questionId, t.ranAt),
     subjectIdx: index('mention_facts_subject_idx').on(t.brandId, t.subjectKind, t.subjectKey, t.ranAt),
     runIdx: index('mention_facts_run_idx').on(t.runId),
+    /** 0022:业务唯一键(一次采集对一个主体至多一条判定),防重投递重复事实 */
+    runSubjectUk: uniqueIndex('mention_facts_run_subject_uk').on(t.runId, t.subjectKind, t.subjectKey, t.ranAt),
   }),
 );
 
@@ -192,6 +194,8 @@ export const citationFacts = pgTable(
     brandIdx: index('citation_facts_brand_idx').on(t.brandId, t.extractedAt),
     brandDomainIdx: index('citation_facts_brand_domain_idx').on(t.brandId, t.domain, t.extractedAt),
     runIdx: index('citation_facts_run_idx').on(t.runId),
+    /** 0022:同一回答中同一 URL 至多一条 */
+    runUrlUk: uniqueIndex('citation_facts_run_url_uk').on(t.runId, t.rawUrl, t.extractedAt),
   }),
 );
 
@@ -216,6 +220,8 @@ export const reputationFacts = pgTable(
     pk: primaryKey({ columns: [t.id, t.ranAt] }),
     brandIdx: index('reputation_facts_brand_idx').on(t.brandId, t.ranAt),
     runIdx: index('reputation_facts_run_idx').on(t.runId),
+    /** 0022:口碑题每 run 聚合一行 */
+    runUk: uniqueIndex('reputation_facts_run_uk').on(t.runId, t.ranAt),
   }),
 );
 

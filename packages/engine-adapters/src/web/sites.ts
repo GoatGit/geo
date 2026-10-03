@@ -46,6 +46,9 @@ export interface EngineSiteConfig {
   /** 引导块剥离(可选):从回答开头连续剥离匹配行(如文心的「搜索N个关键词+引用源列表」前置块),
    *  直到首个不匹配行——避免整篇剥离正文中合法的编号榜单。 */
   leadingNoiseLineRe?: string;
+  /** 聊天入口文本(2026-10 豆包改版):落地页无输入框时,依次点击这些精确文本
+   *  (如「新对话」)进入聊天界面,再找输入框。 */
+  chatEntryTexts?: string[];
   /** 回答文本稳定窗口(docs/04 §2.1 完成判定三条件之二) */
   completionStableMs: number;
   navigationTimeoutMs: number;
@@ -60,24 +63,31 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     displayName: '豆包',
     // ✅ 已通关(2026-09,登录态有头采集,run 1373 ok_with_answer)。风控要点:
     // ① headless 提交即被服务端强制登出(URL 变 ?from_logout=1)——必须 LOCAL_BROWSER_HEADED=1;
-    // ② 输入必须 keyboard.insertText(真实输入事件),fill/type 合成事件无效;
+    // ② 输入必须真实键盘事件(2026-10 复核:新版受控 textarea 对 fill/insertText 均不点亮发送,keyboard.type 最稳);
     // ③ 回答容器为 message 节点(无 markdown 类),提交后先有 ~40s 本地会话空窗再流式回答,
     //    ASK_TIMEOUT 需 ≥150s;loginUrlPatterns 的 from_logout 用于被登出后快速失败。
+    // 2026-10 改版:落地为「对话/工作」模式选择页,无输入框——须先点侧栏「新对话」(chatEntryTexts)
+    // 进入聊天界面;输入框 testid 由 chat_text_input 变为 chat_input_input;发送按钮 wrapper 类
+    // send-btn-wrapper(button 仍是 bg-dbx-fill-highlight 系,禁用态为 ring-dbx-fill-highlight-disable)。
     chatUrl: 'https://www.doubao.com/chat/',
     loginHints: ['button:has-text("登录")', 'a:has-text("登录")', '[data-testid="login_button"]'],
     loginUrlPatterns: ['from_logout'],
     inputSelectors: [
+      'textarea[data-testid="chat_input_input"]',
+      '[data-testid="chat_input_input"]',
       '[contenteditable="true"]',
       'textarea[data-testid="chat_text_input"]',
       '[data-testid="chat_text_input"]',
       'textarea[placeholder]',
     ],
-    // 实测(2026-09):发送按钮为输入文字后出现的蓝色高亮按钮(无 testid/aria)
-    submitSelectors: ['button[class*="bg-dbx-fill-highlight"]', '[data-testid="send_button"]', 'button[type="submit"]', 'button:has-text("发送")'],
+    // 实测(2026-10):新版发送按钮在 div.send-btn-wrapper 内;旧版蓝色高亮按钮类保留兼容
+    submitSelectors: ['div[class*="send-btn-wrapper"] button:not([disabled])', 'button[class*="bg-dbx-fill-highlight"]', '[data-testid="send_button"]', 'button[type="submit"]', 'button:has-text("发送")'],
     // 实测(2026-09,登录态有头):回答流在 message 节点(无 markdown 类);提交后先有
     // ~40s 本地会话空窗(local_xxx)再同步服务端,ASK_TIMEOUT 需 ≥150s
     answerSelectors: ['div[class*="message"]', '[data-testid="receive_message"]', 'div[class*="answer"]', 'div[class*="markdown-body"]'],
     stopSelectors: ['[data-testid="stop_button"]', 'button:has-text("停止")'],
+    // 模式选择页进入聊天的入口(2026-10 改版):输入框不可见时依次尝试点击这些精确文本
+    chatEntryTexts: ['新对话', '开始新对话'],
     // 登录 Cookie 实测:字节跳动 passport 登录后新增 sessionid/sid_tt
     loggedInCookieHints: ['sessionid', 'sid_tt'],
     // 引用来源在 chat/completion SSE 流里(正文 DOM 无 <a> 链接,实测 2026-09)
@@ -87,6 +97,7 @@ export const ENGINE_SITES: Record<EngineId, EngineSiteConfig> = {
     // 实测:完整回答(含搜索阶段)需要更长时间
     minAskTimeoutMs: 180_000,
     // 实测:游客态可正常提问;且豆包风控拒绝云端环境的扫码登录,游客采集为兜底
+    // (2026-10 复核:游客态在部分出口会出现发送按钮永久禁用,登录态优先)
     guestAllowed: true,
     answerNoisePatterns: [],
     completionStableMs: BASE_COMPLETION_STABLE_MS,

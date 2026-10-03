@@ -26,10 +26,35 @@ const DEFAULT_CONTEXT_PATH = '/home/wuying/workspace';
 
 export class AgentBaySessionBroker implements SessionBroker {
   private readonly config: AgentBayConfig;
+  /**
+   * 会话登记钩子(P1-D 对策):登录用途会话带 ManualRelease,worker 崩溃(OOM/发版
+   * kill)时 finally 不会执行,含登录态 Cookie 的云端浏览器会话成为孤儿(烧钱 + 凭证
+   * 暴露面)。调用方(worker)注入 onAcquired/onReleased 把会话记进 Redis,启动扫除器
+   * 定期 forceRelease 超龄孤儿。
+   */
+  onAcquired?: (sessionId: string, purpose: string) => void;
+  onReleased?: (sessionId: string) => void;
 
   constructor(config: AgentBayConfig) {
     if (!config.apiKey) throw new BrokerError('AGENTBAY_API_TOKEN is required');
     this.config = config;
+  }
+
+  /** 强制回收指定会话(孤儿扫除器用):带 3 次退避重试,失败仅记日志。 */
+  async forceRelease(sessionId: string): Promise<boolean> {
+    const auth = `Bearer ${this.config.apiKey}`;
+    const body: Record<string, string> = { Authorization: auth };
+    for (let i = 1; i <= 3; i++) {
+      try {
+        await this.rpc('ReleaseMcpSession', { ...body, SessionId: sessionId });
+        this.onReleased?.(sessionId);
+        return true;
+      } catch (err) {
+        console.error(`[agentbay] forceRelease ${sessionId} 第 ${i} 次失败:`, (err as Error).message);
+        await new Promise((r) => setTimeout(r, 5_000 * i));
+      }
+    }
+    return false;
   }
 
   async acquire(profile: SessionProfile): Promise<SessionHandle> {
@@ -99,14 +124,25 @@ export class AgentBaySessionBroker implements SessionBroker {
         throw new BrokerError('agentbay: no CDP url in GetCdpLink response', undefined, JSON.stringify(linkRes).slice(0, 300));
       }
 
+      this.onAcquired?.(sessionId, profile.purpose ?? 'collect');
       return {
         sessionId,
         cdpUrl,
         imageId: this.config.imageId,
         contextId,
         release: async () => {
-          // 释放失败不阻塞主流程;AgentBay 侧空闲回收兜底
-          await this.rpc('ReleaseMcpSession', { ...body, SessionId: sessionId }).catch(() => undefined);
+          // 释放失败不阻塞主流程,但不再静默:3 次退避重试 + 登记 removal,
+          // 失败的会话留给孤儿扫除器兜底(ManualRelease 登录会话云端不会自动回收)
+          for (let i = 1; i <= 3; i++) {
+            try {
+              await this.rpc('ReleaseMcpSession', { ...body, SessionId: sessionId });
+              this.onReleased?.(sessionId);
+              return;
+            } catch (err) {
+              console.error(`[agentbay] release ${sessionId} 第 ${i} 次失败:`, (err as Error).message);
+              await new Promise((r) => setTimeout(r, 3_000 * i));
+            }
+          }
         },
       };
     } catch (err) {

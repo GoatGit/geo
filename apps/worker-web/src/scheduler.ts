@@ -17,6 +17,7 @@ import {
 import { COLLECT_QUEUE, bullConnection, priorityOf, type CollectJobData } from './queue';
 import { EngineBreaker } from './breaker';
 import { AccountPoolService } from './profiles';
+import { dayStamp, inflight, trackEnqueue } from './day-cap';
 
 /** 单 tick 的派发预算:全局与每引擎剩余额度(Infinity = 不限),随入队扣减。 */
 export interface Budget {
@@ -231,7 +232,10 @@ export class RoundScheduler {
 
   private async buildBudget(settings: PlatformSettings): Promise<Budget> {
     const used = await this.todayRunCounts();
-    const usedTotal = [...used.values()].reduce((a, b) => a + b, 0);
+    // 在途扣减(P0-B):已执行 + 在途(入队-完结,Redis 账本)一起占预算,否则 60s tick
+    // 间只有 ~4 个并发在跑,每 tick 重建的预算会反复给同一批额度放行,日上限成倍击穿
+    const live = await inflight(this.redis).catch(() => ({ global: 0, byEngine: new Map<string, number>() }));
+    const usedTotal = [...used.values()].reduce((a, b) => a + b, 0) + live.global;
     const globalRemaining = settings.globalDailyRunCap > 0
       ? Math.max(settings.globalDailyRunCap - usedTotal, 0)
       : Number.POSITIVE_INFINITY;
@@ -240,7 +244,7 @@ export class RoundScheduler {
       const cap = settings.engineDailyCaps[engine] ?? 0;
       engineRemaining.set(
         engine,
-        cap > 0 ? Math.max(cap - (used.get(engine) ?? 0), 0) : Number.POSITIVE_INFINITY,
+        cap > 0 ? Math.max(cap - (used.get(engine) ?? 0) - (live.byEngine.get(engine) ?? 0), 0) : Number.POSITIVE_INFINITY,
       );
     }
     return { globalRemaining, engineRemaining };
@@ -268,11 +272,18 @@ export class RoundScheduler {
     planId: number,
     nextRunAt: Date,
   ): Promise<boolean> {
+    // 早退必须推进 next_run_at(P1-A):due 查询 orderBy(nextRunAt) limit(50),不推进的
+    // 僵尸计划永远占据前排,≥50 个时健康品牌整批饿死。统一顺延到下一个采集窗口。
+    const postpone = () =>
+      this.db.update(collectionPlans).set({ nextRunAt }).where(eq(collectionPlans.id, planId)).catch(() => undefined);
     const questions = await this.db
       .select()
       .from(monitoringQuestions)
       .where(and(eq(monitoringQuestions.brandId, brandId), eq(monitoringQuestions.status, 'active')));
-    if (questions.length === 0) return true;
+    if (questions.length === 0) {
+      await postpone();
+      return true;
+    }
 
     const sub = (
       await this.db.select().from(subscriptions).where(eq(subscriptions.brandId, brandId)).limit(1)
@@ -280,10 +291,14 @@ export class RoundScheduler {
     // 过期/停用订阅不派发(按原计划付费口径,docs/01 §3.10)。订阅行没有自动到期降档任务,
     // status 会一直停在 active——到期校验必须看 periodEnd;但 periodEnd 为 NULL 是历史数据
     // 的"未设置/不限期"语义(存量品牌普遍如此),不得视为过期
-    if (!sub || sub.accountId == null) return true;
+    if (!sub || sub.accountId == null) {
+      await postpone();
+      return true;
+    }
     const expired = sub.periodEnd !== null && sub.periodEnd.getTime() <= Date.now();
     if ((sub.status && sub.status !== 'active') || expired) {
-      return true;
+      await postpone();
+      return true; // 过期/停用同样顺延,避免每 tick 空转复查
     }
     const accountId = sub.accountId;
     const priority = priorityOf(sub?.plan ?? 'free');
@@ -330,10 +345,11 @@ export class RoundScheduler {
     if (engineList.length === 0) {
       if (cached.length > 0) {
         console.warn(
-          `[scheduler] brand=${brandId} 本轮跳过:全部引擎无当日容量(${cached.join('/')};"` +
+          `[scheduler] brand=${brandId} 本轮跳过并顺延:全部引擎无当日容量(${cached.join('/')};"` +
             `${skippedNoCapacity.join('/')} 无可用账号或额度已尽,其余为预算/熔断)。次日额度恢复或账号池补号后自动续上`,
         );
       }
+      await postpone();
       return true;
     }
 
@@ -356,7 +372,10 @@ export class RoundScheduler {
 
     // 入队计划:每任务复查全局/引擎额度(纯函数,预算账本被就地扣减)
     const jobs = planRoundJobs(ordered, engineList, budget);
-    if (jobs.length === 0) return true;
+    if (jobs.length === 0) {
+      await postpone(); // 全引擎预算耗尽:顺延防占位
+      return true;
+    }
 
     // 原子提交:建轮次(totals 先行,防与 processor 的 done 增量"先增后覆盖"竞态)
     // + 推进 next_run_at。commit 后入队;若 commit 后崩溃则当日少采一轮(enqueued=0 可见),
@@ -393,6 +412,12 @@ export class RoundScheduler {
       );
       enqueued += 1;
     }
+    // 在途账本(P0-B):入队即占额度,完结(processor 终态事件)释放
+    const enqByEngine = new Map<string, number>();
+    for (const j of jobs) enqByEngine.set(j.engine, (enqByEngine.get(j.engine) ?? 0) + 1);
+    await Promise.all(
+      [...enqByEngine].map(([e, n]) => trackEnqueue(this.redis, e, n, dayStamp()).catch(() => undefined)),
+    );
     budget.globalRemaining -= enqueued;
 
     // 只补 enqueued 键,不覆盖 processor 已增量写入的 done/ok/failed

@@ -107,15 +107,18 @@ export async function extractReputation(db: Db, job: ReputationJobData, redis?: 
     // judged 为 null(LLM 失败):mode=llm 时保持规则结果(confidence 0.7 天然入抽检池),降级事件已由 agent 记录
   }
 
-  await db.insert(reputationFacts).values({
-    runId: job.runId,
-    brandId: job.brandId,
-    sentiment,
-    confidence,
-    impressionTerms: terms,
-    excerpt: pickExcerpt(job.answerText, job.questionText, terms),
-    auditState,
-    ranAt,
-    parserVersion,
-  });
+  await db
+    .insert(reputationFacts)
+    .values({
+      runId: job.runId,
+      brandId: job.brandId,
+      sentiment,
+      confidence,
+      impressionTerms: terms,
+      excerpt: pickExcerpt(job.answerText, job.questionText, terms),
+      auditState,
+      ranAt,
+      parserVersion,
+    })
+    .onConflictDoNothing(); // 0022:每 run 一行,重投递不重复
 }

@@ -168,13 +168,31 @@ export class DomWebAdapter implements EngineAdapter {
       await page.waitForTimeout(1_500);
       // SPA 挂载等待:输入框就绪再提问,否则输入会打在未初始化的编辑器上(豆包实测)。
       // 代理出口增加往返延迟,水合更慢——等待窗口放大到 30s
-      for (const sel of this.site.inputSelectors) {
-        const ready = await page
-          .waitForSelector(sel, { state: 'visible', timeout: 30_000 })
-          .then(() => true)
-          .catch(() => false);
-        if (ready) break;
+      const inputReady = async (ms: number): Promise<boolean> => {
+        for (const sel of this.site.inputSelectors) {
+          const ready = await page
+            .waitForSelector(sel, { state: 'visible', timeout: ms })
+            .then(() => true)
+            .catch(() => false);
+          if (ready) return true;
+        }
+        return false;
+      };
+      // 聊天入口(2026-10 豆包改版:落地为「对话/工作」模式选择页,无输入框):
+      // 依次尝试 chatEntryTexts 精确文本,点完重等输入框——通用降级,不影响旧版站点
+      if (!(await inputReady(12_000)) && this.site.chatEntryTexts?.length) {
+        for (const text of this.site.chatEntryTexts) {
+          const clicked = await page
+            .getByText(text, { exact: true })
+            .first()
+            .click({ timeout: 2_000 })
+            .then(() => true)
+            .catch(() => false);
+          if (clicked && (await inputReady(6_000))) break;
+        }
       }
+      // 兜底再等一轮(入口点击也可能不需要——旧版页面此处直接通过)
+      await inputReady(18_000);
       // 流式嗅探(豆包实测:SSE 带心跳长连接,响应级 body() 要等流关闭才落地,
       // 常规收割窗口等不到;页面内包裹 fetch 增量读取并暂存 window 变量, ask 结束直接取)
       await this.installNetSniffer(page);
@@ -214,10 +232,12 @@ export class DomWebAdapter implements EngineAdapter {
       const asked = await this.submitQuestion(page, question);
       if (!asked) {
         const bodyHead = (await page.locator('body').innerText({ timeout: 1_000 }).catch(() => '')).slice(0, 80);
-        // 输入框不可用的高频原因是未登录(游客落地页无输入框):非正登录证据时按
-        // needs_login 收口 → 账号池置 login_required 引导人工登录,而不是误报页面改版
+        // 输入框不可用的判定三分(P1-B):确认未登录(loggedIn===false)才按 needs_login
+        // 收口换号;checkLogin 拿不准(null:页面未就绪/无正登录证据)时按页面异常收口
+        // failed、不换号——否则站点改版导致选择器全灭时,一个下午会把整个账号池逐个
+        // 打成 login_required(且告警文案误导运营去重登,实际是选择器问题)。
         const recheck = await checkLogin(page, this.site);
-        if (recheck.loggedIn !== true) {
+        if (recheck.loggedIn === false) {
           return {
             status: 'failed',
             answerText: '',
@@ -235,7 +255,7 @@ export class DomWebAdapter implements EngineAdapter {
             },
           };
         }
-        return this.fail(`未找到可用的提问输入框(已登录,页面改版?需校准 inputSelectors;url=${page.url()} body="${bodyHead}")`, queuedAt);
+        return this.fail(`未找到可用的提问输入框(已登录或登录态无法判定,疑似页面改版,需校准 inputSelectors;url=${page.url()} body="${bodyHead}")`, queuedAt);
       }
 
       const { main, text, timedOut } = await this.waitForAnswer(page, timeoutMs, question);
@@ -355,12 +375,21 @@ export class DomWebAdapter implements EngineAdapter {
   }
 
   /**
-   * contenteditable 输入实测(qianwen/doubao):fill/type 的合成事件不被站点输入组件识别,
-   * 必须 keyboard.insertText(浏览器级输入事件,元素需已聚焦)。
+   * 输入方式按编辑器形态自适应(2026-10 豆包改版校准):
+   * - textarea/input(React 受控):keyboard.type 逐字真实键序最稳——fill/insertText
+   *   均出现过"DOM 有字但组件 state 为空、发送按钮不点亮"的形态;
+   * - contenteditable(qianwen/doubao 旧版):keyboard.insertText;
    * ⚠ 不做回显校验回退:豆包输入框 innerText 读不出插入文本,误回退成 fill 会覆盖有效输入。
    */
   private async typeInto(page: Page, input: Locator, text: string): Promise<void> {
-    await input.fill('', { timeout: 3_000 }).catch(() => undefined);
+    const isField = await input
+      .evaluate((el) => el.tagName === 'TEXTAREA' || el.tagName === 'INPUT')
+      .catch(() => false);
+    if (isField) {
+      await input.fill('', { timeout: 3_000 }).catch(() => undefined);
+      await page.keyboard.type(text, { delay: 30 });
+      return;
+    }
     try {
       await page.keyboard.insertText(text);
     } catch {

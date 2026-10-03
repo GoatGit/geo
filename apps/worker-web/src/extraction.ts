@@ -130,7 +130,7 @@ export async function runInstantExtraction(input: {
         parserVersion: f.parserVersion,
         confidence: f.confidence,
       })),
-    );
+    ).onConflictDoNothing(); // 0022 业务唯一键(run+主体):重投递不产生重复事实
   }
 
   // 引用即时抽取(教训 A6 对策:引用卡同步通路,只把"正文散落链接"留给异步管道)
@@ -152,7 +152,7 @@ export async function runInstantExtraction(input: {
       };
     });
   if (citationRows.length > 0) {
-    await db.insert(citationFacts).values(citationRows);
+    await db.insert(citationFacts).values(citationRows).onConflictDoNothing(); // 0022:同 run 同 URL 至多一条
   }
 
   return { facts };

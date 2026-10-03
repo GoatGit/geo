@@ -31,6 +31,7 @@ import {
   bullConnection,
   type CollectJobData,
 } from './queue';
+import { trackEnqueue, trackFinish } from './day-cap';
 import { discoverCompetitors, runInstantExtraction, toSubjects, type SubjectDef, type SubjectRow } from './extraction';
 
 /** 失败重试上限(docs/04 §5:重试最多 2 次,必须更换账号):1 次首发 + 2 次轮换重试。 */
@@ -48,6 +49,29 @@ const ASK_HARD_MARGIN_MS = envInt('ASK_HARD_MARGIN_MS', 120_000, 10_000, 600_000
 const RETRY_BACKOFF_MS = envInt('COLLECT_RETRY_BACKOFF_MS', 3_000, 0, 60_000);
 /** 档案互斥 advisory lock 的 class key(pg 两段式 key 的固定段,与业务 id 空间隔离)。 */
 const PROFILE_LOCK_CLASS = 0x67_65_6f;
+
+/**
+ * ask 硬超时墙(P0-A 修复):必须以"该引擎实际生效的回答预算"为基线再加余量——
+ * 适配器会把 waitForAnswer 预算抬到 site.minAskTimeoutMs(qwen/元宝 240s),
+ * 若硬墙仍按 ASK_TIMEOUT_MS(120s)+余量 计算,任何 >~180s 的深度搜索回答都会被
+ * 系统性判 failed(长回答样本整批丢失 + 账号连坐扣分 + 熔断被失败率打爆)。
+ */
+function askHardTimeoutMs(engine: string): number {
+  const site = siteConfigOf(engine as never);
+  const askBudgetMs = Math.max(ASK_TIMEOUT_MS, site?.minAskTimeoutMs ?? 0);
+  return askBudgetMs + ASK_HARD_MARGIN_MS;
+}
+
+/** 启动断言:余量必须盖住 goto(30s)+输入框挂载(≤48s)+提交重试+引用收割(12s)的下界,否则拒启动。 */
+export function assertAskBudgetSanity(): void {
+  const OVERHEAD_FLOOR_MS = 60_000;
+  if (ASK_HARD_MARGIN_MS < OVERHEAD_FLOOR_MS) {
+    throw new Error(
+      `ASK_HARD_MARGIN_MS=${ASK_HARD_MARGIN_MS} 低于导航/挂载/收割开销下界 ${OVERHEAD_FLOOR_MS}ms:` +
+        '硬超时会在回答完成前强拆会话,长回答样本将被系统性误杀(拒绝启动)',
+    );
+  }
+}
 
 /**
  * 采集执行链(docs/04 §1 总体结构):
@@ -98,6 +122,7 @@ export class CollectProcessor {
   private readonly redis: Redis;
 
   start(concurrency: number): Worker<CollectJobData> {
+    assertAskBudgetSanity(); // 配置不自洽(余量盖不住链路开销)直接拒启动
     const worker = new Worker<CollectJobData>(COLLECT_QUEUE, (job) => this.process(job), {
       connection: bullConnection(),
       concurrency,
@@ -107,6 +132,14 @@ export class CollectProcessor {
     // 否则 done 永远追不上 total,轮次 finishedAt 永不落库、进度永久卡死。
     // process() 内部已处理的失败走正常完成路径,不会触发此事件,不会双重计数。
     worker.on('failed', (job, err) => this.onJobFinalFailure(job, err));
+    // 日额度在途账本(P0-B):终态(completed / 最终 failed)记一笔完结,与调度侧入队对称
+    worker.on('completed', (job) => void trackFinish(this.redis, job.data.engine).catch(() => undefined));
+    worker.on('failed', (job) => {
+      if (!job) return;
+      const maxAttempts = job.opts.attempts ?? 1;
+      if (job.attemptsMade < maxAttempts) return; // 还有重试:未终态,不记完结
+      void trackFinish(this.redis, job.data.engine).catch(() => undefined);
+    });
     return worker;
   }
 
@@ -184,7 +217,8 @@ export class CollectProcessor {
 
     // 熔断(docs/04 §5):该引擎通道维护中 → 延迟重排,不产生 failed 污染口径
     if (await this.breaker.isTripped(engine)) {
-      await this.requeue.add('collect', { ...data, deferredCount: deferredCount + 1, firstQueuedAt: data.firstQueuedAt ?? job.timestamp }, { delay: 60_000, priority: data.priority });
+      await trackEnqueue(this.redis, engine).catch(() => undefined);
+      await this.requeue.add('collect', { ...data, deferredCount: deferredCount + 1, firstQueuedAt: data.firstQueuedAt ?? job.timestamp }, { delay: 60_000, priority: data.priority, jobId: `${job.id}#d${deferredCount + 1}` });
       void this.alerter?.breakerTripped(engine, -1, -1);
       return { status: 'deferred' };
     }
@@ -197,7 +231,8 @@ export class CollectProcessor {
     let profile = await this.pool.acquire(engine);
     if (!profile) {
       // 账号池耗尽(docs/04 §3.2):延迟重排,扩容与冗余由运营策略解决
-      await this.requeue.add('collect', { ...data, deferredCount: deferredCount + 1, firstQueuedAt: data.firstQueuedAt ?? job.timestamp }, { delay: 120_000, priority: data.priority });
+      await trackEnqueue(this.redis, engine).catch(() => undefined);
+      await this.requeue.add('collect', { ...data, deferredCount: deferredCount + 1, firstQueuedAt: data.firstQueuedAt ?? job.timestamp }, { delay: 120_000, priority: data.priority, jobId: `${job.id}#d${deferredCount + 1}` });
       void this.alerter?.poolExhausted(engine);
       return { status: 'deferred' };
     }
@@ -215,7 +250,8 @@ export class CollectProcessor {
           profile = next;
           continue;
         }
-        await this.requeue.add('collect', { ...data, deferredCount: deferredCount + 1, firstQueuedAt: data.firstQueuedAt ?? job.timestamp }, { delay: 60_000, priority: data.priority });
+        await trackEnqueue(this.redis, engine).catch(() => undefined);
+      await this.requeue.add('collect', { ...data, deferredCount: deferredCount + 1, firstQueuedAt: data.firstQueuedAt ?? job.timestamp }, { delay: 60_000, priority: data.priority, jobId: `${job.id}#d${deferredCount + 1}` });
         return { status: 'deferred' };
       }
       try {
@@ -423,7 +459,7 @@ export class CollectProcessor {
     /** forceCleaned:正常 finally 与硬超时强拆只做一次,避免双重 release */
     let forceCleaned = false;
     let releaseSession: (() => Promise<void>) | null = null;
-    const hardMs = ASK_TIMEOUT_MS + ASK_HARD_MARGIN_MS;
+    const hardMs = askHardTimeoutMs(engine);
     let hardTimer: NodeJS.Timeout | undefined;
     const hardTimeout = new Promise<never>((_, reject) => {
       hardTimer = setTimeout(
@@ -456,6 +492,12 @@ export class CollectProcessor {
           purpose: 'collect',
         });
         releaseSession = () => session.release();
+        // 竞态兜底(P1-C):硬超时清理可能先于 acquire 完成发生——那时 releaseSession
+        // 尚为 null,清理空手而归;acquire 返回后立即补放并按失败收口,浏览器会话不再泄漏
+        if (forceCleaned) {
+          await session.release().catch(() => undefined);
+          throw new Error('ask hard timeout:session acquired after cleanup(已补放会话)');
+        }
         try {
           // 本地代理直接注入 Page;远程代理(AgentBay)经 CDP 连接拿页面
           let page = session.page as Page | undefined;
