@@ -18,6 +18,8 @@ apps/
   api/             NestJS:auth/brands/questions/recognition/monitor(指标唯一出口)/runs/_collection/account/reports/billing(会员+微信/支付宝支付)/WS + admin(平台管理后台)+ insights(行业洞察 + PDF 下载)
   worker-web/      采集编排:BullMQ 调度(品牌时区白天随机)/熔断/账号池(健康分)/ask 超时护栏/失败换号重试/即时抽取/竞品发现/口碑基线/报告生成 + 行业洞察数据聚合
   web/             Next.js 控制台:总览/排名透视(矩阵+漏斗)/引用源/口碑/问题/口径/采集状态/报告 + 平台后台(/admin:系统总览/全局配置/采集轮次/行业洞察)
+skills/
+  engine-login/    五大 AI 引擎自动登录技能(独立脚本、配置模板、依赖锁文件与公共 CA 证书)
 ```
 
 ## 本地开发
@@ -61,6 +63,21 @@ worker 调度采集(mock 回放 5 引擎)→ 排名透视/漏斗/口碑/引用�
 选择器为多级回退链,页面改版只需校准 `sites.ts` 并升 schemaVersion(docs/04 §7);
 实测校准要点已按引擎固化在该文件注释中(豆包 headless 登出/message 容器、qwen insertText
 输入与 aria 发送按钮、yuanbao agent-dialogue 容器等)。
+
+## 自动登录技能
+
+账号池自动登录技能已纳入仓库:[skills/engine-login/SKILL.md](./skills/engine-login/SKILL.md)。
+支持豆包、DeepSeek、千问、文心、元宝,使用与采集一致的 AgentBay 指纹、出口代理与 Context,
+通过手机号验证码完成登录并将凭证写回账号池;遇到人机验证时由智能体按技能说明接管。
+
+```bash
+cd skills/engine-login
+cp .env.example .env         # 填写 GEO_SKILL_API_KEY、AGENTBAY_API_TOKEN 等配置
+npm ci                      # 独立安装,不属于根目录 pnpm workspace
+node scripts/engine-login.mjs --engine=deepseek --sms-link='<收码链接>' --profile-id=<档案ID> --keep=60
+```
+
+该目录可整体复制到智能体的技能目录使用。真实密钥保存在本地 `.env`,不纳入版本管理。
 
 ## 测试与质量
 

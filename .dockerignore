@@ -6,6 +6,7 @@ coverage
 *.tsbuildinfo
 docs
 scripts
+skills
 infra/local-data
 .env
 .env.*

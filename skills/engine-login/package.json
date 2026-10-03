@@ -1,0 +1,11 @@
+{
+  "name": "engine-login-skill",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "五大 AI 引擎手机号验证码登录技能(直连远程浏览器,凭证回收入池)——自包含,不依赖任何项目源码",
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "playwright-core": "^1.48.2"
+  }
+}
