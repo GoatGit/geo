@@ -1,7 +1,7 @@
 import { AgentBaySessionBroker } from './agentbay-broker';
 import { LocalSessionBroker } from './local-broker';
 import { MockSessionBroker } from './mock-broker';
-import type { SessionBroker } from './types';
+import type { SessionBroker, SessionRegistry } from './types';
 
 export { AgentBaySessionBroker, fingerprintHash } from './agentbay-broker';
 export { MockSessionBroker } from './mock-broker';
@@ -22,7 +22,33 @@ export function browserModeFromEnv(env: NodeJS.ProcessEnv = process.env): Browse
 }
 
 /** 按 env 组装(docs/07 §1:BROWSER_MODE=mock|agentbay|local)。 */
-export function createBrokerFromEnv(env: NodeJS.ProcessEnv = process.env): SessionBroker {
+export interface BrokerOverrides {
+  /** AgentBay 会话登记(崩溃后回收孤儿用);不传则不登记。 */
+  sessionRegistry?: SessionRegistry;
+}
+
+/**
+ * 会话应用侧最长存活:必须覆盖对应链路的正常时长,否则会提前收掉正在登录/采集的会话。
+ * 默认跟随 LOGIN_TIMEOUT_MS / ASK_TIMEOUT_MS + ASK_HARD_MARGIN_MS 推导,
+ * 也允许 AGENTBAY_LOGIN_MAX_AGE_MS / AGENTBAY_COLLECT_MAX_AGE_MS 显式覆盖。
+ */
+function sessionMaxAgeFromEnv(env: NodeJS.ProcessEnv): { login: number; collect: number } {
+  const num = (raw: string | undefined, fallback: number): number => {
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+  };
+  const loginWindow = num(env.LOGIN_TIMEOUT_MS, 600_000);
+  const collectWall = num(env.ASK_TIMEOUT_MS, 120_000) + num(env.ASK_HARD_MARGIN_MS, 120_000);
+  return {
+    login: num(env.AGENTBAY_LOGIN_MAX_AGE_MS, loginWindow + 15 * 60_000),
+    collect: num(env.AGENTBAY_COLLECT_MAX_AGE_MS, collectWall + 5 * 60_000),
+  };
+}
+
+export function createBrokerFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+  overrides: BrokerOverrides = {},
+): SessionBroker {
   const mode = browserModeFromEnv(env);
   if (mode === 'agentbay') {
     return new AgentBaySessionBroker({
@@ -31,6 +57,8 @@ export function createBrokerFromEnv(env: NodeJS.ProcessEnv = process.env): Sessi
       imageId: env.AGENTBAY_IMAGE_ID ?? 'browser_latest',
       regionId: env.AGENTBAY_REGION_ID,
       contextPath: env.AGENTBAY_CONTEXT_PATH,
+      sessionMaxAgeMs: sessionMaxAgeFromEnv(env),
+      sessionRegistry: overrides.sessionRegistry,
     });
   }
   if (mode === 'local') {

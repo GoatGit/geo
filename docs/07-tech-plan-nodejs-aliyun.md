@@ -143,6 +143,18 @@ const browser = await chromium.connectOverCDP(cdpUrl);                     // pl
 | 会话保活 | 无——用完即毁 | 避免闲置积分燃烧；跨轮次不保活 |
 | 失败处理 | wss 断连/沙箱异常 → 本次 run `failed` → 重试换账号(新会话新 Context) | 同 04 §5 |
 
+> **会话回收双保险**(成本闸门)：`login` 会话创建时声明 `ManualRelease`(避免扫码中途被云端按时长回收)，
+> 因此必须由应用侧兜底——`AgentBaySessionBroker` 按用途设最长存活(登录 = `LOGIN_TIMEOUT_MS`+15min，
+> 采集 = ask 硬墙+5min，可经 `AGENTBAY_LOGIN_MAX_AGE_MS`/`AGENTBAY_COLLECT_MAX_AGE_MS` 覆盖)，到点强制释放；
+> 同时把 sessionId 登记进 Redis(`agentbay:session:*`，24h TTL)，实例崩溃/重启后按登记清扫超龄会话。
+> 清扫只处理「登记年龄已超过该用途上限」的条目，多实例并行启动不会误杀其他实例正在用的会话。
+>
+> **第三道兜底：创建响应超时的无主会话**。实测云端存在「会话已建出、但 `CreateMcpSession` 响应超时
+> （`DEFAULT_SYS_ERROR: sendCommandMessage failed: timeout`）且不回 SessionId」的情形——这类会话既无法
+> `release` 也无法登记，会直接变成按小时计费的无主会话。因此每次 `acquire` 都在 `Labels` 里带一个唯一
+> `attempt` 标记（`{app:'geolens', attempt:<uuid>}`），创建报错后用 `ListSession(Labels=...)` 反查并回收；
+> 反查/释放失败只告警，不掩盖创建失败的原错误，也不影响正常链路（成功时不额外发请求）。
+
 **单会话积分成本模型**(官方计费：Browser Use 0.5 积分/小时，积分包 ¥1.2/积分 → **≈¥0.6/会话小时**；不足 1 小时按秒计)：
 - 保守按 30 查询/会话小时(含人机节奏与引擎等待)→ **≈¥0.02/查询**；
 - 按 5 Tab 并行提效到 60-90 查询/会话小时 → **≈¥0.007-0.01/查询**；
