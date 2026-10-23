@@ -75,7 +75,7 @@ export class AgentBaySessionBroker implements SessionBroker {
 
   async acquire(profile: SessionProfile): Promise<SessionHandle> {
     const auth = `Bearer ${this.config.apiKey}`;
-    const regionId = this.config.regionId ?? 'cn-shanghai';
+    const regionId = this.config.regionId ?? 'cn-hangzhou';
     const body: Record<string, string> = { Authorization: auth };
 
     // 登录态持久化(docs/04 §3.1):按 profileKey 取/建 AgentBay Context,
@@ -333,7 +333,7 @@ export class AgentBaySessionBroker implements SessionBroker {
     const form = new URLSearchParams({
       Action: action,
       Version: RPC_VERSION,
-      RegionId: this.config.regionId ?? 'cn-shanghai',
+      RegionId: this.config.regionId ?? 'cn-hangzhou',
       Format: 'JSON',
       Timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
       SignatureNonce: randomUUID(),

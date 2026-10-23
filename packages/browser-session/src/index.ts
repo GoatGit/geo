@@ -52,7 +52,7 @@ export function createBrokerFromEnv(
   const mode = browserModeFromEnv(env);
   if (mode === 'agentbay') {
     return new AgentBaySessionBroker({
-      apiEndpoint: env.AGENTBAY_API_ENDPOINT ?? 'https://agentbay.cn-shanghai.aliyuncs.com',
+      apiEndpoint: env.AGENTBAY_API_ENDPOINT ?? 'https://agentbay.cn-hangzhou.aliyuncs.com',
       apiKey: env.AGENTBAY_API_TOKEN ?? '',
       imageId: env.AGENTBAY_IMAGE_ID ?? 'browser_latest',
       regionId: env.AGENTBAY_REGION_ID,

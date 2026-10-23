@@ -86,8 +86,9 @@ ALIPAY_PUBLIC_KEY_PATH=/app/certs/alipay/alipay_public_key.pem
 
 ## 4. 远程 CDP 浏览器(AgentBay)——✅ 已接线(2026-09-15)
 
-代码侧已校准(W1-2 完成):broker 按 POP RPC 协议重写——端点 `agentbay.cn-shanghai.aliyuncs.com`、
+代码侧已校准(W1-2 完成):broker 按 POP RPC 协议重写——端点 `agentbay.cn-hangzhou.aliyuncs.com`、
 Version 2025-05-06、`Authorization: Bearer <akm-key>` 在 form body(与官方 wuying-agentbay-sdk 一致)。
+生产 worker 的 `AGENTBAY_REGION_ID`/`AGENTBAY_API_ENDPOINT` 统一取 `cn-hangzhou`(仓库默认值已同此,避免两处地域漂移)。
 
 **密钥双层结构(实测)**:`ak-` KeyId 仅用于管理,会话鉴权必须用 `akm-` 完整密钥;
 完整值仅在控制台创建时展示一次,API 只回 KeyId、列表打码。
